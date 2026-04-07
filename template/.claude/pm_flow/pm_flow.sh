@@ -163,14 +163,14 @@ append_exchange() {
 assert_contains() {
   local haystack="$1"
   local needle="$2"
-  printf '%s\n' "$haystack" | rg -F -q "$needle" || fail "Claude response missing required marker: $needle"
+  [[ "$haystack" == *"$needle"* ]] || fail "Claude response missing required marker: $needle"
 }
 
 assert_matches() {
   local haystack="$1"
   local pattern="$2"
   local label="$3"
-  printf '%s\n' "$haystack" | rg -q "$pattern" || fail "Claude response missing valid $label"
+  printf '%s\n' "$haystack" | python3 -c 'import re, sys; sys.exit(0 if re.search(sys.argv[1], sys.stdin.read(), re.MULTILINE) else 1)' "$pattern" || fail "Claude response missing valid $label"
 }
 
 validate_step_response() {
@@ -254,7 +254,6 @@ record_pending_meta() {
 cmd_validate() {
   require_command claude
   require_command uuidgen
-  require_command rg
   require_command python3
   printf 'claude_path=%s\n' "$(command -v claude)"
   claude --version
