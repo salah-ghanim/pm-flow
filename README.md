@@ -42,6 +42,8 @@ Per-project files:
 - `agentic/pm_flow/<project>/task_contract.md`
 - `agentic/pm_flow/<project>/project_state/`
 - `agentic/pm_flow/<project>/runs/`
+- `agentic/pm_flow/<project>/project_state/start.md`
+- `agentic/pm_flow/<project>/project_state/resume.md`
 
 ## Template layout
 
@@ -94,3 +96,9 @@ Inside the target repo:
 6. Rotate the session if the stored `session_id` goes stale.
 
 Installed repos get repo-local portable state under `agentic/pm_flow/<project>/project_state/`. Timestamped run directories remain the audit trail under `agentic/pm_flow/<project>/runs/`.
+
+Recommended prompt scaffolding:
+
+- Use `project_state/start.md` when beginning a fresh session for a project.
+- Use `project_state/resume.md` when continuing an existing project session.
+- These files are markdown guidance for the agent to read first. They are intentionally manual prompt scaffolding, not executable behavior in `pm_flow.sh`.

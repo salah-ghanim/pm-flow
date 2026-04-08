@@ -197,6 +197,20 @@ main() {
     "$abs_target" \
     "$primary_mission" \
     "$baseline_name"
+  render_template \
+    "template/agentic/pm_flow/project/project_state/start.md" \
+    "$project_dir/project_state/start.md" \
+    "$project_name" \
+    "$abs_target" \
+    "$primary_mission" \
+    "$baseline_name"
+  render_template \
+    "template/agentic/pm_flow/project/project_state/resume.md" \
+    "$project_dir/project_state/resume.md" \
+    "$project_name" \
+    "$abs_target" \
+    "$primary_mission" \
+    "$baseline_name"
   copy_template \
     "template/agentic/pm_flow/project/project_state/current_run.txt" \
     "$project_dir/project_state/current_run.txt"

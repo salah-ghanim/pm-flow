@@ -48,8 +48,11 @@ Validate local prerequisites:
 
 - Keep stable, non-timestamped continuation files in `agentic/pm_flow/<project>/project_state/`.
 - `project_state/plan.md` is the default place for the current project plan.
+- `project_state/start.md` is the recommended prompt scaffold for a fresh session.
+- `project_state/resume.md` is the recommended prompt scaffold for a continuation session.
 - `project_state/current_run.txt` stores the repo-relative path to the current run.
 - Timestamped run directories remain the audit trail for transcripts and pending reviews.
+- These files are markdown guidance for the agent to read first. They do not change `pm_flow.sh` behavior automatically.
 
 ## Start a task
 
