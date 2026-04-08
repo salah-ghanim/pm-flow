@@ -5,9 +5,9 @@
 - Codex does the implementation work.
 - Claude acts as project manager, drift reviewer, and completion reviewer.
 
-This repo packages the flow as a reusable installable template so it can be pushed once and installed into any project later.
+This repo packages the flow as a reusable installable template.
 
-## Core Rules
+## Core rules
 
 - Claude PM sessions must start from a real first call and then resume with the returned `session_id`.
 - The first Claude PM call uses plain `claude -p --output-format json`.
@@ -18,22 +18,47 @@ This repo packages the flow as a reusable installable template so it can be push
 - Every completion review must compare expected versus observed outcome.
 - Networked or environment-specific project commands should run through stable repo-local wrappers.
 
-## Repo Layout
+## Canonical installed layout
+
+The canonical installed layout is now:
+
+- `agentic/pm_flow/`
+  - generic top-level scripts and shared files
+- `agentic/pm_flow/projects.md`
+  - repo-local registry of available project workspaces
+- `agentic/pm_flow/<project>/`
+  - project-specific task contract, continuation state, and runs
+
+Top-level generic files:
+
+- `agentic/pm_flow/pm_flow.sh`
+- `agentic/pm_flow/net_exec.sh`
+- `agentic/pm_flow/local_env.sh.example`
+- `agentic/pm_flow/README.md`
+- `agentic/pm_flow/projects.md`
+
+Per-project files:
+
+- `agentic/pm_flow/<project>/task_contract.md`
+- `agentic/pm_flow/<project>/project_state/`
+- `agentic/pm_flow/<project>/runs/`
+
+## Template layout
 
 - `install.sh`
-  - Installs the scaffold into a target repo.
-- `template/.claude/pm_flow/pm_flow.sh`
-  - Run manager, prompt preparer, response recorder, and transcript logger.
-- `template/.claude/pm_flow/net_exec.sh`
-  - Stable repo-root command wrapper for networked or env-specific commands.
-- `template/.claude/pm_flow/task_contract.md`
-  - Persistent mission, anti-drift, and validation contract.
-- `template/.claude/pm_flow/README.md`
-  - Installed repo-local usage guide.
+  - Installs or updates the scaffold in a target repo.
+- `template/agentic/pm_flow/pm_flow.sh`
+  - Generic run manager, prompt preparer, response recorder, and transcript logger.
+- `template/agentic/pm_flow/net_exec.sh`
+  - Generic repo-root command wrapper for networked or env-specific commands.
+- `template/agentic/pm_flow/projects.md`
+  - Project registry template.
+- `template/agentic/pm_flow/project/`
+  - Per-project template files such as `task_contract.md` and `project_state/`.
 - `template/CLAUDE.md`
   - Repo-local operating reminders for Codex.
 
-## Local Install
+## Local install
 
 Install into another checked-out repo:
 
@@ -43,7 +68,7 @@ Install into another checked-out repo:
 
 If no target path is given, the installer uses the current directory.
 
-## Future Curl Install
+## Future curl install
 
 After this repo is pushed, the same installer can be used directly from GitHub raw:
 
@@ -57,7 +82,7 @@ That works because `install.sh` supports both:
 - local-copy mode from a checked-out `pm-flow` repo
 - remote-download mode from a raw GitHub base URL
 
-## Installed Workflow
+## Installed workflow
 
 Inside the target repo:
 
@@ -68,4 +93,4 @@ Inside the target repo:
 5. Record the response into the transcript.
 6. Rotate the session if the stored `session_id` goes stale.
 
-The installed usage details live in `template/.claude/pm_flow/README.md` and are copied into the target repo as `.claude/pm_flow/README.md`.
+Installed repos get repo-local portable state under `agentic/pm_flow/<project>/project_state/`. Timestamped run directories remain the audit trail under `agentic/pm_flow/<project>/runs/`.

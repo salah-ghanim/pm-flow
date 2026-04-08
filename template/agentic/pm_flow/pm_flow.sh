@@ -2,36 +2,40 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-RUNS_DIR="$SCRIPT_DIR/runs"
-STATE_DIR="$SCRIPT_DIR/project_state"
-CURRENT_RUN_FILE="$STATE_DIR/current_run.txt"
-CONTRACT_FILE="$SCRIPT_DIR/task_contract.md"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 PM_SYSTEM_PROMPT="You are the project manager for another software agent. Review proposed engineering steps and completion reports, critique reasoning, detect mission drift, suggest improvements, approve or reject the path forward, and recommend the next action. Do not write code. Focus on scope control, validation, sequencing, risks, and drift management. Be direct and concrete."
+PROJECT_OVERRIDE="${PM_FLOW_PROJECT:-}"
+PROJECT_KEY=""
+PROJECT_DIR=""
+RUNS_DIR=""
+STATE_DIR=""
+CURRENT_RUN_FILE=""
+CONTRACT_FILE=""
 
 usage() {
   cat <<'EOF'
 Usage:
-  pm_flow.sh validate
-  pm_flow.sh init <task-name>
-  pm_flow.sh rotate-session <run-dir> [reason]
-  pm_flow.sh prepare-step <run-dir> <stage-name>
-  pm_flow.sh prepare-step <run-dir> <stage-name> --file <markdown-file>
-  pm_flow.sh record-step <pending-dir>
-  pm_flow.sh record-step <pending-dir> --response-file <markdown-file>
-  pm_flow.sh prepare-complete <run-dir>
-  pm_flow.sh prepare-complete <run-dir> --file <markdown-file>
-  pm_flow.sh record-complete <pending-dir>
-  pm_flow.sh record-complete <pending-dir> --response-file <markdown-file>
-  pm_flow.sh print-command <pending-dir>
-  pm_flow.sh current-run
+  pm_flow.sh [--project <name>] validate
+  pm_flow.sh [--project <name>] init <task-name>
+  pm_flow.sh [--project <name>] rotate-session <run-dir> [reason]
+  pm_flow.sh [--project <name>] prepare-step <run-dir> <stage-name>
+  pm_flow.sh [--project <name>] prepare-step <run-dir> <stage-name> --file <markdown-file>
+  pm_flow.sh [--project <name>] record-step <pending-dir>
+  pm_flow.sh [--project <name>] record-step <pending-dir> --response-file <markdown-file>
+  pm_flow.sh [--project <name>] prepare-complete <run-dir>
+  pm_flow.sh [--project <name>] prepare-complete <run-dir> --file <markdown-file>
+  pm_flow.sh [--project <name>] record-complete <pending-dir>
+  pm_flow.sh [--project <name>] record-complete <pending-dir> --response-file <markdown-file>
+  pm_flow.sh [--project <name>] print-command <pending-dir>
+  pm_flow.sh [--project <name>] current-run
 
   Important:
     This script never invokes `claude -p`.
-    It writes a direct top-shell Claude command into command.txt.
-    The first PM call uses plain `claude -p --output-format json`.
-    Later calls add `--resume <session_id>` using the captured value from response.json.
-    Use the special run-dir value `current` to target the repo-local current run pointer.
+  It writes a direct top-shell Claude command into command.txt.
+  The first PM call uses plain `claude -p --output-format json`.
+  Later calls add `--resume <session_id>` using the captured value from response.json.
+  Use the special run-dir value `current` to target the repo-local current run pointer.
+  The active project defaults to the repo basename when that project directory exists.
 EOF
 }
 
@@ -122,6 +126,29 @@ slugify() {
     slug="task"
   fi
   printf '%s\n' "$slug"
+}
+
+resolve_project_key() {
+  if [[ -n "${PROJECT_OVERRIDE:-}" ]]; then
+    printf '%s\n' "$(slugify "$PROJECT_OVERRIDE")"
+    return
+  fi
+  local default_project
+  default_project="$(slugify "$(basename "$PROJECT_ROOT")")"
+  if [[ -d "$SCRIPT_DIR/$default_project" ]]; then
+    printf '%s\n' "$default_project"
+    return
+  fi
+  fail "could not resolve project under $SCRIPT_DIR; use --project <name>"
+}
+
+initialize_project_paths() {
+  PROJECT_KEY="$(resolve_project_key)"
+  PROJECT_DIR="$SCRIPT_DIR/$PROJECT_KEY"
+  RUNS_DIR="$PROJECT_DIR/runs"
+  STATE_DIR="$PROJECT_DIR/project_state"
+  CURRENT_RUN_FILE="$STATE_DIR/current_run.txt"
+  CONTRACT_FILE="$PROJECT_DIR/task_contract.md"
 }
 
 read_stdin_body() {
@@ -223,7 +250,7 @@ assert_matches() {
 validate_step_response() {
   local response="$1"
   assert_contains "$response" "Assessment"
-  assert_contains "$response" "Drift review"
+  assert_matches "$response" '(?i)drift review' "drift review section"
   assert_contains "$response" "Risks"
   assert_contains "$response" "Improvements"
   assert_contains "$response" "Decision"
@@ -234,7 +261,7 @@ validate_step_response() {
 validate_completion_response() {
   local response="$1"
   assert_contains "$response" "Outcome assessment"
-  assert_contains "$response" "Drift review"
+  assert_matches "$response" '(?i)drift review' "drift review section"
   assert_contains "$response" "Expected vs observed"
   assert_contains "$response" "Feedback"
   assert_contains "$response" "Recommended next steps"
@@ -567,6 +594,24 @@ cmd_current_run() {
 }
 
 main() {
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project)
+        shift || fail "--project requires a value"
+        PROJECT_OVERRIDE="${1:-}"
+        [[ -n "$PROJECT_OVERRIDE" ]] || fail "--project requires a value"
+        ;;
+      *)
+        args+=("$1")
+        ;;
+    esac
+    shift || true
+  done
+  set -- "${args[@]}"
+
+  initialize_project_paths
+
   local cmd="${1:-}"
   case "$cmd" in
     validate)

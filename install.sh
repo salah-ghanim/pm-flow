@@ -29,6 +29,16 @@ escape_sed_replacement() {
   printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
 }
 
+slugify() {
+  local input="${1:-project}"
+  local slug
+  slug="$(printf '%s' "$input" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
+  if [[ -z "$slug" ]]; then
+    slug="project"
+  fi
+  printf '%s\n' "$slug"
+}
+
 fetch_template() {
   local rel_path="$1"
   if [[ -n "${REPO_RAW_BASE:-}" ]]; then
@@ -128,28 +138,71 @@ main() {
     project_name="$(basename "$abs_target")"
   fi
 
-  local flow_dir="$abs_target/.claude/pm_flow"
-  if [[ -e "$flow_dir" && "$force" != "1" ]]; then
-    fail "target already has .claude/pm_flow; rerun with --force if replacement is intended"
+  local flow_dir="$abs_target/agentic/pm_flow"
+  local project_key
+  project_key="$(slugify "$(basename "$abs_target")")"
+  local project_dir="$flow_dir/$project_key"
+  local flow_exists="0"
+  if [[ -d "$flow_dir" ]]; then
+    flow_exists="1"
+  fi
+
+  if [[ -e "$project_dir" && "$force" != "1" ]]; then
+    fail "target already has agentic/pm_flow/$project_key; rerun with --force if replacement is intended"
   fi
 
   mkdir -p "$flow_dir"
-  mkdir -p "$flow_dir/runs"
-  mkdir -p "$flow_dir/reports"
+  if [[ "$force" == "1" && -d "$project_dir" ]]; then
+    rm -rf "$project_dir"
+  fi
+  mkdir -p "$project_dir"
+  mkdir -p "$project_dir/runs"
+  mkdir -p "$project_dir/project_state"
+
+  if [[ "$flow_exists" != "1" || "$force" == "1" ]]; then
+    render_template \
+      "template/agentic/pm_flow/README.md" \
+      "$flow_dir/README.md" \
+      "$project_name" \
+      "$abs_target" \
+      "$primary_mission" \
+      "$baseline_name"
+    copy_template "template/agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
+    copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
+    copy_template "template/agentic/pm_flow/local_env.sh.example" "$flow_dir/local_env.sh.example"
+    render_template \
+      "template/agentic/pm_flow/projects.md" \
+      "$flow_dir/projects.md" \
+      "$project_name" \
+      "$abs_target" \
+      "$primary_mission" \
+      "$baseline_name"
+  fi
+
+  if [[ ! -f "$flow_dir/pm_flow.sh" || ! -f "$flow_dir/net_exec.sh" || ! -f "$flow_dir/projects.md" ]]; then
+    fail "agentic/pm_flow exists but is missing required generic files; rerun with --force to repair"
+  fi
 
   render_template \
-    "template/.claude/pm_flow/README.md" \
-    "$flow_dir/README.md" \
+    "template/agentic/pm_flow/project/project_state/README.md" \
+    "$project_dir/project_state/README.md" \
     "$project_name" \
     "$abs_target" \
     "$primary_mission" \
     "$baseline_name"
-  copy_template "template/.claude/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
-  copy_template "template/.claude/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
-  copy_template "template/.claude/pm_flow/local_env.sh.example" "$flow_dir/local_env.sh.example"
   render_template \
-    "template/.claude/pm_flow/task_contract.md" \
-    "$flow_dir/task_contract.md" \
+    "template/agentic/pm_flow/project/project_state/plan.md" \
+    "$project_dir/project_state/plan.md" \
+    "$project_name" \
+    "$abs_target" \
+    "$primary_mission" \
+    "$baseline_name"
+  copy_template \
+    "template/agentic/pm_flow/project/project_state/current_run.txt" \
+    "$project_dir/project_state/current_run.txt"
+  render_template \
+    "template/agentic/pm_flow/project/task_contract.md" \
+    "$project_dir/task_contract.md" \
     "$project_name" \
     "$abs_target" \
     "$primary_mission" \
@@ -176,11 +229,16 @@ main() {
   chmod +x "$flow_dir/pm_flow.sh"
   chmod +x "$flow_dir/net_exec.sh"
 
-  touch "$flow_dir/runs/.gitkeep"
-  touch "$flow_dir/reports/.gitkeep"
+  touch "$project_dir/runs/.gitkeep"
+
+  if ! grep -q -- "- \`$project_key\`" "$flow_dir/projects.md"; then
+    printf -- '- `%s` - installed project workspace for %s\n' "$project_key" "$project_name" >> "$flow_dir/projects.md"
+  fi
 
   printf 'installed_pm_flow=%s\n' "$flow_dir"
   printf 'project_name=%s\n' "$project_name"
+  printf 'project_key=%s\n' "$project_key"
+  printf 'project_dir=%s\n' "$project_dir"
   if [[ -n "$REPO_RAW_BASE" ]]; then
     printf 'install_source=remote\n'
   else

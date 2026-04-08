@@ -5,7 +5,7 @@ This repo uses a two-agent process:
 - Codex does the implementation work.
 - Claude acts as the project manager and drift reviewer.
 
-## Hard Rules
+## Hard rules
 
 - Every task gets a fresh Claude PM conversation.
 - Claude PM calls must be issued from the top shell, never from inside child scripts.
@@ -14,44 +14,47 @@ This repo uses a two-agent process:
 - Later PM calls use `claude -p --resume <session_id>`.
 - In this environment, shell features around `claude -p` can defeat approved command prefixes and produce false `Not logged in` failures.
 - Every PM review must include a drift review.
-- Every completion report must compare expected versus observed outcome.
+- Every completion review must compare expected versus observed outcome.
 - Stable wrappers should be used for networked or environment-specific project commands.
 - If network access fails inside a sandbox, treat that as a sandbox restriction first.
 
-## Files
+## Layout
 
-- `pm_flow.sh`
-  - Creates runs, prepares prompts, writes direct Claude commands, records responses, rotates session ids, and writes transcripts.
-- `task_contract.md`
-  - Persistent project contract used in every Claude PM review.
-- `net_exec.sh`
-  - Stable command wrapper rooted at the repo.
-- `local_env.sh.example`
-  - Optional per-project environment configuration.
-- `project_state/`
-  - Stable repo-local continuation state such as `plan.md`, `current_run.txt`, and any repo-specific trackers you want future sessions to read first.
-- `runs/<timestamp>-<task-slug>/`
-  - Task-local metadata, prompts, responses, and transcript history.
+Top-level generic files:
+
+- `agentic/pm_flow/pm_flow.sh`
+- `agentic/pm_flow/net_exec.sh`
+- `agentic/pm_flow/local_env.sh.example`
+- `agentic/pm_flow/README.md`
+- `agentic/pm_flow/projects.md`
+
+Per-project files:
+
+- `agentic/pm_flow/<project>/task_contract.md`
+- `agentic/pm_flow/<project>/project_state/`
+- `agentic/pm_flow/<project>/runs/`
+
+The script defaults to the repo basename as the active project when that directory exists. You can override it with `--project <name>` or `PM_FLOW_PROJECT=<name>`.
 
 ## Setup
 
 Validate local prerequisites:
 
 ```bash
-./.claude/pm_flow/pm_flow.sh validate
+./agentic/pm_flow/pm_flow.sh validate
 ```
 
-## Portable Continuation State
+## Portable continuation state
 
-- Keep stable, non-timestamped continuation files in `.claude/pm_flow/project_state/`.
+- Keep stable, non-timestamped continuation files in `agentic/pm_flow/<project>/project_state/`.
 - `project_state/plan.md` is the default place for the current project plan.
 - `project_state/current_run.txt` stores the repo-relative path to the current run.
 - Timestamped run directories remain the audit trail for transcripts and pending reviews.
 
-## Start A Task
+## Start a task
 
 ```bash
-./.claude/pm_flow/pm_flow.sh init "my-task" <<'EOF'
+./agentic/pm_flow/pm_flow.sh init "my-task" <<'EOF'
 Task summary:
 - What the task is
 
@@ -63,25 +66,30 @@ Success criteria:
 EOF
 ```
 
-The command prints the run directory path.
-It also updates `.claude/pm_flow/project_state/current_run.txt`.
+The command prints the run directory path and updates the selected project's `project_state/current_run.txt`.
 
 You can inspect the current run pointer at any time:
 
 ```bash
-./.claude/pm_flow/pm_flow.sh current-run
+./agentic/pm_flow/pm_flow.sh current-run
 ```
 
-## Prepare A Step Review
+If you need a non-default project:
 
 ```bash
-./.claude/pm_flow/pm_flow.sh prepare-step "<run-dir>" "candidate-review" --file engineer_update.md
+./agentic/pm_flow/pm_flow.sh --project other-project current-run
+```
+
+## Prepare a step review
+
+```bash
+./agentic/pm_flow/pm_flow.sh prepare-step "<run-dir>" "candidate-review" --file engineer_update.md
 ```
 
 You can use `current` instead of a timestamped run path:
 
 ```bash
-./.claude/pm_flow/pm_flow.sh prepare-step current "candidate-review" --file engineer_update.md
+./agentic/pm_flow/pm_flow.sh prepare-step current "candidate-review" --file engineer_update.md
 ```
 
 This creates a pending review directory containing:
@@ -95,7 +103,7 @@ This creates a pending review directory containing:
 Print the generated command and run it from the top shell:
 
 ```bash
-./.claude/pm_flow/pm_flow.sh print-command "<pending-dir>"
+./agentic/pm_flow/pm_flow.sh print-command "<pending-dir>"
 ```
 
 `command.txt` contains a direct `claude -p` command that writes `response.json`.
@@ -103,27 +111,27 @@ Print the generated command and run it from the top shell:
 Then record the response:
 
 ```bash
-./.claude/pm_flow/pm_flow.sh record-step "<pending-dir>"
+./agentic/pm_flow/pm_flow.sh record-step "<pending-dir>"
 ```
 
-## Prepare A Completion Review
+## Prepare a completion review
 
 ```bash
-./.claude/pm_flow/pm_flow.sh prepare-complete "<run-dir>" --file completion_report.md
+./agentic/pm_flow/pm_flow.sh prepare-complete "<run-dir>" --file completion_report.md
 ```
 
 Run the generated command from the top shell, then record it:
 
 ```bash
-./.claude/pm_flow/pm_flow.sh record-complete "<pending-dir>"
+./agentic/pm_flow/pm_flow.sh record-complete "<pending-dir>"
 ```
 
-## Session Recovery
+## Session recovery
 
 If the Claude session id for a run is stale or poisoned:
 
 ```bash
-./.claude/pm_flow/pm_flow.sh rotate-session "<run-dir>" "session died during review"
+./agentic/pm_flow/pm_flow.sh rotate-session "<run-dir>" "session died during review"
 ```
 
 The next prepared command will start a fresh Claude PM conversation and capture its returned `session_id`.
