@@ -53,7 +53,7 @@ case "${1:-}" in -h|--help|help) usage; exit 0 ;; esac
 PENDING_DIR="$(cd -- "$1" && pwd)"
 shift
 
-MODEL="o4-mini"
+MODEL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --model) MODEL="${2:-}"; [[ -n "$MODEL" ]] || fail "--model requires a value"; shift 2 ;;
@@ -115,12 +115,13 @@ full_prompt = (
 # Codex -c flag sets config fields: instructions maps to the system prompt
 cmd = [
     "codex", "exec",
-    "-m", model,
     "--dangerously-bypass-approvals-and-sandbox",
     "-c", f"instructions={system_prompt}",
     "-o", out_file,
-    full_prompt,
 ]
+if model:
+    cmd += ["-m", model]
+cmd.append(full_prompt)
 result = subprocess.run(cmd)
 sys.exit(result.returncode)
 PY
