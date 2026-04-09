@@ -169,6 +169,7 @@ main() {
       "$baseline_name"
     copy_template "template/agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
     copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
+    copy_template "template/agentic/pm_flow/codex_pm_review.sh" "$flow_dir/codex_pm_review.sh"
     copy_template "template/agentic/pm_flow/local_env.sh.example" "$flow_dir/local_env.sh.example"
     render_template \
       "template/agentic/pm_flow/projects.md" \
@@ -242,6 +243,7 @@ main() {
 
   chmod +x "$flow_dir/pm_flow.sh"
   chmod +x "$flow_dir/net_exec.sh"
+  chmod +x "$flow_dir/codex_pm_review.sh"
 
   touch "$project_dir/runs/.gitkeep"
 

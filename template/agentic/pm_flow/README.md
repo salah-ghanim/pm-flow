@@ -1,17 +1,20 @@
-# Claude PM Flow
+# PM Flow
 
 This repo uses a two-agent process:
 
 - Codex does the implementation work.
-- Claude acts as the project manager and drift reviewer.
+- A PM reviewer (Claude or Codex) acts as the project manager and drift reviewer.
+
+By default Claude is the PM reviewer. Codex can be used as a drop-in fallback when
+the Claude API is rate-limited or unavailable.
 
 ## Hard rules
 
-- Every task gets a fresh Claude PM conversation.
+- Every task gets a fresh PM reviewer conversation.
 - Claude PM calls must be issued from the top shell, never from inside child scripts.
 - `pm_flow.sh` prepares prompts and records responses, but it does not execute `claude -p`.
-- The first PM call uses plain `claude -p --output-format json` and captures the real `session_id`.
-- Later PM calls use `claude -p --resume <session_id>`.
+- The first Claude PM call uses plain `claude -p --output-format json` and captures the real `session_id`.
+- Later Claude PM calls use `claude -p --resume <session_id>`.
 - In this environment, shell features around `claude -p` can defeat approved command prefixes and produce false `Not logged in` failures.
 - Every PM review must include a drift review.
 - Every completion review must compare expected versus observed outcome.
@@ -24,6 +27,7 @@ Top-level generic files:
 
 - `agentic/pm_flow/pm_flow.sh`
 - `agentic/pm_flow/net_exec.sh`
+- `agentic/pm_flow/codex_pm_review.sh`
 - `agentic/pm_flow/local_env.sh.example`
 - `agentic/pm_flow/README.md`
 - `agentic/pm_flow/projects.md`
@@ -128,6 +132,41 @@ Run the generated command from the top shell, then record it:
 ```bash
 ./agentic/pm_flow/pm_flow.sh record-complete "<pending-dir>"
 ```
+
+## Codex fallback for PM review
+
+When the Claude API is rate-limited or unavailable, use `codex_pm_review.sh` as a
+drop-in replacement. It reads the same prepared pending directory, inlines all
+referenced workspace files, calls `codex exec`, and writes a `response.json` in
+the same format that `pm_flow.sh record-step` and `record-complete` expect.
+
+**Prerequisites:** `codex` CLI in PATH (https://github.com/openai/codex) and `python3`.
+
+```bash
+# Instead of running the generated command.txt, run:
+./agentic/pm_flow/codex_pm_review.sh "<pending-dir>"
+
+# Or with an explicit model:
+./agentic/pm_flow/codex_pm_review.sh "<pending-dir>" --model o3
+```
+
+Then record as normal:
+
+```bash
+./agentic/pm_flow/pm_flow.sh record-step "<pending-dir>"
+# or
+./agentic/pm_flow/pm_flow.sh record-complete "<pending-dir>"
+```
+
+Notes:
+- The Codex fallback does not maintain a session across calls (each review is stateless).
+  `session_id` in the written `response.json` is set to a timestamp-based placeholder.
+  This means `--resume` is not available for subsequent Codex reviews in the same run;
+  each review starts fresh, which is acceptable for step and completion reviews.
+- The default model is `o4-mini`. Use `--model o3` for higher-quality reviews when cost
+  is not a concern.
+- The `--dangerously-bypass-approvals-and-sandbox` flag is passed to `codex exec` because
+  the review prompt is self-contained and no code execution is requested.
 
 ## Session recovery
 

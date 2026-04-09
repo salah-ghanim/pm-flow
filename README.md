@@ -4,6 +4,8 @@
 
 - Codex does the implementation work.
 - Claude acts as project manager, drift reviewer, and completion reviewer.
+  When the Claude API is rate-limited or unavailable, `codex_pm_review.sh` provides
+  a drop-in Codex fallback that writes the same `response.json` format.
 
 This repo packages the flow as a reusable installable template.
 
@@ -53,6 +55,8 @@ Per-project files:
   - Generic run manager, prompt preparer, response recorder, and transcript logger.
 - `template/agentic/pm_flow/net_exec.sh`
   - Generic repo-root command wrapper for networked or env-specific commands.
+- `template/agentic/pm_flow/codex_pm_review.sh`
+  - Codex fallback for PM reviews when the Claude API is rate-limited or unavailable.
 - `template/agentic/pm_flow/projects.md`
   - Project registry template.
 - `template/agentic/pm_flow/project/`
@@ -91,9 +95,24 @@ Inside the target repo:
 1. Validate prerequisites.
 2. Initialize a run with a task brief.
 3. Prepare a step review or completion review.
-4. Run the generated `command.txt` from the top shell.
+4. Run the generated `command.txt` from the top shell (Claude), or run
+   `codex_pm_review.sh <pending-dir>` as a Codex fallback.
 5. Record the response into the transcript.
 6. Rotate the session if the stored `session_id` goes stale.
+
+## Codex PM fallback
+
+When the Claude API is rate-limited, use the included Codex fallback:
+
+```bash
+./agentic/pm_flow/codex_pm_review.sh "<pending-dir>" [--model o4-mini]
+```
+
+This inlines all referenced workspace files into a self-contained prompt, calls
+`codex exec`, and writes a `response.json` compatible with `pm_flow.sh record-step`
+and `record-complete`. The normal record commands work unchanged after the fallback runs.
+
+See `agentic/pm_flow/README.md` in any installed repo for full details.
 
 Installed repos get repo-local portable state under `agentic/pm_flow/<project>/project_state/`. Timestamped run directories remain the audit trail under `agentic/pm_flow/<project>/runs/`.
 
