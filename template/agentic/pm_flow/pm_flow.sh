@@ -31,8 +31,9 @@ Usage:
 
   Important:
     This script never invokes `claude -p`.
-  It writes a direct top-shell Claude command into command.txt.
-  The first PM call uses plain `claude -p --output-format json`.
+  It writes a top-shell Claude command into command.txt routed through
+  `./agentic/pm_flow/net_exec.sh`.
+  The first PM call uses `claude -p --output-format json` inside that wrapper.
   Later calls add `--resume <session_id>` using the captured value from response.json.
   Use the special run-dir value `current` to target the repo-local current run pointer.
   The active project defaults to the repo basename when that project directory exists.
@@ -289,16 +290,16 @@ write_command_file() {
   local prompt_path="$pending_dir/prompt_one_line.txt"
   local system_prompt_path="$pending_dir/system_prompt.txt"
   local response_path="$pending_dir/response.json"
-  local prompt_one_line system_prompt
+  local net_exec_path="./agentic/pm_flow/net_exec.sh"
+  local prompt_one_line
   prompt_one_line="$(/bin/cat "$prompt_path")"
-  system_prompt="$(/bin/cat "$system_prompt_path")"
   {
-    printf 'claude -p --output-format json '
+    printf '%q claude -p --output-format json ' "$net_exec_path"
     printf -- '--add-dir %q ' "$PROJECT_ROOT"
     if [[ "$mode_flag" == "resume" && -n "${SESSION_ID:-}" ]]; then
       printf -- '--resume %q ' "$SESSION_ID"
     fi
-    printf -- '--append-system-prompt %q -- %q > %q\n' "$system_prompt" "$prompt_one_line" "$response_path"
+    printf -- '--append-system-prompt-file %q -- %q > %q\n' "$system_prompt_path" "$prompt_one_line" "$response_path"
   } > "$command_path"
 }
 

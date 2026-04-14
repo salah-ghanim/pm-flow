@@ -12,10 +12,11 @@ This repo packages the flow as a reusable installable template.
 ## Core rules
 
 - Claude PM sessions must start from a real first call and then resume with the returned `session_id`.
-- The first Claude PM call uses plain `claude -p --output-format json`.
-- Later Claude PM calls use `claude -p --resume <session_id>`.
+- The first Claude PM call uses `claude -p --output-format json` inside `./agentic/pm_flow/net_exec.sh`.
+- Later Claude PM calls use `claude -p --resume <session_id>` inside that wrapper.
 - `pm_flow.sh` prepares prompts, metadata, and transcripts, but does not invoke Claude itself.
-- Generated Claude commands are meant to be run directly from the top shell.
+- Generated Claude commands are meant to be run from the top shell through the stable `net_exec.sh` wrapper.
+- The PM system prompt is passed from `system_prompt.txt` via `--append-system-prompt-file`, not inlined on the command line.
 - Every PM review must include drift review.
 - Every completion review must compare expected versus observed outcome.
 - Networked or environment-specific project commands should run through stable repo-local wrappers.

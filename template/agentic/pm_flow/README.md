@@ -13,8 +13,9 @@ the Claude API is rate-limited or unavailable.
 - Every task gets a fresh PM reviewer conversation.
 - Claude PM calls must be issued from the top shell, never from inside child scripts.
 - `pm_flow.sh` prepares prompts and records responses, but it does not execute `claude -p`.
-- The first Claude PM call uses plain `claude -p --output-format json` and captures the real `session_id`.
-- Later Claude PM calls use `claude -p --resume <session_id>`.
+- The generated Claude PM command should be run through `./agentic/pm_flow/net_exec.sh`.
+- The first Claude PM call uses `claude -p --output-format json` inside that wrapper and captures the real `session_id`.
+- Later Claude PM calls use `claude -p --resume <session_id>` inside that wrapper.
 - In this environment, shell features around `claude -p` can defeat approved command prefixes and produce false `Not logged in` failures.
 - Every PM review must include a drift review.
 - Every completion review must compare expected versus observed outcome.
@@ -113,7 +114,12 @@ Print the generated command and run it from the top shell:
 ./agentic/pm_flow/pm_flow.sh print-command "<pending-dir>"
 ```
 
-`command.txt` contains a direct `claude -p` command that writes `response.json`.
+`command.txt` contains a top-shell Claude PM command routed through
+`./agentic/pm_flow/net_exec.sh`, which is the repo's stable wrapper for
+networked or environment-specific commands.
+The PM system prompt is passed via `system_prompt.txt` using
+`--append-system-prompt-file`, so the prompt text is not inlined on the command
+line.
 
 Then record the response:
 
