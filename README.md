@@ -9,6 +9,11 @@
 
 This repo packages the flow as a reusable installable template.
 
+Re-running the installer upgrades reusable flow/config files in place while
+preserving existing per-project state under `project_state/` and run history
+under `runs/`. The main per-project exception is `task_contract.md`, which is
+treated as rules/config and refreshed on reinstall.
+
 ## Core rules
 
 - Claude PM sessions must start from a real first call and then resume with the returned `session_id`.
@@ -74,6 +79,9 @@ Install into another checked-out repo:
 ```
 
 If no target path is given, the installer uses the current directory.
+Re-running the same install command updates reusable flow files and
+`task_contract.md` without overwriting existing `project_state/*` files unless
+you pass `--force`.
 
 ## Future curl install
 

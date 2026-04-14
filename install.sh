@@ -13,6 +13,12 @@ Usage:
 
 Installs the generic Claude PM flow template into the target repository.
 
+Default reinstall behavior:
+- refresh generic `agentic/pm_flow/*` scripts and docs
+- refresh per-project `task_contract.md`
+- preserve existing `project_state/*` files and run history
+- use `--force` only when a full project-template replacement is intended
+
 Examples:
   ./install.sh /path/to/repo --name "My Repo"
   curl -fsSL https://raw.githubusercontent.com/salah-ghanim/pm-flow/main/install.sh | \
@@ -147,10 +153,6 @@ main() {
     flow_exists="1"
   fi
 
-  if [[ -e "$project_dir" && "$force" != "1" ]]; then
-    fail "target already has agentic/pm_flow/$project_key; rerun with --force if replacement is intended"
-  fi
-
   mkdir -p "$flow_dir"
   if [[ "$force" == "1" && -d "$project_dir" ]]; then
     rm -rf "$project_dir"
@@ -159,18 +161,18 @@ main() {
   mkdir -p "$project_dir/runs"
   mkdir -p "$project_dir/project_state"
 
-  if [[ "$flow_exists" != "1" || "$force" == "1" ]]; then
-    render_template \
-      "template/agentic/pm_flow/README.md" \
-      "$flow_dir/README.md" \
-      "$project_name" \
-      "$abs_target" \
-      "$primary_mission" \
-      "$baseline_name"
-    copy_template "template/agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
-    copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
-    copy_template "template/agentic/pm_flow/codex_pm_review.sh" "$flow_dir/codex_pm_review.sh"
-    copy_template "template/agentic/pm_flow/local_env.sh.example" "$flow_dir/local_env.sh.example"
+  render_template \
+    "template/agentic/pm_flow/README.md" \
+    "$flow_dir/README.md" \
+    "$project_name" \
+    "$abs_target" \
+    "$primary_mission" \
+    "$baseline_name"
+  copy_template "template/agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
+  copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
+  copy_template "template/agentic/pm_flow/codex_pm_review.sh" "$flow_dir/codex_pm_review.sh"
+  copy_template "template/agentic/pm_flow/local_env.sh.example" "$flow_dir/local_env.sh.example"
+  if [[ ! -f "$flow_dir/projects.md" || "$force" == "1" ]]; then
     render_template \
       "template/agentic/pm_flow/projects.md" \
       "$flow_dir/projects.md" \
@@ -184,37 +186,47 @@ main() {
     fail "agentic/pm_flow exists but is missing required generic files; rerun with --force to repair"
   fi
 
-  render_template \
-    "template/agentic/pm_flow/project/project_state/README.md" \
-    "$project_dir/project_state/README.md" \
-    "$project_name" \
-    "$abs_target" \
-    "$primary_mission" \
-    "$baseline_name"
-  render_template \
-    "template/agentic/pm_flow/project/project_state/plan.md" \
-    "$project_dir/project_state/plan.md" \
-    "$project_name" \
-    "$abs_target" \
-    "$primary_mission" \
-    "$baseline_name"
-  render_template \
-    "template/agentic/pm_flow/project/project_state/start.md" \
-    "$project_dir/project_state/start.md" \
-    "$project_name" \
-    "$abs_target" \
-    "$primary_mission" \
-    "$baseline_name"
-  render_template \
-    "template/agentic/pm_flow/project/project_state/resume.md" \
-    "$project_dir/project_state/resume.md" \
-    "$project_name" \
-    "$abs_target" \
-    "$primary_mission" \
-    "$baseline_name"
-  copy_template \
-    "template/agentic/pm_flow/project/project_state/current_run.txt" \
-    "$project_dir/project_state/current_run.txt"
+  if [[ ! -f "$project_dir/project_state/README.md" || "$force" == "1" ]]; then
+    render_template \
+      "template/agentic/pm_flow/project/project_state/README.md" \
+      "$project_dir/project_state/README.md" \
+      "$project_name" \
+      "$abs_target" \
+      "$primary_mission" \
+      "$baseline_name"
+  fi
+  if [[ ! -f "$project_dir/project_state/plan.md" || "$force" == "1" ]]; then
+    render_template \
+      "template/agentic/pm_flow/project/project_state/plan.md" \
+      "$project_dir/project_state/plan.md" \
+      "$project_name" \
+      "$abs_target" \
+      "$primary_mission" \
+      "$baseline_name"
+  fi
+  if [[ ! -f "$project_dir/project_state/start.md" || "$force" == "1" ]]; then
+    render_template \
+      "template/agentic/pm_flow/project/project_state/start.md" \
+      "$project_dir/project_state/start.md" \
+      "$project_name" \
+      "$abs_target" \
+      "$primary_mission" \
+      "$baseline_name"
+  fi
+  if [[ ! -f "$project_dir/project_state/resume.md" || "$force" == "1" ]]; then
+    render_template \
+      "template/agentic/pm_flow/project/project_state/resume.md" \
+      "$project_dir/project_state/resume.md" \
+      "$project_name" \
+      "$abs_target" \
+      "$primary_mission" \
+      "$baseline_name"
+  fi
+  if [[ ! -f "$project_dir/project_state/current_run.txt" || "$force" == "1" ]]; then
+    copy_template \
+      "template/agentic/pm_flow/project/project_state/current_run.txt" \
+      "$project_dir/project_state/current_run.txt"
+  fi
   render_template \
     "template/agentic/pm_flow/project/task_contract.md" \
     "$project_dir/task_contract.md" \

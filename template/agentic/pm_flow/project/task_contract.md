@@ -37,7 +37,8 @@ Anti-drift rules:
 - do not assume network or DNS problems before considering sandbox or wrapper issues
 - prefer stable approved wrappers over ad hoc command shapes
 - Claude PM must be called from the top shell, never from child scripts
-- first Claude PM call should use plain `claude -p --output-format json`; later calls should use `--resume` with the returned `session_id`
+- Claude PM commands should be run through `./agentic/pm_flow/net_exec.sh`
+- first Claude PM call should use `claude -p --output-format json` inside that wrapper; later calls should use `--resume` with the returned `session_id`
 - the prepared `command.txt` is the source of truth for Claude invocation shape
 
 Drift review process:
