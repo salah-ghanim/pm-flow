@@ -1,132 +1,162 @@
 # pm-flow
 
-`pm-flow` is a standalone scaffold for running a two-agent workflow:
+`pm-flow` is an installable scaffold for bounded multi-agent project work.
 
-- Codex does the implementation work.
-- Claude acts as project manager, drift reviewer, and completion reviewer.
-  When the Claude API is rate-limited or unavailable, `codex_pm_review.sh` provides
-  a drop-in Codex fallback that writes the same `response.json` format.
+```text
+root coordinator (whole-project awareness, small context)
+└── one long-lived PM sub-agent per isolated section
+    └── one fresh developer sub-agent per engineering assignment
+```
 
-This repo packages the flow as a reusable installable template.
+The root coordinator tracks the full project through a portfolio plan, a
+generated section registry, and handoffs capped at 500 words and 8192 bytes. It
+never needs to absorb section transcripts or developer conversations. Each
+section PM keeps the detail for one complete section, while developer agents
+always start with a fresh, non-inherited context.
 
-Re-running the installer upgrades reusable flow/config files in place while
-preserving existing per-project state under `project_state/` and run history
-under `runs/`. The main per-project exception is `task_contract.md`, which is
-treated as rules/config and refreshed on reinstall.
+Claude is the default PM reviewer. When Claude is unavailable,
+`codex_pm_review.sh` provides a stateless fallback using the same
+`response.json` contract.
 
-## Core rules
+## Core invariants
 
-- Claude PM sessions must start from a real first call and then resume with the returned `session_id`.
-- The first Claude PM call uses `claude -p --output-format json` inside `./agentic/pm_flow/net_exec.sh`.
-- Later Claude PM calls use `claude -p --resume <session_id>` inside that wrapper.
-- `pm_flow.sh` prepares prompts, metadata, and transcripts, but does not invoke Claude itself.
-- Generated Claude commands are meant to be run from the top shell through the stable `net_exec.sh` wrapper.
-- The PM system prompt is passed from `system_prompt.txt` via `--append-system-prompt-file`, not inlined on the command line.
-- Every PM review must include drift review.
-- Every completion review must compare expected versus observed outcome.
-- Networked or environment-specific project commands should run through stable repo-local wrappers.
+- Each section owns an independent PM session and audit run.
+- Every PM and developer sub-agent launch requires no inherited parent conversation (`fork_turns="none"` in Codex collaboration).
+- The root context receives section handoffs capped at 500 words and 8192 bytes.
+- Section transitions and PM restarts use explicit file checkpoints instead of automatic compaction.
+- Independent sections can proceed concurrently only when their owned paths do not overlap.
+- Each section permits one active pending review, and each pending review permits one execution claim.
+- Stale out-of-order PM responses within one section are rejected.
+- A section cannot become `done` until its current completion review records `DONE`.
+- Existing non-section task runs remain usable for compatibility.
+- Reinstalling refreshes scripts and rules while preserving project state, sections, and run history.
+
+The scaffold enforces section/session bookkeeping, ownership-overlap checks,
+stale-response checks, and handoff limits. It prepares prompts, state, commands, and transcripts, but does
+not itself call a native sub-agent API. The host agent runtime is responsible
+for launching sub-agents without inherited history using the generated project
+and section prompts.
 
 ## Canonical installed layout
 
-The canonical installed layout is now:
+```text
+agentic/pm_flow/
+├── pm_flow.sh
+├── net_exec.sh
+├── codex_pm_review.sh
+├── projects.md
+└── <project>/
+    ├── task_contract.md
+    ├── project_state/
+    │   ├── plan.md
+    │   ├── sections.md
+    │   ├── start.md
+    │   └── resume.md
+    ├── sections/
+    │   └── <section>/
+    │       ├── brief.md
+    │       ├── pm_prompt.md
+    │       ├── state.md
+    │       ├── handoff.md
+    │       └── run_path.txt
+    └── runs/
+```
 
-- `agentic/pm_flow/`
-  - generic top-level scripts and shared files
-- `agentic/pm_flow/projects.md`
-  - repo-local registry of available project workspaces
-- `agentic/pm_flow/<project>/`
-  - project-specific task contract, continuation state, and runs
+## Install
 
-Top-level generic files:
-
-- `agentic/pm_flow/pm_flow.sh`
-- `agentic/pm_flow/net_exec.sh`
-- `agentic/pm_flow/local_env.sh.example`
-- `agentic/pm_flow/README.md`
-- `agentic/pm_flow/projects.md`
-
-Per-project files:
-
-- `agentic/pm_flow/<project>/task_contract.md`
-- `agentic/pm_flow/<project>/project_state/`
-- `agentic/pm_flow/<project>/runs/`
-- `agentic/pm_flow/<project>/project_state/start.md`
-- `agentic/pm_flow/<project>/project_state/resume.md`
-
-## Template layout
-
-- `install.sh`
-  - Installs or updates the scaffold in a target repo.
-- `template/agentic/pm_flow/pm_flow.sh`
-  - Generic run manager, prompt preparer, response recorder, and transcript logger.
-- `template/agentic/pm_flow/net_exec.sh`
-  - Generic repo-root command wrapper for networked or env-specific commands.
-- `template/agentic/pm_flow/codex_pm_review.sh`
-  - Codex fallback for PM reviews when the Claude API is rate-limited or unavailable.
-- `template/agentic/pm_flow/projects.md`
-  - Project registry template.
-- `template/agentic/pm_flow/project/`
-  - Per-project template files such as `task_contract.md` and `project_state/`.
-- `template/CLAUDE.md`
-  - Repo-local operating reminders for Codex.
-
-## Local install
-
-Install into another checked-out repo:
+Install into another checked-out repository:
 
 ```bash
 ./install.sh /path/to/project --name "Project Name"
 ```
 
 If no target path is given, the installer uses the current directory.
-Re-running the same install command updates reusable flow files and
-`task_contract.md` without overwriting existing `project_state/*` files unless
-you pass `--force`.
 
-## Future curl install
+Re-running the installer refreshes generic flow files, `task_contract.md`, and
+the managed root-coordinator `start.md`/`resume.md` prompts. A pre-section
+version of either prompt is backed up once with a `.pre-sections.md` suffix.
+The project plan, section workspaces, generated registry, and run history are
+preserved. Refreshed files are staged and atomically replaced.
 
-After this repo is pushed, the same installer can be used directly from GitHub raw:
+If the target already has a `CLAUDE.md`, its original content is backed up once
+as `CLAUDE.pre-pm-flow.md`. Reinstalls replace only the marked pm-flow managed
+block and preserve the repository's other instructions. The installed
+`agentic/pm_flow/.project-key` preserves project identity if the repository
+directory is later renamed; use `--project-key` to select an identity
+explicitly. Use `--force` only for an intentional full replacement.
+
+The installer can also run from a raw GitHub base:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/salah-ghanim/pm-flow/main/install.sh | \
   zsh -s -- . --repo-raw-base https://raw.githubusercontent.com/salah-ghanim/pm-flow/main
 ```
 
-That works because `install.sh` supports both:
+## Start the multi-agent flow
 
-- local-copy mode from a checked-out `pm-flow` repo
-- remote-download mode from a raw GitHub base URL
+In an installed repository, launch the root coordinator from:
 
-## Installed workflow
-
-Inside the target repo:
-
-1. Validate prerequisites.
-2. Initialize a run with a task brief.
-3. Prepare a step review or completion review.
-4. Run the generated `command.txt` from the top shell (Claude), or run
-   `codex_pm_review.sh <pending-dir>` as a Codex fallback.
-5. Record the response into the transcript.
-6. Rotate the session if the stored `session_id` goes stale.
-
-## Codex PM fallback
-
-When the Claude API is rate-limited, use the included Codex fallback:
-
-```bash
-./agentic/pm_flow/codex_pm_review.sh "<pending-dir>" [--model o4-mini]
+```text
+agentic/pm_flow/<project>/project_state/start.md
 ```
 
-This inlines all referenced workspace files into a self-contained prompt, calls
-`codex exec`, and writes a `response.json` compatible with `pm_flow.sh record-step`
-and `record-complete`. The normal record commands work unchanged after the fallback runs.
+That prompt tells the root agent to:
 
-See `agentic/pm_flow/README.md` in any installed repo for full details.
+1. read only the portfolio plan, section registry, and task contract
+2. split the project into isolated sections
+3. create each section with `init-section`
+4. spawn a PM sub-agent with no inherited root history using only the generated section `pm_prompt.md`
+5. reconcile sections through bounded handoffs
 
-Installed repos get repo-local portable state under `agentic/pm_flow/<project>/project_state/`. Timestamped run directories remain the audit trail under `agentic/pm_flow/<project>/runs/`.
+Create a section:
 
-Recommended prompt scaffolding:
+```bash
+./agentic/pm_flow/pm_flow.sh init-section "api-contract" --file section_brief.md
+```
 
-- Use `project_state/start.md` when beginning a fresh session for a project.
-- Use `project_state/resume.md` when continuing an existing project session.
-- These files are markdown guidance for the agent to read first. They are intentionally manual prompt scaffolding, not executable behavior in `pm_flow.sh`.
+`section_brief.md` must use these exact Markdown headings:
+
+```markdown
+## Objective
+
+## Scope
+
+## Owned paths
+- src/api/**
+
+## Dependencies
+- data-model
+
+## Acceptance
+
+## Rejection conditions
+```
+
+Owned paths must be repo-relative and cannot overlap another nonterminal
+section. Each dependency bullet is either an exact existing section key, a
+repo-relative path to that section's `handoff.md`, or `None.` when empty.
+
+Inspect the generated section PM launch prompt:
+
+```bash
+./agentic/pm_flow/pm_flow.sh section-prompt api-contract
+```
+
+Refresh the bounded root view:
+
+```bash
+./agentic/pm_flow/pm_flow.sh list-sections
+```
+
+See the installed `agentic/pm_flow/README.md` for step reviews, completion
+reviews, handoff format, session recovery, and the Codex fallback.
+
+## Template contents
+
+- `install.sh` installs or upgrades the scaffold.
+- `template/agentic/pm_flow/pm_flow.sh` manages sections, PM sessions, prompts, responses, and transcripts.
+- `template/agentic/pm_flow/codex_pm_review.sh` runs stateless Codex PM fallback reviews.
+- `template/agentic/pm_flow/net_exec.sh` provides a stable repo-root command wrapper.
+- `template/agentic/pm_flow/project/project_state/` contains root coordinator prompt and portfolio templates.
+- `template/agentic/pm_flow/project/task_contract.md` defines the root→section PM→fresh developer contract.
+- `template/CLAUDE.md` installs repo-local orchestration rules.

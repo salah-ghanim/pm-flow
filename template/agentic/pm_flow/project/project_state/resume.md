@@ -1,39 +1,50 @@
-# Project resume prompt
+# Project coordinator resume prompt
 
-Use this file as the prompt scaffold when resuming {{PROJECT_NAME}} after prior work already exists.
+Use this file when a fresh root coordinator resumes {{PROJECT_NAME}}. Resuming
+means reconstructing the portfolio from durable handoffs, not restoring one
+ever-growing PM conversation.
 
-Purpose
-- Resume from the canonical repo-local state instead of machine-local session files.
-- Point the agent at the current run, current plan, and project trackers.
-- Reduce drift between sessions by keeping the resume prompt close to the project state itself.
+Read first:
 
-Read first
-1. `agentic/pm_flow/{{PROJECT_NAME}}/project_state/plan.md`
-2. `agentic/pm_flow/{{PROJECT_NAME}}/project_state/current_run.txt`
-3. `agentic/pm_flow/{{PROJECT_NAME}}/project_state/resume.md`
-4. `agentic/pm_flow/{{PROJECT_NAME}}/task_contract.md`
-5. The run directory referenced by `current_run.txt`
+1. `agentic/pm_flow/{{PROJECT_KEY}}/project_state/plan.md`
+2. `agentic/pm_flow/{{PROJECT_KEY}}/project_state/sections.md`
+3. The linked handoffs needed for active/blocked work and unresolved integration from done sections
+4. `agentic/pm_flow/{{PROJECT_KEY}}/task_contract.md`
 
-Suggested opening prompt
+Do not read:
+
+- section transcripts
+- pending PM review directories
+- developer conversation history
+- a completed section's detailed state unless its handoff exposes an unresolved interface
+
+Suggested resume prompt:
+
 ```text
-Resume work on {{PROJECT_NAME}} from the current repo-local pm-flow state. This is a continuation, not a fresh start.
+Resume as a fresh root coordinator for {{PROJECT_NAME}} from durable pm-flow
+state. Do not reconstruct or continue a monolithic PM conversation.
 
-Read these first, in order:
-1. agentic/pm_flow/{{PROJECT_NAME}}/project_state/plan.md
-2. agentic/pm_flow/{{PROJECT_NAME}}/project_state/current_run.txt
-3. agentic/pm_flow/{{PROJECT_NAME}}/project_state/resume.md
-4. agentic/pm_flow/{{PROJECT_NAME}}/task_contract.md
-5. the run directory referenced by current_run.txt
+Read the project plan, sections.md, the bounded handoffs for active or blocked
+sections, and any done-section handoffs needed for unresolved dependencies or
+integration. Do not eagerly load irrelevant completed handoffs. Reconcile
+dependencies at the handoff level.
+For each ready section, spawn a section PM sub-agent with no inherited root
+conversation using only its pm_prompt.md. In Codex collaboration, use
+fork_turns="none". Each section PM may be long-lived within that section, but
+every developer assignment must use a fresh no-history developer sub-agent.
+Treat done and cancelled sections as terminal. If new project-level evidence
+requires more work, reopen the section explicitly with an active or planned
+bounded handoff before its PM prepares another review.
 
-Then continue autonomously from the current state using pm-flow for each real cycle.
-Use agentic/pm_flow/{{PROJECT_NAME}}/ as the canonical project workspace.
+Keep raw section transcripts and developer conversations out of the root
+context.
 ```
 
-What this file should contain
-- The canonical resume order for project state and run history.
-- The default assumption that prior work should be continued, not restarted.
-- Any current-path caveats, blockers, or warnings that matter across sessions.
+If a section PM itself must be restarted, launch a fresh section PM from that
+section's `pm_prompt.md` with no inherited conversation. That prompt points it
+to `state.md` and `handoff.md`. This is an explicit checkpoint boundary; do not
+rely on automatic context compaction.
 
-Manual-use note
-- This file is guidance for humans and agents to read first.
-- It is not executed automatically by `pm_flow.sh`.
+Each section PM must keep only one pending review active. It should run the
+generated one-time execution claim, cancel abandoned pending work explicitly,
+and publish `done` only after recording a current `DONE` completion review.

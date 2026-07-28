@@ -1,8 +1,8 @@
-#!/bin/zsh
+#!/bin/zsh -f
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
+PROJECT_ROOT="$(cd -P -- "$SCRIPT_DIR/../.." && pwd -P)"
 
 export PROJECT_ROOT
 export PM_FLOW_ROOT="$SCRIPT_DIR"

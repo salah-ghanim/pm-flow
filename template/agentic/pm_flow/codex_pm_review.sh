@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/zsh -f
 # codex_pm_review.sh - Run a PM review via Codex CLI instead of Claude.
 #
 # Use this when the Claude API is rate-limited or unavailable. The script reads
@@ -12,7 +12,7 @@
 # Arguments:
 #   <pending-dir>   Path to a pending review directory produced by pm_flow.sh
 #                   prepare-step or prepare-complete.
-#   --model <name>  Codex model to use. Defaults to o4-mini.
+#   --model <name>  Codex model to use. Omit to use the Codex CLI default.
 #
 # After this script completes, run the normal record step:
 #   pm_flow.sh record-step <pending-dir>
@@ -24,6 +24,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
+PROJECT_ROOT="$(cd -P -- "$SCRIPT_DIR/../.." && pwd -P)"
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -31,7 +34,7 @@ Usage:
 
 Arguments:
   <pending-dir>   Pending review dir produced by pm_flow.sh prepare-step or prepare-complete.
-  --model <name>  Codex model. Default: o4-mini.
+  --model <name>  Codex model. Omit to use the Codex CLI default.
 
 Examples:
   # Run a step review via Codex:
@@ -50,8 +53,18 @@ fail() {
 [[ $# -ge 1 ]] || { usage; exit 1; }
 case "${1:-}" in -h|--help|help) usage; exit 0 ;; esac
 
-PENDING_DIR="$(cd -- "$1" && pwd)"
+PENDING_DIR="$(cd -P -- "$1" && pwd -P)"
 shift
+
+case "$PENDING_DIR" in
+  "$SCRIPT_DIR"/*/runs/*/pending/*)
+    pending_rel="${PENDING_DIR#$SCRIPT_DIR/}"
+    PROJECT_KEY="${pending_rel%%/*}"
+    ;;
+  *)
+    fail "pending directory is outside the installed pm-flow project runs: $PENDING_DIR"
+    ;;
+esac
 
 MODEL=""
 while [[ $# -gt 0 ]]; do
@@ -67,6 +80,7 @@ command -v python3 >/dev/null 2>&1 || fail "python3 not found in PATH"
 SYSTEM_PROMPT_FILE="$PENDING_DIR/system_prompt.txt"
 PROMPT_FILE="$PENDING_DIR/prompt_one_line.txt"
 ENGINEER_UPDATE="$PENDING_DIR/engineer_update.md"
+CONTEXT_MANIFEST="$PENDING_DIR/context_files.json"
 RESPONSE_FILE="$PENDING_DIR/response.json"
 
 [[ -f "$SYSTEM_PROMPT_FILE" ]] || fail "system_prompt.txt not found in $PENDING_DIR"
@@ -78,32 +92,60 @@ RESPONSE_FILE="$PENDING_DIR/response.json"
 LAST_MSG_FILE="$(mktemp /tmp/codex_pm_response.XXXXXX)"
 trap 'rm -f "$LAST_MSG_FILE"' EXIT
 
-printf 'Running Codex PM review (model=%s)...\n' "$MODEL" >&2
+printf 'Running Codex PM review (model=%s)...\n' "${MODEL:-codex-cli-default}" >&2
+"$SCRIPT_DIR/pm_flow.sh" --project "$PROJECT_KEY" claim-execution "$PENDING_DIR" >&2
 
-python3 - "$SYSTEM_PROMPT_FILE" "$PROMPT_FILE" "$ENGINEER_UPDATE" "$MODEL" "$LAST_MSG_FILE" << 'PY'
+python3 - "$SYSTEM_PROMPT_FILE" "$PROMPT_FILE" "$ENGINEER_UPDATE" "$MODEL" "$LAST_MSG_FILE" "$CONTEXT_MANIFEST" "$PROJECT_ROOT" << 'PY'
+import json
 import subprocess
 import sys
 from pathlib import Path
 
-system_prompt_file, prompt_file, engineer_update, model, out_file = sys.argv[1:]
+system_prompt_file, prompt_file, engineer_update, model, out_file, context_manifest, project_root_arg = sys.argv[1:]
 
 system_prompt = Path(system_prompt_file).read_text().strip()
 base_prompt   = Path(prompt_file).read_text().strip()
 eng_update    = Path(engineer_update).read_text().strip()
+project_root  = Path(project_root_arg).resolve()
 
-# Extract absolute workspace file paths referenced in the prompt
-import re
-referenced_paths = re.findall(r'(/[^\s]+\.(?:md|txt|json))', base_prompt)
+# New pending reviews carry an explicit, repo-relative context allowlist. The
+# fallback for old pending directories always includes engineer_update.md and
+# discovers any unambiguous absolute paths from the prompt.
+manifest_path = Path(context_manifest)
+if manifest_path.is_file():
+    payload = json.loads(manifest_path.read_text())
+    if payload.get("version") != 1 or not isinstance(payload.get("files"), list):
+        raise SystemExit(f"invalid context manifest: {manifest_path}")
+    referenced_paths = []
+    for relative_path in payload["files"]:
+        if not isinstance(relative_path, str) or not relative_path:
+            raise SystemExit(f"invalid context path in manifest: {relative_path!r}")
+        candidate = (project_root / relative_path).resolve()
+        try:
+            candidate.relative_to(project_root)
+        except ValueError:
+            raise SystemExit(f"context path escapes project root: {relative_path}")
+        if not candidate.is_file():
+            raise SystemExit(f"context file not found: {candidate}")
+        referenced_paths.append(candidate)
+else:
+    import re
+    referenced_paths = [Path(engineer_update).resolve()]
+    for match in re.findall(r'(/.*?\.(?:md|txt|json))(?=\s+-\s+|\s+Respond\b|$)', base_prompt):
+        candidate = Path(match).resolve()
+        try:
+            candidate.relative_to(project_root)
+        except ValueError:
+            continue
+        if candidate.is_file() and candidate not in referenced_paths:
+            referenced_paths.append(candidate)
 
 # Build inline section for each referenced file
 inline_sections = []
-for fpath in referenced_paths:
-    p = Path(fpath)
-    if p.is_file():
-        content = p.read_text().strip()
-    else:
-        content = "(file not found)"
-    inline_sections.append(f"=== FILE: {fpath} ===\n{content}\n=== END FILE ===")
+for path in referenced_paths:
+    content = path.read_text().strip()
+    relative_path = path.relative_to(project_root)
+    inline_sections.append(f"=== FILE: {relative_path} ===\n{content}\n=== END FILE ===")
 
 inline_block = "\n\n".join(inline_sections)
 
@@ -115,14 +157,16 @@ full_prompt = (
 # Codex -c flag sets config fields: instructions maps to the system prompt
 cmd = [
     "codex", "exec",
-    "--dangerously-bypass-approvals-and-sandbox",
+    "--sandbox", "read-only",
+    "--ephemeral",
+    "--cd", str(project_root),
     "-c", f"instructions={system_prompt}",
     "-o", out_file,
 ]
 if model:
     cmd += ["-m", model]
 cmd.append(full_prompt)
-result = subprocess.run(cmd)
+result = subprocess.run(cmd, cwd=project_root)
 sys.exit(result.returncode)
 PY
 
@@ -141,7 +185,12 @@ payload = {
     "subtype":      "success",
     "is_error":     False,
     "result":       result_text,
-    "session_id":   f"codex-fallback-{ts}",
+    # Codex fallback reviews are stateless. Leaving the session id empty and
+    # marking it non-resumable prevents the next Claude review from trying to
+    # resume a fake or stale session that never saw this exchange.
+    "session_id":   "",
+    "session_resumable": False,
+    "pm_backend":   "codex",
     "stop_reason":  "end_turn",
     "total_cost_usd": 0,
     "usage":        {},

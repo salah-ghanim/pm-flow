@@ -1,17 +1,34 @@
-# Project plan
+# Project portfolio plan
 
-Problem
-- Summarize the current objective here.
+## Mission
 
-Approach
-- Summarize the chosen approach here.
+- {{PRIMARY_MISSION}}
 
-Milestones
-- Record meaningful progress, decisions, and validated results here.
+## Project-wide constraints
 
-Next steps
-- List the next concrete steps here.
+- Record only constraints that apply across multiple sections.
 
-Notes
-- Keep this file repo-local so the project can resume in a different environment.
-- Add repo-specific trackers to `project_state/` when they should be read before timestamped run files.
+## Section graph
+
+- Define independently owned sections and their dependencies at a high level.
+- Keep detailed implementation plans inside each section's `state.md`.
+
+## Integration order
+
+- Record which section interfaces must settle before dependent sections begin.
+
+## Project-level decisions
+
+- Record decisions that affect multiple sections.
+- Keep section-local decisions out of this file.
+
+## Completion criteria
+
+- Define the project-level outcome assembled from validated section handoffs.
+
+## Next coordination actions
+
+- List only section creation, dependency reconciliation, integration, or release actions.
+
+This file is intentionally bounded. The root coordinator reads it together with
+`sections.md`; section PM and developer detail belongs under `sections/<name>/`.

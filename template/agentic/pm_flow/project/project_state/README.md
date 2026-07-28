@@ -1,19 +1,43 @@
-# Project state
+# Project coordinator state
 
-This directory is the stable repo-local continuation layer for {{PROJECT_NAME}}.
+This directory is the stable, bounded continuation layer for the root
+coordinator of {{PROJECT_NAME}}.
 
-Use it for non-timestamped files that future sessions should read first, such as:
+The root coordinator reads:
 
-- `plan.md`
-- `start.md`
-- `resume.md`
-- `current_run.txt`
-- any repo-specific trackers that should survive across machines
+- `plan.md` for the project mission, section graph, and integration order
+- `sections.md` for status and one-line summaries
+- the linked section `handoff.md` files when their details are needed
+- `start.md` or `resume.md` as launch scaffolding
 
-Rules:
+The root coordinator does not read:
 
-- `project_state/` is the canonical home for continuation state.
-- `runs/<timestamp>-<task-slug>/` remains the audit trail for task briefs, transcripts, responses, and pending reviews.
-- `current_run.txt` stores a repo-relative run path so the pointer stays portable across environments.
-- `start.md` is the manual-read prompt scaffold for a fresh session.
-- `resume.md` is the manual-read prompt scaffold for a continuation session.
+- `runs/*/transcript.md`
+- pending PM review directories
+- section-local `state.md` by default
+- developer conversation history
+
+Per-section state lives under `../sections/<section>/`:
+
+- `brief.md` defines the boundary and acceptance criteria
+- `pm_prompt.md` launches the section PM sub-agent
+- `state.md` contains detailed section-local decisions and progress
+- `handoff.md` is the 500-word and 8192-byte interface back to the root coordinator
+- `run_path.txt` points to the section's isolated PM run and session
+
+`sections.md` is a derived portfolio index. Run
+`./agentic/pm_flow/pm_flow.sh list-sections` to refresh it from authoritative
+per-section files.
+
+Section briefs use the exact headings `Objective`, `Scope`, `Owned paths`,
+`Dependencies`, `Acceptance`, and `Rejection conditions`. New sections cannot
+overlap the owned paths of nonterminal sections. Declared dependencies are
+exact section keys or repo-relative section `handoff.md` paths and are
+snapshotted for each pending PM review.
+
+`agentic/pm_flow/.project-key` identifies this project workspace even if the
+repository directory is renamed.
+
+The legacy `current_run.txt` remains for old non-section runs. New work should
+select a section explicitly with `--section <name>` so independent sections do
+not contend for a single project-global pointer.

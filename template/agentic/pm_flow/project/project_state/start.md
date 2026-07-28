@@ -1,40 +1,57 @@
-# Project start prompt
+# Project coordinator start prompt
 
-Use this file as the prompt scaffold for a fresh session on {{PROJECT_NAME}}.
+Use this file to launch a fresh root coordinator for {{PROJECT_NAME}}.
 
-Purpose
-- Start work without relying on remembered prompt text.
-- Point the agent at the canonical repo-local state and contract files first.
-- Keep the opening brief short while still grounding the agent in the installed pm-flow layout.
+The root coordinator owns the portfolio, not the implementation detail. Its
+context should contain only the project plan, the section registry, and bounded
+section handoffs.
 
-Read first
-1. `agentic/pm_flow/{{PROJECT_NAME}}/project_state/plan.md`
-2. `agentic/pm_flow/{{PROJECT_NAME}}/project_state/start.md`
-3. `agentic/pm_flow/{{PROJECT_NAME}}/project_state/resume.md`
-4. `agentic/pm_flow/{{PROJECT_NAME}}/task_contract.md`
-5. `agentic/pm_flow/{{PROJECT_NAME}}/project_state/current_run.txt`
+Read first:
 
-Suggested opening prompt
+1. `agentic/pm_flow/{{PROJECT_KEY}}/project_state/plan.md`
+2. `agentic/pm_flow/{{PROJECT_KEY}}/project_state/sections.md`
+3. `agentic/pm_flow/{{PROJECT_KEY}}/task_contract.md`
+
+Do not read section transcripts, pending review directories, or developer
+conversations into the root context.
+
+Suggested opening prompt:
+
 ```text
-Start work on {{PROJECT_NAME}} from the repo-local pm-flow state.
+Start as the root project coordinator for {{PROJECT_NAME}}.
 
-Read these first, in order:
-1. agentic/pm_flow/{{PROJECT_NAME}}/project_state/plan.md
-2. agentic/pm_flow/{{PROJECT_NAME}}/project_state/start.md
-3. agentic/pm_flow/{{PROJECT_NAME}}/project_state/resume.md
-4. agentic/pm_flow/{{PROJECT_NAME}}/task_contract.md
-5. agentic/pm_flow/{{PROJECT_NAME}}/project_state/current_run.txt
+Read only:
+1. agentic/pm_flow/{{PROJECT_KEY}}/project_state/plan.md
+2. agentic/pm_flow/{{PROJECT_KEY}}/project_state/sections.md
+3. agentic/pm_flow/{{PROJECT_KEY}}/task_contract.md
 
-Then continue autonomously from the current project state using pm-flow for each real cycle.
-Use agentic/pm_flow/{{PROJECT_NAME}}/ as the canonical project workspace.
+Decompose the project into independently owned sections. Create each section
+with pm_flow.sh init-section, then spawn one PM sub-agent per ready section with
+no inherited root conversation, using only that section's pm_prompt.md. In Codex
+collaboration, set fork_turns="none". A section PM is long-lived only for its
+section and must create a no-history developer sub-agent for each engineering
+assignment.
+
+Track the project through sections.md and the bounded handoff.md for each
+section. Never pull raw section transcripts or developer conversations into the
+root context. Reconcile interfaces and dependencies between section handoffs.
 ```
 
-What this file should contain
-- The project mission in one or two lines.
-- The canonical files that a fresh session must read first.
-- Any repo-specific execution rules worth seeing before the first cycle.
-- The default expectation for using pm-flow in this repo.
+Root coordinator responsibilities:
 
-Manual-use note
-- This file is guidance for humans and agents to read first.
-- It is not executed automatically by `pm_flow.sh`.
+- keep the project-level objective, section graph, and integration order clear
+- create section briefs with the exact Markdown headings `Objective`, `Scope`, `Owned paths`, `Dependencies`, `Acceptance`, and `Rejection conditions`
+- require repo-relative, non-overlapping owned paths; dependency bullets must be exact existing section keys or repo-relative paths to their `handoff.md`
+- spawn section PM sub-agents with no inherited root history and their section-local `pm_prompt.md` (`fork_turns="none"` in Codex)
+- read only bounded section handoffs and resolve cross-section interface conflicts
+- treat `done` and `cancelled` as terminal; publish an `active` or `planned` handoff before deliberately reopening one
+- avoid doing section engineering or directly managing developer agents
+
+Section PM responsibilities:
+
+- own one complete section
+- spawn a fresh developer sub-agent with no inherited PM history for every bounded implementation assignment
+- keep detailed decisions in section-local state
+- publish a handoff of at most 500 words and 8192 bytes after material outcomes or blockers
+- keep at most one pending PM review active and use its generated command's one-time execution claim
+- record a current `DONE` completion review before publishing a `done` handoff
