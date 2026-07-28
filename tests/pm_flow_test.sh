@@ -100,7 +100,7 @@ PROJECT_DIR="$FIXTURE_REPO/agentic/pm_flow/fixture-repo"
 [[ -x "$PM" ]] || fail "installer did not create executable pm_flow.sh"
 assert_file_contains \
   "$FIXTURE_REPO/CLAUDE.md" \
-  "agentic/pm_flow/fixture-repo/project_state/start.md" \
+  "agentic/pm_flow/fixture-repo/task_contract.md" \
   "installer renders the actual project key"
 assert_file_contains "$FIXTURE_REPO/CLAUDE.md" "Preserve this custom rule." "installer preserves existing CLAUDE rules"
 assert_file_contains "$FIXTURE_REPO/CLAUDE.md" "<!-- pm-flow:begin -->" "installer activates managed CLAUDE rules"
@@ -174,22 +174,9 @@ sections_output="$("$PM" list-sections)"
 assert_contains "$sections_output" "| alpha | planned |" "alpha registry row"
 assert_contains "$sections_output" "| beta | planned |" "beta registry row"
 assert_contains "$sections_output" "[handoff](../sections/alpha/handoff.md)" "registry handoff link"
-assert_file_contains \
-  "$PROJECT_DIR/sections/alpha/pm_prompt.md" \
-  "Spawn a fresh developer sub-agent for every assignment" \
-  "section PM delegation prompt"
-assert_file_contains \
-  "$PROJECT_DIR/sections/alpha/pm_prompt.md" \
-  "Do not load its full transcript" \
-  "section PM context boundary"
-assert_file_contains \
-  "$PROJECT_DIR/sections/alpha/pm_prompt.md" \
-  "without inherited root conversation history" \
-  "section PM no-history launch"
-assert_not_contains \
-  "$(/bin/cat "$PROJECT_DIR/sections/alpha/pm_prompt.md")" \
-  'In Codex collaboration, use' \
-  "section PM prompt states the requirement, not one host's mechanism"
+assert_file_contains "$PROJECT_DIR/sections/alpha/brief.md" "Implement alpha." "the brief is persisted"
+[[ ! -e "$PROJECT_DIR/sections/alpha/pm_prompt.md" ]] || \
+  fail "init-section still generates the retired pm_prompt.md"
 assert_file_contains "$PROJECT_DIR/sections/alpha/owned_paths.txt" "src/alpha/**" "owned paths are persisted"
 assert_file_contains \
   "$PROJECT_DIR/sections/beta/dependency_handoffs.txt" \
@@ -301,7 +288,7 @@ handoff_after="$(/bin/cat "$PROJECT_DIR/sections/alpha/handoff.md")"
 [[ "$handoff_before" == "$handoff_after" ]] || fail "reinstall overwrote section handoff"
 assert_file_contains "$PROJECT_DIR/sections/alpha/status.txt" "active" "reinstall preserves section status"
 assert_file_contains "$PROJECT_DIR/project_state/plan.md" "Preserve this project plan marker." "reinstall preserves project plan"
-assert_file_contains "$PROJECT_DIR/project_state/start.md" "# Project coordinator start prompt" "reinstall refreshes coordinator prompt"
+assert_file_contains "$PROJECT_DIR/project_state/start.md" "pm_flow.sh run" "reinstall refreshes the start guide"
 assert_file_contains \
   "$PROJECT_DIR/project_state/start.pre-sections.md" \
   "Legacy coordinator instructions" \

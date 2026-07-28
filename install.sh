@@ -466,10 +466,10 @@ main() {
   if [[ "$force" != "1" ]]; then
     backup_pre_section_prompt \
       "$project_dir/project_state/start.md" \
-      "^# Project coordinator start prompt$"
+      "^# Starting "
     backup_pre_section_prompt \
       "$project_dir/project_state/resume.md" \
-      "^# Project coordinator resume prompt$"
+      "^# Resuming "
   fi
   render_template \
     "template/agentic/pm_flow/project/project_state/start.md" \

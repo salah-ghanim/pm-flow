@@ -28,42 +28,21 @@ Usage:
   pm_flow.sh [--project <name>] [--section <name>] tick
   pm_flow.sh [--project <name>] [--section <name>] run [--max-ticks <n>]
   pm_flow.sh [--project <name>] role-prompt <role>
-  pm_flow.sh [--project <name>] consult-panel <section-name> [--file <markdown-file>]
-  pm_flow.sh [--project <name>] init <task-name>
-  pm_flow.sh [--project <name>] init-section <section-name>
-  pm_flow.sh [--project <name>] init-section <section-name> --file <markdown-file>
+  pm_flow.sh [--project <name>] init-section <section-name> [--file <markdown-file>]
   pm_flow.sh [--project <name>] list-sections
-  pm_flow.sh [--project <name>] section-prompt <section-name>
   pm_flow.sh [--project <name>] section-run <section-name>
-  pm_flow.sh [--project <name>] section-handoff <section-name> <status> <summary>
-  pm_flow.sh [--project <name>] section-handoff <section-name> <status> <summary> --file <markdown-file>
-  pm_flow.sh [--project <name>] adopt-pending <legacy-pending-dir>
-  pm_flow.sh [--project <name>] cancel-pending <pending-dir> [reason]
-  pm_flow.sh [--project <name>] rotate-session <run-dir> [reason]
-  pm_flow.sh [--project <name>] [--section <name>] prepare-step <run-dir> <stage-name>
-  pm_flow.sh [--project <name>] [--section <name>] prepare-step <run-dir> <stage-name> --file <markdown-file>
-  pm_flow.sh [--project <name>] record-step <pending-dir>
-  pm_flow.sh [--project <name>] record-step <pending-dir> --response-file <markdown-file>
-  pm_flow.sh [--project <name>] [--section <name>] prepare-complete <run-dir>
-  pm_flow.sh [--project <name>] [--section <name>] prepare-complete <run-dir> --file <markdown-file>
-  pm_flow.sh [--project <name>] record-complete <pending-dir>
-  pm_flow.sh [--project <name>] record-complete <pending-dir> --response-file <markdown-file>
-  pm_flow.sh [--project <name>] print-command <pending-dir>
-  pm_flow.sh [--project <name>] [--section <name>] current-run
+  pm_flow.sh [--project <name>] section-handoff <section-name> <status> <summary> [--file <markdown-file>]
+  pm_flow.sh [--project <name>] consult-panel <section-name> [--file <markdown-file>]
 
-  Important:
-  This script never invokes `claude -p`.
-  It writes a top-shell Claude command into command.txt routed through
-  `./agentic/pm_flow/net_exec.sh`.
-  One section owns one isolated, resumable PM session and one audit run.
-  The root coordinator reads list-sections output and bounded handoff.md files,
-  never section transcripts or developer conversations.
-  Each section PM must create a no-history developer sub-agent for every implementation assignment.
-  The first section PM call uses `claude -p --output-format json`; later calls
-  add `--resume <session_id>` using the captured value from response.json.
-  Use `--section <name>` with the special run-dir value `current` to target
-  that section without relying on the project-global legacy pointer.
-  The active project defaults to the repo basename when that project directory exists.
+  How it runs:
+  `run` repeats `tick` until nothing is actionable. Each tick observes the files
+  on disk, derives the single next action, performs it, and exits, so an
+  interrupted run resumes by being run again.
+  Roles are named, not vendors. config.json binds each role to a cli, a model,
+  and a difficulty, and every role is dispatched as a fresh process.
+  A section that fails `failures_before_consultant` reviews in a row goes to a
+  panel of independent consultants; the product officer then adopts one path,
+  several in parallel, a synthesis, or abandons the section.
 EOF
 }
 
@@ -558,52 +537,6 @@ with lock_path.open("a+") as lock:
     atomic_text(section_dir / "summary.txt", summary)
     atomic_text(section_dir / "updated_at.txt", updated_at)
 PY
-}
-
-write_section_pm_prompt() {
-  local section_dir="$1"
-  local section_name="$2"
-  local section_key="$3"
-  local run_path="$4"
-  local logical_section_dir="${5:-$section_dir}"
-  local section_rel
-  section_rel="$(repo_relative_path "$logical_section_dir")"
-  cat > "$section_dir/pm_prompt.md" <<EOF
-# Section PM launch prompt: $section_name
-
-You are the long-lived PM sub-agent for exactly one project section: \`$section_name\` (\`$section_key\`).
-The root agent coordinates the whole project; you own this section end to end.
-You must have been created without inherited root conversation history, seeded
-only with this prompt. (Claude Code subagents already start fresh; in Codex
-collaboration the root must launch you with \`fork_turns="none"\`.)
-
-Read only the bounded context needed to start:
-
-1. \`$section_rel/brief.md\`
-2. \`$section_rel/state.md\`
-3. \`$section_rel/handoff.md\`
-4. \`$(repo_relative_path "$CONTRACT_FILE")\`
-5. Dependency handoffs explicitly named in the section brief
-
-The audit run is \`$(repo_relative_path "$run_path")\`. Do not load its full transcript merely to reconstruct context.
-
-Operating contract:
-
-- Break this section into bounded engineering assignments.
-- Spawn a fresh developer sub-agent for every assignment with no inherited PM conversation.
-- Never resume, reuse, or keep a developer conversation alive.
-- Give each developer only its objective, owned paths, constraints, acceptance checks, and the minimum relevant files.
-- Review the developer's report and validation evidence before deciding the next assignment.
-- Keep detailed section decisions and progress in \`$section_rel/state.md\`.
-- After every material outcome or blocker, replace the bounded handoff with:
-  \`./agentic/pm_flow/pm_flow.sh section-handoff "$section_key" <status> "<one-line summary>" --file <handoff-file>\`
-- Keep the handoff at 500 words and 8192 bytes or fewer with these headings: Outcome, Decisions, Interfaces, Risks, Next action.
-- Report to the root coordinator through the handoff only. Do not send raw transcripts or developer conversations upward.
-- Do not manage another section. Escalate cross-section changes through Interfaces or Risks so the root coordinator can reconcile them.
-- Do not implement code yourself; manage, delegate, review, validate, and integrate this section.
-
-Continue until this section is validated as done, explicitly blocked, or cancelled.
-EOF
 }
 
 read_stdin_body() {
@@ -1125,17 +1058,11 @@ cmd_init_section() {
     printf '## Decisions\n\n- None yet.\n\n'
     printf '## Interfaces\n\n- None identified yet.\n\n'
     printf '## Risks\n\n- No implementation evidence exists yet.\n\n'
-    printf '## Next action\n\n- Launch the section PM with `pm_prompt.md`.\n'
+    printf '## Next action\n\n- Awaiting the first scoped assignment.\n'
   } > "$SECTION_DIR/handoff.md"
 
   create_run "$SECTION_NAME" "$section_brief" "0"
   printf '%s\n' "$(repo_relative_path "$RUN_DIR")" > "$SECTION_DIR/run_path.txt"
-  write_section_pm_prompt \
-    "$SECTION_DIR" \
-    "$SECTION_NAME" \
-    "$SECTION_KEY" \
-    "$RUN_DIR" \
-    "$final_section_dir"
   mv "$staged_section_dir" "$final_section_dir"
   SECTION_DIR="$final_section_dir"
   refresh_sections_index
@@ -1144,20 +1071,12 @@ cmd_init_section() {
   printf 'section_key=%s\n' "$SECTION_KEY"
   printf 'section_dir=%s\n' "$SECTION_DIR"
   printf 'run_dir=%s\n' "$RUN_DIR"
-  printf 'pm_prompt=%s\n' "$SECTION_DIR/pm_prompt.md"
   printf 'handoff=%s\n' "$SECTION_DIR/handoff.md"
 }
 
 cmd_list_sections() {
   refresh_sections_index
   /bin/cat "$SECTIONS_INDEX_FILE"
-}
-
-cmd_section_prompt() {
-  local section_dir
-  section_dir="$(resolve_section_dir "${1:-}")"
-  [[ -f "$section_dir/pm_prompt.md" ]] || fail "missing section PM prompt: $section_dir/pm_prompt.md"
-  /bin/cat "$section_dir/pm_prompt.md"
 }
 
 cmd_section_run() {
@@ -1306,10 +1225,6 @@ main() {
     list-sections)
       shift || true
       cmd_list_sections "$@"
-      ;;
-    section-prompt)
-      shift || true
-      cmd_section_prompt "$@"
       ;;
     section-run)
       shift || true

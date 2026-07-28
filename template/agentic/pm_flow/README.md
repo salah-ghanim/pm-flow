@@ -1,340 +1,168 @@
 # PM Flow
 
-PM Flow keeps project-wide coordination small by making project sections the
-explicit context boundary.
+PM Flow runs a software project with a team of agents and no human in the loop.
+Work is cut into sections, each section is driven by its own manager, and every
+piece of engineering goes to a fresh agent with no inherited conversation.
 
 ```text
-root project coordinator
-├── section PM: api
-│   ├── fresh developer: endpoint
-│   └── fresh developer: contract tests
-└── section PM: web
-    ├── fresh developer: page shell
-    └── fresh developer: integration
+product officer          cuts the product into sections, adjudicates failures
+└── section manager      scopes assignments, reviews results
+    ├── developer        one bounded assignment, then discarded
+    ├── consultants      an independent panel, when a section keeps failing
+    └── rescue engineer  the last attempt, on the path the officer chose
 ```
 
-The root coordinator knows the full project shape but reads only the portfolio
-plan, section registry, and bounded handoffs. Each section has its own
-long-lived PM session. Every PM/developer child starts without inherited parent
-conversation history.
+## Roles, not vendors
 
-Claude is the default PM reviewer. `codex_pm_review.sh` is a stateless fallback
-when Claude is unavailable.
+Roles are named. `config.json` binds each one to a CLI, a model, and a
+difficulty, so nothing in the flow depends on which vendor is behind a role:
 
-## Hard rules
+```json
+{
+  "domain": "crypto-trading",
+  "roles": {
+    "cpo":           { "cli": "claude",  "model": "claude-opus-5",  "difficulty": "high" },
+    "pm":            { "cli": "claude",  "model": "claude-opus-5",  "difficulty": "medium" },
+    "developer":     { "cli": "claude",  "model": "claude-sonnet-5","difficulty": "medium" },
+    "consultant":    [{ "cli": "claude", "model": "claude-opus-5",  "difficulty": "xhigh" },
+                      { "cli": "codex",  "model": "gpt-5.6-sol",    "difficulty": "high" }],
+    "10x_developer": { "cli": "claude",  "model": "claude-opus-5",  "difficulty": "max" }
+  }
+}
+```
 
-- One section owns one PM run, session, transcript, state file, and handoff.
-- The root coordinator never loads raw section transcripts or developer conversations.
-- A section PM owns only its section and reads dependencies through bounded handoffs.
-- Every section PM starts with no inherited root conversation.
-- Every engineering assignment uses a fresh developer sub-agent with no inherited PM conversation; developer conversations are never resumed.
-- A root-facing handoff is at most 500 words and 8192 bytes, and contains Outcome, Decisions, Interfaces, Risks, and Next action.
-- Context transitions happen through explicit state and handoff files, not automatic compaction.
-- Independent sections may proceed concurrently only when their write ownership does not overlap.
-- One section may have only one active pending review, and one pending review may claim PM execution only once.
-- Claude PM commands run from the top shell through the generated `command.txt` and `net_exec.sh`.
-- Stale parallel responses for the same section session are rejected.
+`difficulty` is one vocabulary — `low`, `medium`, `high`, `xhigh`, `max` —
+translated into whatever knob each CLI exposes. A role bound to a *list* is a
+panel: its seats run in parallel and blind to each other, which is only worth
+doing across different model families.
 
-The shell scaffold enforces section/session bookkeeping, stale-response checks,
-and handoff limits. It prepares prompts and records PM reviews, but it does not
-call a native sub-agent API. The host agent runtime must spawn sub-agents with
-no inherited conversation and use each section's generated `pm_prompt.md` as
-the only initial section-PM seed.
+Check the bindings with:
+
+```bash
+./agentic/pm_flow/pm_flow.sh config
+```
+
+Only `developer` and `10x_developer` can write to the repository. Reviewing and
+planning roles are dispatched read-only, so a review cannot quietly edit code.
+
+## Personas
+
+Each role is specialised for the project's domain, set at install with
+`--domain`: `generic`, `saas`, `prop-trading`, `crypto-trading`, or
+`infrastructure`. A consultant on a crypto project opens as a *Quantitative
+Trading Consultant* who knows that a backtest is evidence rather than proof;
+the same role on an infrastructure project is a *Principal Cloud Architect* who
+plans before apply. `generic` is deliberately neutral and tells the agent not to
+assume a domain it was not given.
+
+```bash
+./agentic/pm_flow/pm_flow.sh role-prompt consultant
+```
+
+## Running a project
+
+```bash
+./agentic/pm_flow/pm_flow.sh status      # what each section will do next
+./agentic/pm_flow/pm_flow.sh tick        # perform exactly one transition
+./agentic/pm_flow/pm_flow.sh run         # repeat until nothing is actionable
+```
+
+Fill in `project_state/plan.md` first — it is what the product officer reads.
+With no sections yet, the first tick decomposes the product into them.
+
+The driver is level-triggered: it stores no record of what it was doing. Every
+tick observes the files on disk, derives the single next action, performs it,
+and exits. Resuming an interrupted run is therefore not a special case; it is
+the same command run again. Nothing needs to be cleaned up first.
+
+A section's state *is* its files:
+
+```text
+sections/<key>/
+├── brief.md                 the boundary and acceptance criteria
+├── state.md                 durable detail the manager keeps
+├── handoff.md               the bounded report upward
+└── cycles/001/
+    ├── assignment.md        scoped by the manager
+    ├── result.md            produced by the developer
+    ├── review.md            judged by the manager
+    ├── decision.txt         GO, GO_WITH_CHANGES, or NO_GO
+    └── heartbeat.txt        progress the developer reports as it works
+```
+
+## When a section keeps failing
+
+Repeated failure is treated as a signal about the approach, not about effort.
+After `escalation.failures_before_consultant` consecutive rejections the section
+goes to the consultant panel with the full history of what was attempted and
+what was observed. Each seat answers independently, and the product officer then
+decides:
+
+- `ADOPT` — take one path
+- `ADOPT_PARALLEL` — run several at once, each in its own attempt, with a stated
+  rule for what picks the winner
+- `SYNTHESIZE` — combine them
+- `ABANDON` — the capability cannot be delivered and the product can survive
+  without it
+
+Adopted paths go to the rescue engineer. A rescue that fails review consumes a
+round; when `escalation.max_rescue_attempts` rounds are spent the section is
+abandoned rather than escalating forever.
+
+You can convene a panel by hand:
+
+```bash
+./agentic/pm_flow/pm_flow.sh consult-panel <section> --file failure_notes.md
+```
+
+## Supervision
+
+Every dispatch is supervised, because an unattended run cannot ask for help:
+
+- a usage limit pauses and retries
+- a network fault retries with backoff
+- a real error is not retried at all, since retrying spends quota to get the
+  same answer
+- an agent that stops reporting progress for `supervision.heartbeat_stall_seconds`
+  is terminated as its whole process group and retried
+
+Tune these under `supervision` in `config.json`.
+
+## Sections by hand
+
+The product officer normally creates sections, but you can add one directly:
+
+```bash
+./agentic/pm_flow/pm_flow.sh init-section "api-contract" --file brief.md
+./agentic/pm_flow/pm_flow.sh list-sections
+```
+
+A brief needs the exact headings `Objective`, `Scope`, `Owned paths`,
+`Dependencies`, `Acceptance`, and `Rejection conditions`. Owned paths must be
+repo-relative and cannot overlap a section that is still live, because sections
+may run concurrently. Each dependency is an existing section key or a
+repo-relative path to its `handoff.md`.
 
 ## Layout
 
 ```text
 agentic/pm_flow/
-├── pm_flow.sh
-├── net_exec.sh
-├── codex_pm_review.sh
-├── projects.md
+├── config.json          role bindings, escalation, supervision
+├── pm_flow.sh           commands
+├── driver.zsh           the run loop
+├── agent_exec.sh        dispatches one role as a supervised process
+├── roles/               who each role is
+├── domains/             how each role is specialised per domain
+├── tasks/               what a role is being asked to do on a given call
 └── <project>/
     ├── task_contract.md
-    ├── project_state/
-    │   ├── plan.md
-    │   ├── sections.md
-    │   ├── start.md
-    │   └── resume.md
+    ├── project_state/   plan.md, sections.md, start.md, resume.md
     ├── sections/
-    │   └── <section>/
-    │       ├── brief.md
-    │       ├── pm_prompt.md
-    │       ├── state.md
-    │       ├── handoff.md
-    │       └── run_path.txt
     └── runs/
-        └── <timestamp>-<section>/
 ```
 
-`project_state/sections.md` is a generated portfolio view. Per-section files
-are authoritative.
-
-The installed `agentic/pm_flow/.project-key` is the durable project identity.
-It remains authoritative if the repository directory is renamed. Pass
-`--project <key>` to override selection explicitly.
-
-## Start or resume the root coordinator
-
-For a fresh root context, use:
-
-```text
-agentic/pm_flow/<project>/project_state/start.md
-```
-
-For a new root context continuing an existing project, use:
-
-```text
-agentic/pm_flow/<project>/project_state/resume.md
-```
-
-Both prompts instruct the root agent to read project-level state and bounded
-handoffs only.
-
-## Create a section
-
-The section brief is validated. It must use all six exact Markdown headings
-below. `Owned paths` needs at least one repo-relative bullet. `Dependencies`
-needs at least one bullet: use an exact existing section key, a repo-relative
-path to its `handoff.md`, or `None.` when there are no dependencies.
-The example below assumes a `data-model` section already exists.
-
-```bash
-./agentic/pm_flow/pm_flow.sh init-section "api-contract" <<'EOF'
-## Objective
-
-- Add the public API contract.
-
-## Scope
-
-- In: request and response schemas.
-- Out: persistence implementation.
-
-## Owned paths
-
-- src/api/**
-- tests/api/**
-
-## Dependencies
-
-- data-model
-
-## Acceptance
-
-- Contract tests pass.
-
-## Rejection conditions
-
-- The public schema requires an unapproved persistence change.
-EOF
-```
-
-Or use `--file section_brief.md`.
-
-A dependency section must already exist. A dependency may instead be written as
-the repo-relative path
-`agentic/pm_flow/<project>/sections/data-model/handoff.md`. Prose such as
-“read the data model handoff” is rejected because it is not a stable identity.
-Each declared handoff is copied into every pending review, so that review sees
-an immutable dependency snapshot rather than silently changing input.
-
-Section creation rejects absolute paths, paths containing `..`, and path
-prefixes or globs that overlap any `planned`, `active`, or `blocked` section.
-Completed and cancelled ownership can be reassigned deliberately.
-
-The command creates:
-
-- one isolated PM audit run and resumable session
-- section-local `brief.md`, `state.md`, and `handoff.md`
-- a ready-to-use `pm_prompt.md`
-- a `run_path.txt` pointer
-- a refreshed project section registry
-
-A new section starts at status `planned`. It becomes `active` when its PM
-publishes the first handoff, so the registry distinguishes sections that exist
-from sections that are under way.
-
-Launch a PM sub-agent with the generated prompt:
-
-```bash
-./agentic/pm_flow/pm_flow.sh section-prompt api-contract
-```
-
-The host agent should pass that output to its native sub-agent creation
-mechanism without inherited root history. The section PM then delegates each
-implementation assignment to a new developer sub-agent the same way. Claude Code
-subagents already start with a fresh context; in Codex collaboration this
-requires `fork_turns="none"`.
-
-## Track the project without loading section detail
-
-```bash
-./agentic/pm_flow/pm_flow.sh list-sections
-```
-
-This atomically refreshes and prints
-`agentic/pm_flow/<project>/project_state/sections.md`.
-
-To resolve a section's audit run:
-
-```bash
-./agentic/pm_flow/pm_flow.sh section-run api-contract
-./agentic/pm_flow/pm_flow.sh --section api-contract current-run
-```
-
-## Publish a bounded handoff
-
-```bash
-./agentic/pm_flow/pm_flow.sh \
-  section-handoff api-contract active "Contract implemented; integration pending" \
-  --file handoff.md
-```
-
-The handoff must have these Markdown headings and stay within 500 words and 8192 bytes:
-
-```markdown
-## Outcome
-## Decisions
-## Interfaces
-## Risks
-## Next action
-```
-
-Allowed statuses are `planned`, `active`, `blocked`, `done`, and `cancelled`.
-Updating a handoff also refreshes the root registry.
-
-## Prepare a section PM review
-
-Use `--section` with `current`; this avoids the legacy project-global current
-run pointer.
-
-```bash
-./agentic/pm_flow/pm_flow.sh \
-  --section api-contract \
-  prepare-step current "contract-tests" \
-  --file developer_report.md
-```
-
-The pending directory contains:
-
-- `prompt.md`
-- `system_prompt.txt`
-- `command.txt`
-- `response.json`
-- copies of the section's declared dependency handoffs
-- session preconditions used to reject stale responses
-
-Only one pending review can be active for a section. Preparing a second review
-fails until the active one is recorded or cancelled.
-
-Print and execute the generated command from the top shell:
-
-```bash
-./agentic/pm_flow/pm_flow.sh print-command "<pending-dir>"
-```
-
-`command.txt` first runs `claim-execution`, then invokes Claude through
-`net_exec.sh`. The atomic claim is allowed exactly once, so rerunning the same
-command cannot make a duplicate PM call. Do not call `claim-execution`
-separately during the normal generated-command flow.
-
-Then record it:
-
-```bash
-./agentic/pm_flow/pm_flow.sh record-step "<pending-dir>"
-```
-
-The first review starts a Claude session. Later reviews for the same section
-resume that session. Sessions from other sections are independent.
-
-If execution is aborted or its result cannot be recorded, release the active
-slot explicitly:
-
-```bash
-./agentic/pm_flow/pm_flow.sh \
-  cancel-pending "<pending-dir>" "PM call failed before a usable response"
-```
-
-Cancellation without an execution claim simply releases the slot. Once
-execution was claimed, cancellation conservatively clears the session ID and
-increments its revision because the remote PM may have advanced; the next
-review starts a fresh session from durable section state.
-
-## Completion review
-
-```bash
-./agentic/pm_flow/pm_flow.sh \
-  --section api-contract \
-  prepare-complete current \
-  --file completion_report.md
-
-./agentic/pm_flow/pm_flow.sh record-complete "<pending-dir>"
-```
-
-A section may publish a `done` handoff only when the latest recorded completion
-review decided exactly `DONE`, no PM activity has occurred since that review,
-and no pending review is active. The completion report is not exposed to the
-root automatically; the section PM must still publish the bounded handoff:
-
-```bash
-./agentic/pm_flow/pm_flow.sh \
-  section-handoff api-contract done "Contract validated and ready" \
-  --file handoff.md
-```
-
-Statuses `done` and `cancelled` are terminal for review preparation. To resume
-work deliberately, first publish an `active` or `planned` handoff. Any recorded
-PM activity after reopening invalidates the old `DONE` gate, so a later `done`
-transition needs a new current `DONE` completion review.
-
-## Codex PM fallback
-
-When Claude is unavailable:
-
-```bash
-./agentic/pm_flow/codex_pm_review.sh "<pending-dir>" [--model <model>]
-./agentic/pm_flow/pm_flow.sh record-step "<pending-dir>"
-```
-
-The fallback claims execution before invoking Codex and refuses duplicate use
-of the same pending review. Codex fallback reviews are stateless and write
-`session_resumable: false`. Recording one clears the resumable Claude session,
-so the next Claude review starts fresh from section state rather than resuming a
-conversation that missed the fallback exchange.
-
-## Session recovery
-
-Before rotating a section PM session, checkpoint the section's durable
-`state.md` and `handoff.md`. Then run:
-
-```bash
-./agentic/pm_flow/pm_flow.sh \
-  --section api-contract \
-  rotate-session current \
-  "section PM restarted from explicit checkpoint"
-```
-
-The next prepared review starts a fresh PM session. This is an explicit context
-boundary, not automatic compaction. Rotation refuses to run while a pending
-review is active; record it or recover with `cancel-pending` first.
-
-## Upgrade an already prepared review
-
-An upgrade may leave a pending review created by the older lifecycle, before
-active-slot and execution-claim metadata existed. Migrate that review once:
-
-```bash
-./agentic/pm_flow/pm_flow.sh adopt-pending "<legacy-pending-dir>"
-```
-
-`adopt-pending` first proves that the legacy review still matches the current
-PM session. It then makes it the section's active pending review and upgrades
-its generated command. If a valid response already exists, adoption records
-the execution claim without calling the PM again. Current-schema pending
-reviews cannot be adopted.
-
-## Legacy task runs
-
-`init`, the project-global `current_run.txt`, and explicit run paths remain
-available for existing installations. New project work should use
-`init-section` and `--section`.
+`agentic/pm_flow/.project-key` is the durable project identity and survives the
+repository being renamed. Pass `--project <key>` to select one explicitly.
+
+Copy `local_env.sh.example` to `local_env.sh` to set environment for every
+dispatched role.

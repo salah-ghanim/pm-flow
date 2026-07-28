@@ -1,162 +1,107 @@
 # pm-flow
 
-`pm-flow` is an installable scaffold for bounded multi-agent project work.
+`pm-flow` installs a headless agent team into a repository. You describe the
+product; it cuts the work into sections, drives each one, escalates what fails,
+and stops when the product is assembled or it can show you why it cannot be.
 
 ```text
-root coordinator (whole-project awareness, small context)
-└── one long-lived PM sub-agent per isolated section
-    └── one fresh developer sub-agent per engineering assignment
-```
-
-The root coordinator tracks the full project through a portfolio plan, a
-generated section registry, and handoffs capped at 500 words and 8192 bytes. It
-never needs to absorb section transcripts or developer conversations. Each
-section PM keeps the detail for one complete section, while developer agents
-always start with a fresh, non-inherited context.
-
-Claude is the default PM reviewer. When Claude is unavailable,
-`codex_pm_review.sh` provides a stateless fallback using the same
-`response.json` contract.
-
-## Core invariants
-
-- Each section owns an independent PM session and audit run.
-- Every PM and developer sub-agent launch requires no inherited parent conversation.
-- The root context receives section handoffs capped at 500 words and 8192 bytes.
-- Section transitions and PM restarts use explicit file checkpoints instead of automatic compaction.
-- Independent sections can proceed concurrently only when their owned paths do not overlap.
-- Each section permits one active pending review, and each pending review permits one execution claim.
-- Stale out-of-order PM responses within one section are rejected.
-- A section cannot become `done` until its current completion review records `DONE`.
-- Existing non-section task runs remain usable for compatibility.
-- Reinstalling refreshes scripts and rules while preserving project state, sections, and run history.
-
-The scaffold enforces section/session bookkeeping, ownership-overlap checks,
-stale-response checks, and handoff limits. It prepares prompts, state, commands, and transcripts, but does
-not itself call a native sub-agent API. The host agent runtime is responsible
-for launching sub-agents without inherited history using the generated project
-and section prompts.
-
-## Canonical installed layout
-
-```text
-agentic/pm_flow/
-├── pm_flow.sh
-├── net_exec.sh
-├── codex_pm_review.sh
-├── projects.md
-└── <project>/
-    ├── task_contract.md
-    ├── project_state/
-    │   ├── plan.md
-    │   ├── sections.md
-    │   ├── start.md
-    │   └── resume.md
-    ├── sections/
-    │   └── <section>/
-    │       ├── brief.md
-    │       ├── pm_prompt.md
-    │       ├── state.md
-    │       ├── handoff.md
-    │       └── run_path.txt
-    └── runs/
+product officer          cuts the product into sections, adjudicates failures
+└── section manager      scopes assignments, reviews results
+    ├── developer        one bounded assignment, then discarded
+    ├── consultants      an independent panel, when a section keeps failing
+    └── rescue engineer  the last attempt, on the path the officer chose
 ```
 
 ## Install
 
-Install into another checked-out repository:
+```bash
+./install.sh /path/to/repo --name "My Product" --domain saas
+```
+
+Domains — `generic`, `saas`, `prop-trading`, `crypto-trading`, `infrastructure` —
+specialise every role for the problem space. `generic` is the default and is
+deliberately neutral: it tells agents not to assume a domain they were not given.
+
+Reinstalling refreshes the scripts, prompts, and contract while preserving
+`config.json`, the project plan, section workspaces, and run history.
+
+## Run it
 
 ```bash
-./install.sh /path/to/project --name "Project Name"
+cd /path/to/repo
+$EDITOR agentic/pm_flow/<project>/project_state/plan.md   # what you want built
+./agentic/pm_flow/pm_flow.sh run
 ```
 
-If no target path is given, the installer uses the current directory.
-
-Re-running the installer refreshes generic flow files, `task_contract.md`, and
-the managed root-coordinator `start.md`/`resume.md` prompts. A pre-section
-version of either prompt is backed up once with a `.pre-sections.md` suffix.
-The project plan, section workspaces, generated registry, and run history are
-preserved. Refreshed files are staged and atomically replaced.
-
-If the target already has a `CLAUDE.md`, its original content is backed up once
-as `CLAUDE.pre-pm-flow.md`. Reinstalls replace only the marked pm-flow managed
-block and preserve the repository's other instructions. The installed
-`agentic/pm_flow/.project-key` preserves project identity if the repository
-directory is later renamed; use `--project-key` to select an identity
-explicitly. Use `--force` only for an intentional full replacement.
-
-The installer can also run from a raw GitHub base:
+`run` repeats `tick` until nothing is actionable. Each tick observes the files
+on disk, derives the single next action, performs it, and exits — so an
+interrupted run resumes by being run again, with nothing to clean up first.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/salah-ghanim/pm-flow/main/install.sh | \
-  zsh -s -- . --repo-raw-base https://raw.githubusercontent.com/salah-ghanim/pm-flow/main
+./agentic/pm_flow/pm_flow.sh status   # what each section will do next
+./agentic/pm_flow/pm_flow.sh tick     # one transition, then stop
 ```
 
-## Start the multi-agent flow
+## Roles are named, not vendors
 
-In an installed repository, launch the root coordinator from:
+`agentic/pm_flow/config.json` binds each role to a CLI, a model, and a
+difficulty. Nothing in the flow's prompts or files names a vendor:
 
-```text
-agentic/pm_flow/<project>/project_state/start.md
+```json
+"roles": {
+  "pm":         { "cli": "claude", "model": "claude-opus-5",   "difficulty": "medium" },
+  "developer":  { "cli": "claude", "model": "claude-sonnet-5", "difficulty": "medium" },
+  "consultant": [{ "cli": "claude", "model": "claude-opus-5", "difficulty": "xhigh" },
+                 { "cli": "codex",  "model": "gpt-5.6-sol",   "difficulty": "high" }]
+}
 ```
 
-That prompt tells the root agent to:
+`difficulty` is one vocabulary (`low` … `max`) mapped to whatever each CLI
+exposes. A role bound to a list is a panel whose seats run in parallel and blind
+to each other — worth doing across different model families, not within one.
 
-1. read only the portfolio plan, section registry, and task contract
-2. split the project into isolated sections
-3. create each section with `init-section`
-4. spawn a PM sub-agent with no inherited root history using only the generated section `pm_prompt.md`
-5. reconcile sections through bounded handoffs
+Only the building roles can write to the repository; reviewing and planning
+roles are dispatched read-only.
 
-Create a section:
+## What happens when work fails
 
-```bash
-./agentic/pm_flow/pm_flow.sh init-section "api-contract" --file section_brief.md
-```
+After a configurable number of consecutive rejections a section goes to the
+consultant panel with the full history of what was attempted and observed. Each
+seat answers independently. The product officer then adopts one path, runs
+several in parallel, synthesises them, or abandons the section with a statement
+of what the product loses. Adopted paths go to a rescue engineer; when the
+rescue rounds are spent the section is abandoned rather than escalating forever.
 
-`section_brief.md` must use these exact Markdown headings:
+Giving up is meant to be rare, and it is a product decision rather than the
+default way a hard section ends.
 
-```markdown
-## Objective
+## Supervision
 
-## Scope
+An unattended run cannot ask for help, so every dispatch is supervised: usage
+limits pause and retry, network faults retry with backoff, real errors are not
+retried at all, and an agent that stops reporting progress is terminated as a
+whole process group and retried.
 
-## Owned paths
-- src/api/**
+## Core invariants
 
-## Dependencies
-- data-model
+- Every role runs as a fresh process. Continuity lives in files, never in a
+  conversation.
+- Sections own disjoint paths, so they can run concurrently without colliding.
+- A section reports upward only through a handoff capped at 500 words and
+  8192 bytes.
+- Consecutive failures are counted from the section's own history, so a crash
+  cannot desynchronise them.
+- Consultant seats never see each other's proposals.
+- A dispatch is claimed before a model is called, so a crash cannot silently pay
+  for the same call twice.
 
-## Acceptance
-
-## Rejection conditions
-```
-
-Owned paths must be repo-relative and cannot overlap another nonterminal
-section. Each dependency bullet is either an exact existing section key, a
-repo-relative path to that section's `handoff.md`, or `None.` when empty.
-
-Inspect the generated section PM launch prompt:
-
-```bash
-./agentic/pm_flow/pm_flow.sh section-prompt api-contract
-```
-
-Refresh the bounded root view:
-
-```bash
-./agentic/pm_flow/pm_flow.sh list-sections
-```
-
-See the installed `agentic/pm_flow/README.md` for step reviews, completion
-reviews, handoff format, session recovery, and the Codex fallback.
-
-## Template contents
+## Repository contents
 
 - `install.sh` installs or upgrades the scaffold.
-- `template/agentic/pm_flow/pm_flow.sh` manages sections, PM sessions, prompts, responses, and transcripts.
-- `template/agentic/pm_flow/codex_pm_review.sh` runs stateless Codex PM fallback reviews.
-- `template/agentic/pm_flow/net_exec.sh` provides a stable repo-root command wrapper.
-- `template/agentic/pm_flow/project/project_state/` contains root coordinator prompt and portfolio templates.
-- `template/agentic/pm_flow/project/task_contract.md` defines the root→section PM→fresh developer contract.
-- `template/CLAUDE.md` installs repo-local orchestration rules.
+- `template/agentic/pm_flow/pm_flow.sh` — commands.
+- `template/agentic/pm_flow/driver.zsh` — the run loop.
+- `template/agentic/pm_flow/agent_exec.sh` — dispatches one role, supervised.
+- `template/agentic/pm_flow/roles/` — who each role is.
+- `template/agentic/pm_flow/domains/` — how roles specialise per domain.
+- `template/agentic/pm_flow/tasks/` — what a role is asked to do on a call.
+- `tests/pm_flow_test.sh` — the suite, run with `zsh tests/pm_flow_test.sh`.

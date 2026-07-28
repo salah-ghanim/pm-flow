@@ -1,43 +1,26 @@
-# Project coordinator state
+# Project state
 
-This directory is the stable, bounded continuation layer for the root
-coordinator of {{PROJECT_NAME}}.
+This directory is what the product officer reads. Keep it small: everything
+here is loaded into the officer's context on every decomposition or
+adjudication.
 
-The root coordinator reads:
+- `plan.md` — the mission, constraints, and integration order. **You write
+  this.** It is the input the product officer decomposes into sections.
+- `sections.md` — a generated registry of every section, its status, and its
+  one-line summary. Refresh it with `pm_flow.sh list-sections`; per-section
+  files are authoritative.
+- `start.md` / `resume.md` — how to start and how to resume a run.
+- `decomposition/` — the officer's section blocks from the run that created
+  them, kept for audit.
 
-- `plan.md` for the project mission, section graph, and integration order
-- `sections.md` for status and one-line summaries
-- the linked section `handoff.md` files when their details are needed
-- `start.md` or `resume.md` as launch scaffolding
+Per-section detail lives under `../sections/<key>/` and is deliberately not
+read from here:
 
-The root coordinator does not read:
+- `brief.md` — the boundary and acceptance criteria
+- `state.md` — durable detail the section manager keeps
+- `handoff.md` — the bounded report upward, capped at 500 words and 8192 bytes
+- `cycles/NNN/` — one attempt each: assignment, result, review, decision
+- `escalation/` — the consultant panel, the adjudication, and any rescue
 
-- `runs/*/transcript.md`
-- pending PM review directories
-- section-local `state.md` by default
-- developer conversation history
-
-Per-section state lives under `../sections/<section>/`:
-
-- `brief.md` defines the boundary and acceptance criteria
-- `pm_prompt.md` launches the section PM sub-agent
-- `state.md` contains detailed section-local decisions and progress
-- `handoff.md` is the 500-word and 8192-byte interface back to the root coordinator
-- `run_path.txt` points to the section's isolated PM run and session
-
-`sections.md` is a derived portfolio index. Run
-`./agentic/pm_flow/pm_flow.sh list-sections` to refresh it from authoritative
-per-section files.
-
-Section briefs use the exact headings `Objective`, `Scope`, `Owned paths`,
-`Dependencies`, `Acceptance`, and `Rejection conditions`. New sections cannot
-overlap the owned paths of nonterminal sections. Declared dependencies are
-exact section keys or repo-relative section `handoff.md` paths and are
-snapshotted for each pending PM review.
-
-`agentic/pm_flow/.project-key` identifies this project workspace even if the
-repository directory is renamed.
-
-The legacy `current_run.txt` remains for old non-section runs. New work should
-select a section explicitly with `--section <name>` so independent sections do
-not contend for a single project-global pointer.
+The section's cycle files *are* its state. Nothing records what the driver was
+doing, so an interrupted run resumes by being run again.

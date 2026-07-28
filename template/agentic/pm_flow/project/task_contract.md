@@ -3,39 +3,60 @@
 Primary mission:
 
 - {{PRIMARY_MISSION}}
-- keep going until the project is assembled from validated section outcomes or explicitly stopped with evidence
+- keep going until the product is assembled from validated section outcomes, or
+  stop with evidence that it cannot be
 
-## Agent hierarchy and context boundaries
+## Roles and context boundaries
 
-Root project coordinator:
+Every role runs as its own process with no inherited conversation. Continuity
+lives in files, never in a chat history, and no role reads another role's raw
+output except through the artifacts named below.
 
-- owns the project objective, section boundaries, dependency graph, integration order, and final reconciliation
-- reads the project plan, generated section registry, and bounded section handoffs
-- does not absorb raw section transcripts, pending reviews, or developer conversations
-- does not directly manage implementation assignments when a section PM owns them
+Product officer:
 
-Section PM sub-agent:
+- owns the product objective, the section graph, the dependency order, and
+  integration
+- reads the project plan, the generated section registry, and bounded section
+  handoffs
+- decides between consultant proposals when a section has failed repeatedly
+- does not implement, and does not manage developers directly
+
+Section manager:
 
 - owns one complete, well-isolated section
-- starts without inherited root conversation history; in Codex collaboration use `fork_turns="none"`
-- is seeded only with its generated `pm_prompt.md`
-- may remain long-lived only for that section
-- keeps detailed plans, evidence, and decisions in that section's `state.md`
+- scopes each assignment: objective, owned paths, what to reuse, the acceptance
+  check, and the rejection conditions
+- reviews the returned evidence rather than the developer's summary
+- keeps durable detail in that section's `state.md`
+- reports upward only through a handoff of at most 500 words and 8192 bytes
 - reads another section only through an explicitly required bounded handoff
-- publishes a handoff of at most 500 words and 8192 bytes after material outcomes or blockers
 
-Developer sub-agent:
+Developer:
 
-- is fresh for every bounded engineering assignment
-- starts without inherited section-PM conversation history; in Codex collaboration use `fork_turns="none"`
-- receives only the objective, owned paths, constraints, acceptance checks, and minimum relevant files
-- is never resumed or reused for another assignment
-- returns changes and validation evidence to its section PM, not to the root coordinator
+- is fresh for every assignment and is never reused
+- receives only the objective, owned paths, constraints, acceptance checks, and
+  the minimum relevant files
+- reuses what already exists, and restructures rather than duplicating
+- returns changes plus real validation output, not a description of it
+- reports progress to its heartbeat file as it works
+
+Consultant panel:
+
+- convened when a section fails repeatedly, never as a routine review
+- each seat answers the same brief independently and cannot see the others
+- diagnoses the real obstacle, considers established practice before inventing,
+  and proposes alternatives that could deliver the section's value differently
+
+Rescue engineer:
+
+- the project's last engineering attempt at a capability
+- receives the original assignment, the failed work, why it failed, and the
+  chosen path
+- delivers that path fully, and stops only for a structural reason it can state
 
 ## Section definition
 
-Before launching a section PM, the section brief must contain these exact
-Markdown headings:
+A section brief must contain these exact Markdown headings:
 
 ```markdown
 ## Objective
@@ -46,84 +67,56 @@ Markdown headings:
 ## Rejection conditions
 ```
 
-`Owned paths` must contain repo-relative bullets and cannot contain `..`.
-Section creation rejects path prefixes or globs that overlap any nonterminal
-section.
+`Owned paths` must be repo-relative and cannot contain `..`. Sections may run
+concurrently, so two sections must never be able to write the same file;
+creation rejects any overlap with a section that is not terminal.
 
-Each `Dependencies` bullet must be an exact existing section key or the
-repo-relative path to that section's `handoff.md`. Use `- None.` when there are
-no dependencies. Every pending review receives a snapshot copy of each declared
-dependency handoff; it must not substitute another section's live state or
-transcript.
-
-Sections may run independently only when their write ownership does not overlap.
-Shared interfaces must be reconciled by the root coordinator before conflicting
-work proceeds.
+Each `Dependencies` bullet is an exact existing section key or the repo-relative
+path to its `handoff.md`. Use `- None.` when there are none.
 
 ## What counts as progress
 
-- a concrete change or decision that directly advances the active section objective
+- a concrete change or decision that advances the section objective
 - validation evidence that proves a candidate should be kept or rejected
 - a negative result that kills a weak path quickly and with evidence
-- a bounded handoff that enables a dependent section or root-level integration
-- a process fix only when it is strictly required to unblock the same task cycle
+- a bounded handoff that unblocks a dependent section or integration
 
-What does not count as progress by itself:
+What does not count:
 
-- documentation only
-- generic cleanup unrelated to the section objective
-- workflow polish not used in the same cycle
-- observations without a decision or validation outcome
-- context accumulation or transcript summarization with no handoff decision
+- documentation alone
+- cleanup unrelated to the section objective
+- observations without a decision or a validation outcome
 - side quests outside the section brief
 
-## Acceptance rule for a candidate
+## Decisions
 
-1. identify the exact source of the idea or requirement
-2. state the one-sentence hypothesis or expected gain
-3. delegate the smallest implementation needed to test it to a fresh developer sub-agent
-4. validate against the current baseline or explicit success criteria
-5. keep it only when observed results support the hypothesis
+Each role answers with one token on its decision line, optionally followed by a
+short justification:
 
-## Anti-drift and isolation rules
+- section scoping: `ASSIGN` or `COMPLETE`
+- developer: `DELIVERED`, `PARTIAL`, or `BLOCKED`
+- review: `GO`, `GO_WITH_CHANGES`, or `NO_GO`
+- consultant: `ALTERNATIVE`, `RETRY_INFORMED`, or `ABANDON`
+- adjudication: `ADOPT`, `ADOPT_PARALLEL`, `SYNTHESIZE`, or `ABANDON`
+- rescue: `DELIVERED` or `BLOCKED`
 
-- do not expand a section without escalating the boundary change through its handoff
-- do not silently replace a section objective with a different one
-- do not let a section PM coordinate unrelated sections
-- do not reuse a developer conversation, even for a closely related next assignment
-- do not feed section transcripts or developer conversations into the root context
-- do not use automatic context compaction as the project continuation mechanism
-- checkpoint explicitly in `state.md` and `handoff.md`, then launch a fresh agent when a boundary changes
-- do not continue a failed path after a clean negative result without one explicit, evidence-based exception
-- do not assume network or DNS problems before considering sandbox or wrapper issues
-- prefer stable approved wrappers over ad hoc command shapes
+A review must not soften a rejection to keep things moving. Repeated failure is
+handled by escalation, not by lowering the bar.
 
-## Review and handoff rules
+## Failure and escalation
 
-Every proposed engineering step must state:
+- consecutive rejections are counted from the section's own cycle history
+- reaching the configured threshold sends the section to the consultant panel
+  with everything that was attempted and observed
+- the product officer may adopt one path, several in parallel, a synthesis, or
+  abandon the section
+- a rescue that fails review consumes a round; when the rounds are spent the
+  section is abandoned rather than escalating forever
+- abandoning is a product decision and must state what the product loses
 
-- alignment with the section objective
-- the direct expected outcome
-- owned paths and interface impact
-- validation to run
-- rejection criteria
+## Handoffs
 
-Every section PM review must include:
-
-- whether drift is happening
-- the main risk
-- whether the next step is `GO`, `GO_WITH_CHANGES`, or `NO_GO`
-- the next bounded assignment for a fresh developer sub-agent
-
-Every completion review must include:
-
-- expected versus observed outcome
-- whether drift happened
-- interface changes exposed to other sections
-- whether the result is `DONE`, `FOLLOW_UP`, or `REWORK`
-
-Every root-facing section handoff must be at most 500 words and 8192 bytes and
-contain exactly these information categories:
+Every section handoff is at most 500 words and 8192 bytes and contains exactly:
 
 - Outcome
 - Decisions
@@ -131,32 +124,23 @@ contain exactly these information categories:
 - Risks
 - Next action
 
-## Pending review lifecycle
+A `done` handoff requires a recorded completion decision for that section.
+`done` and `cancelled` are terminal; publish an `active` or `planned` handoff to
+reopen a section deliberately.
 
-- only one pending review may be active for a section
-- preparing another review fails until the active review is recorded or cancelled
-- the generated Claude command and Codex fallback atomically claim execution before calling the PM
-- an execution claim is one-time; duplicate PM execution for that pending review is refused
-- `cancel-pending` releases abandoned work; after execution was claimed it also clears and advances the PM session because remote state may have changed
-- `rotate-session` refuses to rotate while pending work is active
-- `adopt-pending` upgrades one still-current legacy prepared review without repeating an already completed PM call
+## Anti-drift rules
 
-## Completion and reopening
-
-- a `done` handoff requires the latest recorded completion decision to be exactly `DONE`
-- no PM activity may have occurred after that `DONE` review, and no pending review may be active
-- `DONE` still requires a bounded `done` handoff before the root treats the section as complete
-- `done` and `cancelled` are terminal for PM review preparation
-- publish an `active` or `planned` handoff before deliberately reopening a terminal section
-- after new PM activity, a later `done` transition requires a new current `DONE` completion review
-
-## Permissions and execution
-
-- prefer repo-local wrappers before ad hoc commands
-- stabilize repeated permission-sensitive command families with a wrapper
-- when sandboxed execution fails on networked work, retry through the approved outside-sandbox wrapper before diagnosing infrastructure
-- Claude PM commands run from the top shell through `./agentic/pm_flow/net_exec.sh`
-- the prepared `command.txt` remains the source of truth for Claude invocation shape
+- do not expand a section without escalating the boundary change through its
+  handoff
+- do not silently replace a section objective with a different one
+- do not let one section manager coordinate another section
+- do not reuse a developer conversation, even for a closely related assignment
+- do not feed raw section detail into the product officer's context
+- do not rely on automatic context compaction; checkpoint to `state.md` and
+  `handoff.md` and let the next process start fresh
+- do not continue a failed path after a clean negative result without one
+  explicit, evidence-based exception
+- prefer stable repo-local wrappers over ad hoc command shapes
 
 Current baseline or reference:
 
