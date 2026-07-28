@@ -317,7 +317,7 @@ cmd_consult_panel() {
         --seat "$seat" \
         --prompt-file "$consultant_persona" \
         --output "$panel_dir/proposal_${seat}.json" \
-        --heartbeat "$panel_dir/heartbeat.txt" \
+        --heartbeat "$panel_dir/heartbeat_seat_${seat}.txt" \
         --label "consultant seat $seat" \
         > "$panel_dir/seat_${seat}.log" 2>&1
     ) &
