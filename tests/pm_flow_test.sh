@@ -260,12 +260,14 @@ assert_not_contains "$(/bin/cat "$beta_pending/command.txt")" "alpha-session-1" 
 
 "$PM" claim-execution "$alpha_second_pending" > "$TEST_ROOT/claim-alpha-second.out"
 write_step_response "$alpha_second_pending/response.json" "alpha-session-1"
-mkdir "$alpha_run/.record.lock"
-printf '%s\n' "$$" > "$alpha_run/.record.lock/owner"
-expect_failure "same-section record lock" "$PM" record-step "$alpha_second_pending"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "another PM response" "record lock error"
-rm "$alpha_run/.record.lock/owner"
-rmdir "$alpha_run/.record.lock"
+: >> "$alpha_run/.record.lock"
+zsh -fc "zmodload zsh/system; zsystem flock -f held '$alpha_run/.record.lock'; sleep 6" &
+lock_holder_pid=$!
+sleep 1
+PM_FLOW_LOCK_WAIT=2 expect_failure "same-section record lock" "$PM" record-step "$alpha_second_pending"
+assert_file_contains "$TEST_ROOT/expected-failure.log" "waiting for .record.lock" "record lock error"
+kill "$lock_holder_pid" 2>/dev/null || true
+wait "$lock_holder_pid" 2>/dev/null || true
 "$PM" record-step "$alpha_second_pending" > "$TEST_ROOT/record-alpha-second.out"
 
 alpha_parallel_one="$("$PM" --section alpha prepare-step current parallel-one --file "$TEST_ROOT/developer-report.md")"

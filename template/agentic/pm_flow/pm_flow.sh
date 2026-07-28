@@ -489,20 +489,21 @@ PY
 refresh_sections_index() {
   ensure_state_dir
   mkdir -p "$SECTIONS_DIR"
-  python3 - "$PROJECT_ROOT" "$PROJECT_DIR" "$SECTIONS_DIR" "$SECTIONS_INDEX_FILE" <<'PY'
+  python3 - "$PROJECT_ROOT" "$PROJECT_DIR" "$SECTIONS_DIR" "$SECTIONS_INDEX_FILE" "$SECTIONS_DIR/.index.lock" <<'PY'
 from pathlib import Path
 import fcntl
-import hashlib
 import os
 import sys
-import tempfile
 
 project_root = Path(sys.argv[1]).resolve()
 project_dir = Path(sys.argv[2]).resolve()
 sections_dir = Path(sys.argv[3]).resolve()
 index_path = Path(sys.argv[4]).resolve()
-lock_name = hashlib.sha256(str(project_dir).encode()).hexdigest()
-lock_path = Path(tempfile.gettempdir()) / f"pm-flow-sections-{lock_name}.lock"
+# The mutex lives beside the data it guards. Under tempfile.gettempdir() two
+# workers with different TMPDIR values lock different files and exclude nothing.
+lock_path = Path(sys.argv[5])
+lock_path.parent.mkdir(parents=True, exist_ok=True)
+lock_path.touch(exist_ok=True)
 
 def first_line(path: Path, default: str) -> str:
     if not path.is_file():
@@ -561,20 +562,19 @@ commit_section_handoff_files() {
   local section_status="$3"
   local summary="$4"
   local updated_at="$5"
-  python3 - "$PROJECT_DIR" "$section_dir" "$handoff_tmp" "$section_status" "$summary" "$updated_at" <<'PY'
+  python3 - "$PROJECT_DIR" "$section_dir" "$handoff_tmp" "$section_status" "$summary" "$updated_at" "$SECTIONS_DIR/.index.lock" <<'PY'
 from pathlib import Path
 import fcntl
-import hashlib
 import os
 import sys
-import tempfile
 
 project_dir = Path(sys.argv[1]).resolve()
 section_dir = Path(sys.argv[2]).resolve()
 handoff_tmp = Path(sys.argv[3]).resolve()
-status, summary, updated_at = sys.argv[4:]
-lock_name = hashlib.sha256(str(project_dir).encode()).hexdigest()
-lock_path = Path(tempfile.gettempdir()) / f"pm-flow-sections-{lock_name}.lock"
+status, summary, updated_at = sys.argv[4:7]
+lock_path = Path(sys.argv[7])
+lock_path.parent.mkdir(parents=True, exist_ok=True)
+lock_path.touch(exist_ok=True)
 
 def atomic_text(path: Path, value: str) -> None:
     temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -900,64 +900,49 @@ assert_current_pending_schema() {
     fail "legacy pending review must be migrated first: run adopt-pending '$PENDING_DIR'"
 }
 
-release_record_lock() {
-  if [[ -n "${RUN_RECORD_LOCK:-}" && -d "$RUN_RECORD_LOCK" ]]; then
-    rm -f "$RUN_RECORD_LOCK/owner"
-    rmdir "$RUN_RECORD_LOCK" 2>/dev/null || true
+# Locking uses fcntl through zsh/system. The lock is held by an open descriptor
+# and the kernel releases it when the process dies, so there is no staleness
+# heuristic to get wrong. The previous PID-file scheme could be acquired by two
+# processes at once: both could observe the same dead owner, both remove it, and
+# the loser would then delete the winner's live owner file.
+LOCK_WAIT_SECONDS="${PM_FLOW_LOCK_WAIT:-60}"
+
+acquire_lock() {
+  local lock_file="$1"
+  local fd_var="$2"
+  local wait_seconds="${3:-$LOCK_WAIT_SECONDS}"
+  zmodload zsh/system 2>/dev/null || fail "the zsh/system module is required for safe locking"
+  mkdir -p "$(dirname "$lock_file")"
+  [[ -e "$lock_file" ]] || : >> "$lock_file"
+  if ! zsystem flock -t "$wait_seconds" -f "$fd_var" "$lock_file"; then
+    fail "timed out after ${wait_seconds}s waiting for $(basename "$lock_file")"
   fi
-  RUN_RECORD_LOCK=""
+}
+
+release_lock() {
+  local fd_var="$1"
+  local fd="${(P)fd_var:-}"
+  [[ -n "$fd" ]] || return 0
+  zsystem flock -u "$fd" 2>/dev/null || true
+  unset "$fd_var"
+}
+
+release_record_lock() {
+  release_lock RUN_RECORD_LOCK
 }
 
 acquire_record_lock() {
-  local lock_dir="$RUN_DIR/.record.lock"
-  if ! mkdir "$lock_dir" 2>/dev/null; then
-    local owner="unknown"
-    if [[ -f "$lock_dir/owner" ]]; then
-      owner="$(/usr/bin/head -n 1 "$lock_dir/owner" | tr -d '\r')"
-    fi
-    if [[ "$owner" == <-> ]] && ! kill -0 "$owner" 2>/dev/null; then
-      rm -f "$lock_dir/owner"
-      if rmdir "$lock_dir" 2>/dev/null && mkdir "$lock_dir" 2>/dev/null; then
-        owner="recovered-stale-lock"
-      else
-        fail "could not recover stale PM record lock for this section"
-      fi
-    else
-      fail "another PM response or session rotation is being recorded for this section (owner pid: $owner)"
-    fi
-  fi
-  RUN_RECORD_LOCK="$lock_dir"
-  printf '%s\n' "$$" > "$RUN_RECORD_LOCK/owner"
+  acquire_lock "$RUN_DIR/.record.lock" RUN_RECORD_LOCK
   trap release_record_lock EXIT HUP INT TERM
 }
 
 release_section_create_lock() {
-  if [[ -n "${SECTION_CREATE_LOCK:-}" && -d "$SECTION_CREATE_LOCK" ]]; then
-    rm -f "$SECTION_CREATE_LOCK/owner"
-    rmdir "$SECTION_CREATE_LOCK" 2>/dev/null || true
-  fi
-  SECTION_CREATE_LOCK=""
+  release_lock SECTION_CREATE_LOCK
 }
 
 acquire_section_create_lock() {
   mkdir -p "$SECTIONS_DIR"
-  local lock_dir="$SECTIONS_DIR/.create.lock"
-  if ! mkdir "$lock_dir" 2>/dev/null; then
-    local owner="unknown"
-    if [[ -f "$lock_dir/owner" ]]; then
-      owner="$(/usr/bin/head -n 1 "$lock_dir/owner" | tr -d '\r')"
-    fi
-    if [[ "$owner" == <-> ]] && ! kill -0 "$owner" 2>/dev/null; then
-      rm -f "$lock_dir/owner"
-      if ! rmdir "$lock_dir" 2>/dev/null || ! mkdir "$lock_dir" 2>/dev/null; then
-        fail "could not recover stale section-creation lock"
-      fi
-    else
-      fail "another section is being created (owner pid: $owner)"
-    fi
-  fi
-  SECTION_CREATE_LOCK="$lock_dir"
-  printf '%s\n' "$$" > "$SECTION_CREATE_LOCK/owner"
+  acquire_lock "$SECTIONS_DIR/.create.lock" SECTION_CREATE_LOCK
   trap 'release_section_create_lock; release_record_lock' EXIT HUP INT TERM
 }
 
