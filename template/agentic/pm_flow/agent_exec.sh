@@ -122,6 +122,7 @@ print(positive_int(supervision, "max_attempts", 4))
 print(positive_int(supervision, "retry_backoff_seconds", 30))
 print(positive_int(supervision, "usage_limit_pause_seconds", 1800))
 print(config.get("domain", "generic"))
+print(positive_int(supervision, "heartbeat_stall_seconds", 900))
 PY
 )" || fail "could not resolve role '$ROLE' from $CONFIG_FILE"
 
@@ -133,6 +134,67 @@ MAX_ATTEMPTS="$(printf '%s\n' "$role_binding" | sed -n '5p')"
 RETRY_BACKOFF="$(printf '%s\n' "$role_binding" | sed -n '6p')"
 USAGE_PAUSE="$(printf '%s\n' "$role_binding" | sed -n '7p')"
 AGENT_DOMAIN="$(printf '%s\n' "$role_binding" | sed -n '8p')"
+STALL_SECONDS="$(printf '%s\n' "$role_binding" | sed -n '9p')"
+
+file_mtime() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0\n'
+}
+
+# Run one attempt in the background and watch it for silence. A role that was
+# asked to report progress and then stopped reporting is treated as hung: it is
+# killed and retried rather than left to block the run forever. Roles with no
+# heartbeat are not policed this way, because a slow but healthy review writes
+# nothing until it is finished.
+STALLED="0"
+
+# Start the CLI as its own process-group leader so a stalled attempt can be
+# terminated whole. Agent CLIs spawn helper processes, and killing only the
+# direct child leaves those orphaned and still consuming quota.
+PGROUP_SHIM='import os, sys; os.setpgrp(); os.execvp(sys.argv[1], sys.argv[1:])'
+
+terminate_group() {
+  local group="$1"
+  kill -TERM -- "-$group" 2>/dev/null || kill -TERM "$group" 2>/dev/null || true
+  sleep 2
+  kill -KILL -- "-$group" 2>/dev/null || kill -KILL "$group" 2>/dev/null || true
+}
+
+run_attempt() {
+  STALLED="0"
+  local child last_activity heartbeat_seen output_seen now_epoch
+  if [[ "$AGENT_CLI" == "codex" ]]; then
+    ( cd "$PROJECT_ROOT" && exec python3 -c "$PGROUP_SHIM" "${AGENT_ARGV[@]}" ) > "$ATTEMPT_LOG" 2>&1 &
+  else
+    ( cd "$PROJECT_ROOT" && exec python3 -c "$PGROUP_SHIM" "${AGENT_ARGV[@]}" ) > "$RAW_OUTPUT" 2> "$ATTEMPT_LOG" &
+  fi
+  child=$!
+
+  if [[ -z "$HEARTBEAT_FILE" ]]; then
+    wait "$child"
+    return $?
+  fi
+
+  # Poll every second. A few cheap syscalls per second is nothing next to a
+  # model call that runs for minutes, and a coarser interval would make a fast
+  # agent wait just to be observed finishing.
+  while kill -0 "$child" 2>/dev/null; do
+    sleep 1
+    kill -0 "$child" 2>/dev/null || break
+    now_epoch="$(date +%s)"
+    heartbeat_seen="$(file_mtime "$HEARTBEAT_FILE")"
+    output_seen="$(file_mtime "$RAW_OUTPUT")"
+    last_activity=$(( heartbeat_seen > output_seen ? heartbeat_seen : output_seen ))
+    if (( now_epoch - last_activity >= STALL_SECONDS )); then
+      printf '%s stalled with no progress for %ss; terminating\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$STALL_SECONDS" >> "$HEARTBEAT_FILE"
+      terminate_group "$child"
+      STALLED="1"
+      break
+    fi
+  done
+  wait "$child" 2>/dev/null || return $?
+  return 0
+}
 
 # Difficulty is one vocabulary in config.json. Each CLI spells it differently,
 # and codex only accepts three levels, so the top two collapse to high.
@@ -286,18 +348,18 @@ while (( attempt <= MAX_ATTEMPTS )); do
   build_command
 
   attempt_status=0
-  if [[ "$AGENT_CLI" == "codex" ]]; then
-    ( cd "$PROJECT_ROOT" && "${AGENT_ARGV[@]}" ) > "$ATTEMPT_LOG" 2>&1 || attempt_status=$?
-  else
-    ( cd "$PROJECT_ROOT" && "${AGENT_ARGV[@]}" ) > "$RAW_OUTPUT" 2> "$ATTEMPT_LOG" || attempt_status=$?
-  fi
+  run_attempt || attempt_status=$?
 
-  if (( attempt_status == 0 )) && [[ -s "$RAW_OUTPUT" ]]; then
+  if (( attempt_status == 0 )) && [[ "$STALLED" == "0" ]] && [[ -s "$RAW_OUTPUT" ]]; then
     final_reason="none"
     break
   fi
 
-  reason="$(classify_failure "$ATTEMPT_LOG")"
+  if [[ "$STALLED" == "1" ]]; then
+    reason="stall"
+  else
+    reason="$(classify_failure "$ATTEMPT_LOG")"
+  fi
   final_reason="$reason"
   if [[ -n "$HEARTBEAT_FILE" ]]; then
     printf '%s attempt %d of %d failed (%s)\n' \
@@ -315,10 +377,10 @@ while (( attempt <= MAX_ATTEMPTS )); do
         "$AGENT_CLI" "$USAGE_PAUSE" >&2
       sleep "$USAGE_PAUSE"
       ;;
-    network)
+    network|stall)
       local_backoff=$(( RETRY_BACKOFF * attempt ))
-      printf 'pm-flow: %s hit a network fault; retrying in %ss\n' \
-        "$AGENT_CLI" "$local_backoff" >&2
+      printf 'pm-flow: %s attempt ended in a %s; retrying in %ss\n' \
+        "$AGENT_CLI" "$reason" "$local_backoff" >&2
       sleep "$local_backoff"
       ;;
     *)

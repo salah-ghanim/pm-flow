@@ -648,7 +648,8 @@ stub_cli() {
   chmod +x "$TEST_ROOT/agent-bin/claude"
 }
 run_supervised() {
-  PATH="$TEST_ROOT/agent-bin:$PATH" "$AGENT_EXEC" developer \
+  PATH="$TEST_ROOT/agent-bin:$PATH" \
+  PM_FLOW_TEST_HEARTBEAT="$TEST_ROOT/heartbeat.txt" "$AGENT_EXEC" developer \
     --prompt-file "$TEST_ROOT/role-prompt.md" \
     --output "$TEST_ROOT/role-response.json" \
     --heartbeat "$TEST_ROOT/heartbeat.txt" > "$TEST_ROOT/supervised.out" 2>&1 || true
@@ -685,6 +686,38 @@ run_supervised
   fail "a dispatched role must not advertise a resumable session"
 assert_file_contains "$TEST_ROOT/heartbeat.txt" "usage_limit" "heartbeat records why an attempt failed"
 assert_file_contains "$TEST_ROOT/heartbeat.txt" "finished" "heartbeat records completion"
+
+# A hung agent must be killed rather than blocking a headless run forever, and
+# killing it must take its subprocesses with it.
+python3 - "$ROLE_FLOW/config.json" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+config["supervision"] = {
+    "heartbeat_stall_seconds": 4, "max_attempts": 1,
+    "retry_backoff_seconds": 1, "usage_limit_pause_seconds": 1,
+}
+path.write_text(json.dumps(config, indent=2) + "\n")
+PY
+stub_cli 'sleep 900'
+stall_started="$(date +%s)"
+run_supervised
+stall_elapsed=$(( $(date +%s) - stall_started ))
+[[ "$stall_elapsed" -lt 30 ]] || fail "a hung agent was not terminated (${stall_elapsed}s)"
+[[ "$(response_field failure_reason)" == "stall" ]] || fail "a hung agent was not reported as a stall"
+assert_file_contains "$TEST_ROOT/heartbeat.txt" "stalled with no progress" "a stall is recorded in the heartbeat"
+sleep 1
+[[ "$(pgrep -f 'sleep 900' | wc -l | tr -d '[:space:]')" == "0" ]] || \
+  fail "terminating a stalled agent left orphaned subprocesses"
+
+# An agent that keeps reporting progress must survive past the stall threshold.
+stub_cli 'for i in 1 2 3 4 5 6; do sleep 1; print "$(date -u +%H:%M:%S) working" >> "$PM_FLOW_TEST_HEARTBEAT"; done
+printf "{\"is_error\":false,\"result\":\"finished the long assignment\",\"session_id\":\"\"}"'
+run_supervised
+[[ "$(response_field failure_reason)" == "none" ]] || \
+  fail "a heartbeating agent was killed despite reporting progress"
+assert_contains "$(response_field result)" "finished the long assignment" "long healthy run completes"
 
 # --- consultant panel ------------------------------------------------------
 
@@ -745,12 +778,12 @@ assert_contains "$panel_prompt" "cannot see the others" "panel seats are blind t
 mkdir "$TEST_ROOT/panel-bin"
 {
   printf '#!/bin/zsh -f\n'
-  printf 'sleep 1\n'
+  printf 'sleep 2\n'
   printf 'python3 -c "import json;print(json.dumps({\\"is_error\\":False,\\"result\\":\\"## Diagnosis\\\\nRegime overfit.\\\\n\\\\n## Decision\\\\nALTERNATIVE - walk-forward split\\",\\"session_id\\":\\"\\"}))"\n'
 } > "$TEST_ROOT/panel-bin/claude"
 {
   printf '#!/bin/zsh -f\n'
-  printf 'sleep 1\n'
+  printf 'sleep 2\n'
   printf 'out=""\n'
   printf 'while [[ $# -gt 0 ]]; do [[ "$1" == "-o" ]] && { out="$2"; shift 2; continue; }; shift; done\n'
   printf 'printf "## Diagnosis\\nFeature leakage.\\n\\n## Decision\\nALTERNATIVE - rebuild features causally\\n" > "$out"\n'
@@ -762,7 +795,8 @@ panel_started="$(date +%s)"
 panel_output="$(PATH="$TEST_ROOT/panel-bin:$PATH" "$ROLE_PM" \
   consult-panel signal-model --file "$TEST_ROOT/panel-failure.md")"
 panel_elapsed=$(( $(date +%s) - panel_started ))
-[[ "$panel_elapsed" -lt 4 ]] || fail "consultant seats did not run in parallel (${panel_elapsed}s)"
+# Two 2s seats: parallel lands near 3s with poll overhead, serial cannot beat 4s.
+[[ "$panel_elapsed" -lt 5 ]] || fail "consultant seats did not run in parallel (${panel_elapsed}s)"
 
 assert_contains "$panel_output" "seats=2" "panel dispatched both seats"
 assert_contains "$panel_output" "proposals=2" "both seats delivered a proposal"
