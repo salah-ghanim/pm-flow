@@ -7,6 +7,20 @@ DEFAULT_MISSION="achieve meaningful progress on the active project objective wit
 DEFAULT_BASELINE="TBD"
 TEMPLATE_CACHE_DIR=""
 
+# Named once, so prefetching and installing can never disagree about what the
+# template set contains.
+ROLE_NAMES=(cpo pm developer consultant 10x_developer)
+DOMAIN_NAMES=(generic saas prop-trading crypto-trading infrastructure migration)
+TASK_NAMES=(
+  consultant_panel_adjudication
+  section_scope
+  section_review
+  section_handoff
+  section_rescue
+  developer_assignment
+  project_decomposition
+)
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -83,6 +97,11 @@ cleanup_template_cache() {
   TEMPLATE_CACHE_DIR=""
 }
 
+# zsh runs an EXIT trap registered inside a function when that *function*
+# returns, not when the shell exits. Registering this at the top level is what
+# keeps the prefetched cache alive for the rest of the install.
+trap cleanup_template_cache EXIT HUP INT TERM
+
 prefetch_templates() {
   local template_paths=(
     "template/agentic/pm_flow/README.md"
@@ -91,24 +110,6 @@ prefetch_templates() {
     "template/agentic/pm_flow/agent_exec.sh"
     "template/agentic/pm_flow/driver.zsh"
     "template/agentic/pm_flow/config.json"
-    "template/agentic/pm_flow/roles/cpo.md"
-    "template/agentic/pm_flow/roles/pm.md"
-    "template/agentic/pm_flow/roles/developer.md"
-    "template/agentic/pm_flow/roles/consultant.md"
-    "template/agentic/pm_flow/roles/10x_developer.md"
-    "template/agentic/pm_flow/domains/generic.json"
-    "template/agentic/pm_flow/domains/saas.json"
-    "template/agentic/pm_flow/domains/prop-trading.json"
-    "template/agentic/pm_flow/domains/crypto-trading.json"
-    "template/agentic/pm_flow/domains/infrastructure.json"
-    "template/agentic/pm_flow/domains/migration.json"
-    "template/agentic/pm_flow/tasks/consultant_panel_adjudication.md"
-    "template/agentic/pm_flow/tasks/section_scope.md"
-    "template/agentic/pm_flow/tasks/section_review.md"
-    "template/agentic/pm_flow/tasks/section_handoff.md"
-    "template/agentic/pm_flow/tasks/section_rescue.md"
-    "template/agentic/pm_flow/tasks/developer_assignment.md"
-    "template/agentic/pm_flow/tasks/project_decomposition.md"
     "template/agentic/pm_flow/local_env.sh.example"
     "template/agentic/pm_flow/projects.md"
     "template/agentic/pm_flow/project/project_state/README.md"
@@ -120,8 +121,18 @@ prefetch_templates() {
     "template/agentic/pm_flow/project/task_contract.md"
     "template/CLAUDE.md"
   )
+  local name
+  for name in "${ROLE_NAMES[@]}"; do
+    template_paths+=("template/agentic/pm_flow/roles/$name.md")
+  done
+  for name in "${DOMAIN_NAMES[@]}"; do
+    template_paths+=("template/agentic/pm_flow/domains/$name.json")
+  done
+  for name in "${TASK_NAMES[@]}"; do
+    template_paths+=("template/agentic/pm_flow/tasks/$name.md")
+  done
+
   TEMPLATE_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-install.XXXXXX")"
-  trap cleanup_template_cache EXIT HUP INT TERM
   local rel_path source_path cached_path
   for rel_path in "${template_paths[@]}"; do
     cached_path="$TEMPLATE_CACHE_DIR/$rel_path"
@@ -353,10 +364,8 @@ main() {
       --domain)
         shift || fail "--domain requires a value"
         domain="${1:-}"
-        case "$domain" in
-          generic|saas|prop-trading|crypto-trading|infrastructure|migration) ;;
-          *) fail "unknown --domain '$domain'; choose generic, saas, prop-trading, crypto-trading, infrastructure, or migration" ;;
-        esac
+        (( ${DOMAIN_NAMES[(Ie)$domain]} )) || \
+          fail "unknown --domain '$domain'; choose ${(j:, :)DOMAIN_NAMES}"
         domain_explicit="1"
         ;;
       --repo-raw-base)
@@ -431,18 +440,15 @@ main() {
   copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
   copy_template "template/agentic/pm_flow/agent_exec.sh" "$flow_dir/agent_exec.sh"
   copy_template "template/agentic/pm_flow/driver.zsh" "$flow_dir/driver.zsh"
-  local role_name domain_name
-  for role_name in cpo pm developer consultant 10x_developer; do
-    copy_template "template/agentic/pm_flow/roles/$role_name.md" "$flow_dir/roles/$role_name.md"
+  local template_name
+  for template_name in "${ROLE_NAMES[@]}"; do
+    copy_template "template/agentic/pm_flow/roles/$template_name.md" "$flow_dir/roles/$template_name.md"
   done
-  for domain_name in generic saas prop-trading crypto-trading infrastructure migration; do
-    copy_template "template/agentic/pm_flow/domains/$domain_name.json" "$flow_dir/domains/$domain_name.json"
+  for template_name in "${DOMAIN_NAMES[@]}"; do
+    copy_template "template/agentic/pm_flow/domains/$template_name.json" "$flow_dir/domains/$template_name.json"
   done
-  local task_name
-  for task_name in consultant_panel_adjudication section_scope section_review \
-                   section_handoff section_rescue developer_assignment \
-                   project_decomposition; do
-    copy_template "template/agentic/pm_flow/tasks/$task_name.md" "$flow_dir/tasks/$task_name.md"
+  for template_name in "${TASK_NAMES[@]}"; do
+    copy_template "template/agentic/pm_flow/tasks/$template_name.md" "$flow_dir/tasks/$template_name.md"
   done
   # config.json carries the operator's cli/model/difficulty choices, so a
   # reinstall must never overwrite it.
