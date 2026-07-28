@@ -81,7 +81,6 @@ prefetch_templates() {
     "template/agentic/pm_flow/README.md"
     "template/agentic/pm_flow/pm_flow.sh"
     "template/agentic/pm_flow/net_exec.sh"
-    "template/agentic/pm_flow/codex_pm_review.sh"
     "template/agentic/pm_flow/agent_exec.sh"
     "template/agentic/pm_flow/driver.zsh"
     "template/agentic/pm_flow/config.json"
@@ -108,7 +107,6 @@ prefetch_templates() {
     "template/agentic/pm_flow/project/project_state/plan.md"
     "template/agentic/pm_flow/project/project_state/start.md"
     "template/agentic/pm_flow/project/project_state/resume.md"
-    "template/agentic/pm_flow/project/project_state/current_run.txt"
     "template/agentic/pm_flow/project/project_state/sections.md"
     "template/agentic/pm_flow/project/task_contract.md"
     "template/CLAUDE.md"
@@ -409,7 +407,6 @@ main() {
     "$project_key"
   copy_template "template/agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
   copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
-  copy_template "template/agentic/pm_flow/codex_pm_review.sh" "$flow_dir/codex_pm_review.sh"
   copy_template "template/agentic/pm_flow/agent_exec.sh" "$flow_dir/agent_exec.sh"
   copy_template "template/agentic/pm_flow/driver.zsh" "$flow_dir/driver.zsh"
   local role_name domain_name
@@ -490,11 +487,6 @@ main() {
     "$primary_mission" \
     "$baseline_name" \
     "$project_key"
-  if [[ ! -f "$project_dir/project_state/current_run.txt" || "$force" == "1" ]]; then
-    copy_template \
-      "template/agentic/pm_flow/project/project_state/current_run.txt" \
-      "$project_dir/project_state/current_run.txt"
-  fi
   if [[ ! -f "$project_dir/project_state/sections.md" || "$force" == "1" ]]; then
     copy_template \
       "template/agentic/pm_flow/project/project_state/sections.md" \
@@ -537,7 +529,6 @@ main() {
 
   chmod +x "$flow_dir/pm_flow.sh"
   chmod +x "$flow_dir/net_exec.sh"
-  chmod +x "$flow_dir/codex_pm_review.sh"
   chmod +x "$flow_dir/agent_exec.sh"
 
   touch "$project_dir/runs/.gitkeep"

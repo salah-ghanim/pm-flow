@@ -64,6 +64,20 @@ done
 [[ -f "$CONFIG_FILE" ]] || fail "missing agent config: $CONFIG_FILE"
 command -v python3 >/dev/null 2>&1 || fail "python3 not found in PATH"
 
+# Roles are dispatched directly rather than through net_exec.sh, so honour the
+# same repo-local environment hook here.
+export PROJECT_ROOT
+export PM_FLOW_ROOT="$SCRIPT_DIR"
+export PYTHONUTF8=1
+if [[ -d "$PROJECT_ROOT/.venv" && -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
+  export VIRTUAL_ENV="$PROJECT_ROOT/.venv"
+  export PATH="$PROJECT_ROOT/.venv/bin:$PATH"
+fi
+if [[ -f "$SCRIPT_DIR/local_env.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/local_env.sh"
+fi
+
 # Resolve the role binding once, up front, so a misconfigured role fails before
 # any model is called.
 role_binding="$(python3 - "$CONFIG_FILE" "$ROLE" "$SEAT" <<'PY'

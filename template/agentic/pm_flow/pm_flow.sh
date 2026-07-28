@@ -10,7 +10,6 @@ PROJECT_KEY=""
 PROJECT_DIR=""
 RUNS_DIR=""
 STATE_DIR=""
-CURRENT_RUN_FILE=""
 CONTRACT_FILE=""
 SECTIONS_DIR=""
 SECTIONS_INDEX_FILE=""
@@ -19,8 +18,6 @@ SECTION_NAME=""
 SECTION_DIR=""
 RUN_RECORD_LOCK=""
 SECTION_CREATE_LOCK=""
-SESSION_REVISION="0"
-typeset -A LEGACY_METADATA
 
 usage() {
   cat <<'EOF'
@@ -119,35 +116,6 @@ import sys
 project_root = Path(sys.argv[1]).resolve()
 target_path = Path(sys.argv[2]).resolve()
 print(os.path.relpath(target_path, project_root))
-PY
-}
-
-write_current_run_file() {
-  local run_path="$1"
-  ensure_state_dir
-  local current_tmp="${CURRENT_RUN_FILE}.$$.tmp"
-  printf '%s\n' "$(repo_relative_path "$run_path")" > "$current_tmp"
-  mv "$current_tmp" "$CURRENT_RUN_FILE"
-}
-
-resolve_current_run() {
-  ensure_state_dir
-  if [[ -n "${SECTION_OVERRIDE:-}" ]]; then
-    resolve_section_run "$SECTION_OVERRIDE"
-    return
-  fi
-  [[ -f "$CURRENT_RUN_FILE" ]] || fail "missing current run pointer: $CURRENT_RUN_FILE"
-  python3 - "$PROJECT_ROOT" "$CURRENT_RUN_FILE" <<'PY'
-from pathlib import Path
-import sys
-
-project_root = Path(sys.argv[1]).resolve()
-current_run_file = Path(sys.argv[2])
-lines = current_run_file.read_text().splitlines()
-rel_path = lines[0].strip() if lines else ""
-if not rel_path or rel_path == "none":
-    raise SystemExit(1)
-print((project_root / rel_path).resolve())
 PY
 }
 
@@ -447,7 +415,6 @@ initialize_project_paths() {
   DOMAINS_DIR="$SCRIPT_DIR/domains"
   RUNS_DIR="$PROJECT_DIR/runs"
   STATE_DIR="$PROJECT_DIR/project_state"
-  CURRENT_RUN_FILE="$STATE_DIR/current_run.txt"
   CONTRACT_FILE="$PROJECT_DIR/task_contract.md"
   SECTIONS_DIR="$PROJECT_DIR/sections"
   SECTIONS_INDEX_FILE="$STATE_DIR/sections.md"
@@ -678,9 +645,6 @@ persist_meta() {
     "$TASK_NAME" \
     "$TASK_SLUG" \
     "${SECTION_KEY:-}" \
-    "${SESSION_ID:-}" \
-    "${SESSION_STARTED:-0}" \
-    "${SESSION_REVISION:-0}" \
     "$CREATED_AT_UTC" <<'PY'
 from pathlib import Path
 import json
@@ -693,48 +657,12 @@ payload = {
     "task_name": sys.argv[2],
     "task_slug": sys.argv[3],
     "section_key": sys.argv[4],
-    "session_id": sys.argv[5],
-    "session_started": sys.argv[6],
-    "session_revision": sys.argv[7],
-    "created_at_utc": sys.argv[8],
+    "created_at_utc": sys.argv[5],
 }
 temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
 temp.write_text(json.dumps(payload, indent=2) + "\n")
 os.replace(temp, path)
 PY
-}
-
-load_legacy_metadata_file() {
-  local metadata_path="$1"
-  local allowed_csv="$2"
-  LEGACY_METADATA=()
-  local metadata_line field_name raw_value decoded_value
-  while IFS= read -r metadata_line || [[ -n "$metadata_line" ]]; do
-    [[ -n "$metadata_line" ]] || continue
-    [[ "$metadata_line" == *=* ]] || fail "malformed legacy metadata line in $metadata_path"
-    field_name="${metadata_line%%=*}"
-    [[ "$field_name" =~ '^[A-Z][A-Z0-9_]*$' ]] || \
-      fail "invalid legacy metadata field in $metadata_path"
-    case ",$allowed_csv," in
-      *",$field_name,"*) ;;
-      *) fail "unexpected legacy metadata field '$field_name' in $metadata_path" ;;
-    esac
-    (( ${+LEGACY_METADATA[$field_name]} == 0 )) || \
-      fail "duplicate legacy metadata field '$field_name' in $metadata_path"
-    raw_value="${metadata_line#*=}"
-    decoded_value="${(Q)raw_value}"
-    LEGACY_METADATA[$field_name]="$decoded_value"
-  done < "$metadata_path"
-}
-
-legacy_metadata_value() {
-  local field_name="$1"
-  local default_value="${2:-}"
-  if (( ${+LEGACY_METADATA[$field_name]} )); then
-    printf '%s\n' "${LEGACY_METADATA[$field_name]}"
-  else
-    printf '%s\n' "$default_value"
-  fi
 }
 
 validate_loaded_run_metadata() {
@@ -743,37 +671,12 @@ validate_loaded_run_metadata() {
     fail "run metadata has an invalid task_slug"
   [[ -z "${SECTION_KEY:-}" || "$SECTION_KEY" == "$(slugify "$SECTION_KEY")" ]] || \
     fail "run metadata has an invalid section_key"
-  [[ "${SESSION_STARTED:-}" == "0" || "${SESSION_STARTED:-}" == "1" ]] || \
-    fail "run metadata has an invalid session_started value"
-  [[ "${SESSION_REVISION:-}" == <-> ]] || \
-    fail "run metadata has an invalid session_revision"
-  [[ -z "${SESSION_ID:-}" || "$SESSION_ID" =~ '^[A-Za-z0-9._:-]+$' ]] || \
-    fail "run metadata has an invalid session_id"
   [[ -n "${CREATED_AT_UTC:-}" ]] || fail "run metadata is missing created_at_utc"
-}
-
-validate_loaded_pending_metadata() {
-  [[ "${PENDING_SCHEMA_VERSION:-}" == "1" || "${PENDING_SCHEMA_VERSION:-}" == "2" ]] || \
-    fail "pending metadata has an unsupported version"
-  [[ "${KIND:-}" == "step" || "${KIND:-}" == "complete" ]] || \
-    fail "pending metadata has an invalid kind"
-  [[ -n "${LABEL:-}" ]] || fail "pending metadata is missing its label"
-  [[ "${MODE_FLAG:-}" == "start" || "${MODE_FLAG:-}" == "resume" ]] || \
-    fail "pending metadata has an invalid mode"
-  [[ "${EXPECTED_SESSION_STARTED:-}" == "0" || "${EXPECTED_SESSION_STARTED:-}" == "1" ]] || \
-    fail "pending metadata has an invalid expected_session_started value"
-  [[ "${EXPECTED_SESSION_REVISION:-}" == <-> ]] || \
-    fail "pending metadata has an invalid expected_session_revision"
-  [[ -z "${EXPECTED_SESSION_ID:-}" || "$EXPECTED_SESSION_ID" =~ '^[A-Za-z0-9._:-]+$' ]] || \
-    fail "pending metadata has an invalid expected_session_id"
 }
 
 load_run() {
   local run_dir_input="${1:-}"
   [[ -n "$run_dir_input" ]] || fail "run directory is required"
-  if [[ "$run_dir_input" == "current" ]]; then
-    run_dir_input="$(resolve_current_run)" || fail "current run pointer is empty: $CURRENT_RUN_FILE"
-  fi
   local abs_run_dir
   abs_run_dir="$(cd -P "$run_dir_input" && pwd -P)"
   case "$abs_run_dir" in
@@ -785,9 +688,6 @@ load_run() {
   SECTION_DIR=""
   TASK_NAME=""
   TASK_SLUG=""
-  SESSION_ID=""
-  SESSION_STARTED="0"
-  SESSION_REVISION="0"
   CREATED_AT_UTC=""
   if [[ -f "$abs_run_dir/meta.json" ]]; then
     local metadata_version
@@ -796,21 +696,7 @@ load_run() {
     TASK_NAME="$(extract_json_field "$abs_run_dir/meta.json" "task_name")"
     TASK_SLUG="$(extract_json_field "$abs_run_dir/meta.json" "task_slug")"
     SECTION_KEY="$(extract_json_field "$abs_run_dir/meta.json" "section_key")"
-    SESSION_ID="$(extract_json_field "$abs_run_dir/meta.json" "session_id")"
-    SESSION_STARTED="$(extract_json_field "$abs_run_dir/meta.json" "session_started")"
-    SESSION_REVISION="$(extract_json_field "$abs_run_dir/meta.json" "session_revision")"
     CREATED_AT_UTC="$(extract_json_field "$abs_run_dir/meta.json" "created_at_utc")"
-  elif [[ -f "$abs_run_dir/meta.env" ]]; then
-    load_legacy_metadata_file \
-      "$abs_run_dir/meta.env" \
-      "RUN_DIR,TASK_NAME,TASK_SLUG,SECTION_KEY,SECTION_NAME,SESSION_ID,SESSION_STARTED,SESSION_REVISION,CREATED_AT_UTC"
-    TASK_NAME="$(legacy_metadata_value TASK_NAME)"
-    TASK_SLUG="$(legacy_metadata_value TASK_SLUG)"
-    SECTION_KEY="$(legacy_metadata_value SECTION_KEY)"
-    SESSION_ID="$(legacy_metadata_value SESSION_ID)"
-    SESSION_STARTED="$(legacy_metadata_value SESSION_STARTED 0)"
-    SESSION_REVISION="$(legacy_metadata_value SESSION_REVISION 0)"
-    CREATED_AT_UTC="$(legacy_metadata_value CREATED_AT_UTC)"
   else
     fail "missing run metadata in $abs_run_dir"
   fi
@@ -831,78 +717,6 @@ load_run() {
     [[ "${SECTION_KEY:-}" == "$expected_section" ]] || \
       fail "run belongs to section '${SECTION_KEY:-legacy}', not '$expected_section'"
   fi
-}
-
-load_pending() {
-  local pending_dir_input="${1:-}"
-  [[ -n "$pending_dir_input" ]] || fail "pending directory is required"
-  local abs_pending_dir
-  abs_pending_dir="$(cd -P "$pending_dir_input" && pwd -P)"
-  [[ "$(basename "$(dirname "$abs_pending_dir")")" == "pending" ]] || \
-    fail "pending directory is not inside a run's pending directory: $abs_pending_dir"
-  local inferred_run_dir
-  inferred_run_dir="$(cd -P "$abs_pending_dir/../.." && pwd -P)"
-  case "$inferred_run_dir" in
-    "$RUNS_DIR"/*) ;;
-    *) fail "pending review is outside the selected project's runs: $abs_pending_dir" ;;
-  esac
-  case "$abs_pending_dir" in
-    "$inferred_run_dir"/pending/*) ;;
-    *) fail "pending directory escapes its inferred run: $abs_pending_dir" ;;
-  esac
-  PENDING_SCHEMA_VERSION="1"
-  EXPECTED_SESSION_ID=""
-  EXPECTED_SESSION_STARTED="0"
-  EXPECTED_SESSION_REVISION="0"
-  KIND=""
-  LABEL=""
-  MODE_FLAG=""
-  local pending_section_key=""
-  if [[ -f "$abs_pending_dir/pending.json" ]]; then
-    PENDING_SCHEMA_VERSION="$(extract_json_field "$abs_pending_dir/pending.json" "version")"
-    KIND="$(extract_json_field "$abs_pending_dir/pending.json" "kind")"
-    LABEL="$(extract_json_field "$abs_pending_dir/pending.json" "label")"
-    MODE_FLAG="$(extract_json_field "$abs_pending_dir/pending.json" "mode")"
-    pending_section_key="$(extract_json_field "$abs_pending_dir/pending.json" "section_key")"
-    EXPECTED_SESSION_ID="$(extract_json_field "$abs_pending_dir/pending.json" "expected_session_id")"
-    EXPECTED_SESSION_STARTED="$(extract_json_field "$abs_pending_dir/pending.json" "expected_session_started")"
-    EXPECTED_SESSION_REVISION="$(extract_json_field "$abs_pending_dir/pending.json" "expected_session_revision")"
-  elif [[ -f "$abs_pending_dir/pending.env" ]]; then
-    load_legacy_metadata_file \
-      "$abs_pending_dir/pending.env" \
-      "PENDING_SCHEMA_VERSION,RUN_DIR,KIND,LABEL,MODE_FLAG,SECTION_KEY,EXPECTED_SESSION_ID,EXPECTED_SESSION_STARTED,EXPECTED_SESSION_REVISION"
-    PENDING_SCHEMA_VERSION="$(legacy_metadata_value PENDING_SCHEMA_VERSION 1)"
-    KIND="$(legacy_metadata_value KIND)"
-    LABEL="$(legacy_metadata_value LABEL)"
-    MODE_FLAG="$(legacy_metadata_value MODE_FLAG)"
-    pending_section_key="$(legacy_metadata_value SECTION_KEY)"
-    EXPECTED_SESSION_ID="$(legacy_metadata_value EXPECTED_SESSION_ID)"
-    EXPECTED_SESSION_STARTED="$(legacy_metadata_value EXPECTED_SESSION_STARTED 0)"
-    EXPECTED_SESSION_REVISION="$(legacy_metadata_value EXPECTED_SESSION_REVISION 0)"
-  else
-    fail "missing pending metadata in $abs_pending_dir"
-  fi
-  validate_loaded_pending_metadata
-  PENDING_DIR="$abs_pending_dir"
-  load_run "$inferred_run_dir"
-  [[ "$pending_section_key" == "${SECTION_KEY:-}" ]] || \
-    fail "pending review section does not match its run"
-}
-
-assert_pending_session_current() {
-  local expected_id="${EXPECTED_SESSION_ID:-}"
-  local expected_started="${EXPECTED_SESSION_STARTED:-0}"
-  local expected_revision="${EXPECTED_SESSION_REVISION:-0}"
-  if [[ "$expected_id" != "${SESSION_ID:-}" || \
-        "$expected_started" != "${SESSION_STARTED:-0}" || \
-        "$expected_revision" != "${SESSION_REVISION:-0}" ]]; then
-    fail "stale pending review: the PM session changed after this review was prepared; prepare it again"
-  fi
-}
-
-assert_current_pending_schema() {
-  [[ "${PENDING_SCHEMA_VERSION:-1}" == "2" ]] || \
-    fail "legacy pending review must be migrated first: run adopt-pending '$PENDING_DIR'"
 }
 
 # Locking uses fcntl through zsh/system. The lock is held by an open descriptor
@@ -951,112 +765,6 @@ acquire_section_create_lock() {
   trap 'release_section_create_lock; release_record_lock' EXIT HUP INT TERM
 }
 
-active_pending_dir() {
-  printf '%s\n' "$RUN_DIR/.active-pending"
-}
-
-assert_no_active_pending() {
-  local active_dir
-  active_dir="$(active_pending_dir)"
-  if [[ -d "$active_dir" ]]; then
-    if [[ ! -f "$active_dir/path.txt" ]]; then
-      if rmdir "$active_dir" 2>/dev/null; then
-        return 0
-      fi
-      fail "section has an incomplete active-pending claim that could not be recovered"
-    fi
-    local active_path="unknown"
-    active_path="$(/usr/bin/head -n 1 "$active_dir/path.txt" | tr -d '\r')"
-    fail "section already has an active pending review: $active_path; record it or use cancel-pending"
-  fi
-}
-
-claim_active_pending() {
-  local pending_dir="$1"
-  local active_dir
-  active_dir="$(active_pending_dir)"
-  if ! mkdir "$active_dir" 2>/dev/null; then
-    assert_no_active_pending
-    fail "could not claim the section's active pending slot"
-  fi
-  printf '%s\n' "$(repo_relative_path "$pending_dir")" > "$active_dir/path.txt"
-}
-
-assert_active_pending() {
-  local active_dir expected_path actual_path
-  active_dir="$(active_pending_dir)"
-  [[ -f "$active_dir/path.txt" ]] || fail "pending review is not the active review for this section"
-  expected_path="$(/usr/bin/head -n 1 "$active_dir/path.txt" | tr -d '\r')"
-  actual_path="$(repo_relative_path "$PENDING_DIR")"
-  [[ "$expected_path" == "$actual_path" ]] || \
-    fail "pending review is not active; active review is $expected_path"
-}
-
-release_active_pending() {
-  local active_dir
-  active_dir="$(active_pending_dir)"
-  if [[ -d "$active_dir" ]]; then
-    rm -f "$active_dir/path.txt"
-    rmdir "$active_dir" 2>/dev/null || true
-  fi
-}
-
-assert_execution_claimed() {
-  [[ -d "$PENDING_DIR/.execution-claimed" ]] || \
-    fail "pending review has not claimed execution; run its generated command or claim-execution first"
-}
-
-assert_section_open_for_work() {
-  [[ -n "${SECTION_DIR:-}" ]] || return 0
-  local section_lifecycle_status="active"
-  if [[ -f "$SECTION_DIR/status.txt" ]]; then
-    section_lifecycle_status="$(/usr/bin/head -n 1 "$SECTION_DIR/status.txt" | tr -d '\r')"
-  fi
-  case "$section_lifecycle_status" in
-    done|cancelled)
-      fail "section is $section_lifecycle_status; publish an active or planned handoff before preparing more PM work"
-      ;;
-  esac
-}
-
-# Cheap pre-flight so a rejected prepare fails before writing a pending
-# directory. activate_prepared_pending still re-checks under the record lock,
-# which is what actually makes the decision safe.
-assert_ready_to_prepare() {
-  assert_section_open_for_work
-  assert_no_active_pending
-}
-
-activate_prepared_pending() {
-  local pending_dir="$1"
-  local run_dir_before_lock="$RUN_DIR"
-  acquire_record_lock
-  load_run "$run_dir_before_lock"
-  assert_section_open_for_work
-  assert_pending_session_current
-  assert_no_active_pending
-  claim_active_pending "$pending_dir"
-  release_record_lock
-}
-
-append_exchange() {
-  local kind="$1"
-  local label="$2"
-  local engineer_body="$3"
-  local claude_response="$4"
-  local transcript_path="$RUN_DIR/transcript.md"
-  {
-    printf '## %s: %s\n\n' "$kind" "$label"
-    printf -- '- timestamp_utc: %s\n' "$(now_iso_utc)"
-    if [[ -n "${SECTION_KEY:-}" ]]; then
-      printf -- '- section: %s\n' "$SECTION_KEY"
-    fi
-    printf -- '- session_id: %s\n' "$SESSION_ID"
-    printf '\n### Codex Update\n\n%s\n\n' "$engineer_body"
-    printf '### Claude Response\n\n%s\n\n' "$claude_response"
-  } >> "$transcript_path"
-}
-
 assert_contains() {
   local haystack="$1"
   local needle="$2"
@@ -1068,28 +776,6 @@ assert_matches() {
   local pattern="$2"
   local label="$3"
   printf '%s\n' "$haystack" | python3 -c 'import re, sys; sys.exit(0 if re.search(sys.argv[1], sys.stdin.read(), re.MULTILINE) else 1)' "$pattern" || fail "content missing valid $label"
-}
-
-validate_step_response() {
-  local response="$1"
-  assert_contains "$response" "Assessment"
-  assert_matches "$response" '(?i)drift review' "drift review section"
-  assert_contains "$response" "Risks"
-  assert_contains "$response" "Improvements"
-  assert_contains "$response" "Decision"
-  assert_contains "$response" "Next action"
-  extract_markdown_decision "$response" "GO,GO_WITH_CHANGES,NO_GO" >/dev/null
-}
-
-validate_completion_response() {
-  local response="$1"
-  assert_contains "$response" "Outcome assessment"
-  assert_matches "$response" '(?i)drift review' "drift review section"
-  assert_contains "$response" "Expected vs observed"
-  assert_contains "$response" "Feedback"
-  assert_contains "$response" "Recommended next steps"
-  assert_contains "$response" "Decision"
-  extract_markdown_decision "$response" "DONE,FOLLOW_UP,REWORK" >/dev/null
 }
 
 extract_markdown_decision() {
@@ -1315,9 +1001,8 @@ write_completion_marker() {
   local marker_tmp="$RUN_DIR/.completion.env.$$.tmp"
   {
     printf 'decision=%s\n' "$decision"
-    printf 'session_revision=%s\n' "${SESSION_REVISION:-0}"
+    printf 'cycle_path=%s\n' "$(repo_relative_path "$pending_dir")"
     printf 'recorded_at_utc=%s\n' "$(now_iso_utc)"
-    printf 'pending_path=%s\n' "$(repo_relative_path "$pending_dir")"
   } > "$marker_tmp"
   mv "$marker_tmp" "$marker_path"
 }
@@ -1326,200 +1011,10 @@ assert_current_done_completion() {
   local marker_path="$RUN_DIR/completion.env"
   [[ -f "$marker_path" ]] || \
     fail "section cannot be marked done without a recorded PM completion review"
-  local completion_decision completion_revision
+  local completion_decision
   completion_decision="$(awk -F= '$1 == "decision" {print substr($0, index($0, "=") + 1); exit}' "$marker_path")"
-  completion_revision="$(awk -F= '$1 == "session_revision" {print substr($0, index($0, "=") + 1); exit}' "$marker_path")"
   [[ "$completion_decision" == "DONE" ]] || \
-    fail "section cannot be marked done; latest PM completion decision is ${completion_decision:-missing}"
-  [[ "$completion_revision" == "${SESSION_REVISION:-0}" ]] || \
-    fail "section cannot be marked done; PM activity occurred after the DONE completion review"
-}
-
-update_session_from_response() {
-  local response_path="$1"
-  local response_session_id response_resumable response_backend
-  response_session_id="$(extract_json_field "$response_path" "session_id")"
-  response_resumable="$(extract_json_field "$response_path" "session_resumable")"
-  response_backend="$(extract_json_field "$response_path" "pm_backend")"
-
-  if [[ "$response_resumable" == "False" || "$response_resumable" == "false" || \
-        "$response_backend" == "codex" || "$response_session_id" == codex-fallback-* ]]; then
-    SESSION_ID=""
-    SESSION_STARTED="0"
-    return
-  fi
-
-  if [[ -n "$response_session_id" ]]; then
-    SESSION_ID="$response_session_id"
-    SESSION_STARTED="1"
-  else
-    SESSION_ID=""
-    SESSION_STARTED="0"
-  fi
-}
-
-session_mode_flag() {
-  if [[ "${SESSION_STARTED:-0}" == "1" && -n "${SESSION_ID:-}" ]]; then
-    printf '%s\n' "resume"
-  else
-    printf '%s\n' "start"
-  fi
-}
-
-write_command_file() {
-  local command_path="$1"
-  local pending_dir="$2"
-  local mode_flag="$3"
-  local prompt_path="$pending_dir/prompt.md"
-  local system_prompt_path="$pending_dir/system_prompt.txt"
-  local response_path="$pending_dir/response.json"
-  local net_exec_path="./agentic/pm_flow/net_exec.sh"
-  local pm_flow_path="./agentic/pm_flow/pm_flow.sh"
-  # The prompt is passed by command substitution rather than inlined, so the
-  # PM receives the structured multi-line prompt exactly as written in
-  # prompt.md instead of a flattened single line.
-  {
-    printf '%q --project %q claim-execution %q && ' "$pm_flow_path" "$PROJECT_KEY" "$pending_dir"
-    printf '%q claude -p --output-format json ' "$net_exec_path"
-    printf -- '--add-dir %q ' "$PROJECT_ROOT"
-    if [[ "$mode_flag" == "resume" && -n "${SESSION_ID:-}" ]]; then
-      printf -- '--resume %q ' "$SESSION_ID"
-    fi
-    printf -- '--append-system-prompt-file %q -- ' "$system_prompt_path"
-    printf -- '"$(/bin/cat %q)" > %q\n' "$prompt_path" "$response_path"
-  } > "$command_path"
-}
-
-prepare_pending_dir() {
-  local kind_slug="$1"
-  local label="$2"
-  local pending_dir
-  pending_dir="$RUN_DIR/pending/$(now_compact_utc)-${kind_slug}-$(slugify "$label")-$(lower_uuid | cut -c1-8)"
-  mkdir -p "$pending_dir"
-  printf '%s\n' "$pending_dir"
-}
-
-record_pending_meta() {
-  local pending_dir="$1"
-  local kind="$2"
-  local label="$3"
-  local mode_flag="$4"
-  EXPECTED_SESSION_ID="${SESSION_ID:-}"
-  EXPECTED_SESSION_STARTED="${SESSION_STARTED:-0}"
-  EXPECTED_SESSION_REVISION="${SESSION_REVISION:-0}"
-  PENDING_SCHEMA_VERSION="2"
-  python3 - \
-    "$pending_dir/pending.json" \
-    "$kind" \
-    "$label" \
-    "$mode_flag" \
-    "${SECTION_KEY:-}" \
-    "$EXPECTED_SESSION_ID" \
-    "$EXPECTED_SESSION_STARTED" \
-    "$EXPECTED_SESSION_REVISION" <<'PY'
-from pathlib import Path
-import json
-import os
-import sys
-
-path = Path(sys.argv[1])
-payload = {
-    "version": 2,
-    "kind": sys.argv[2],
-    "label": sys.argv[3],
-    "mode": sys.argv[4],
-    "section_key": sys.argv[5],
-    "expected_session_id": sys.argv[6],
-    "expected_session_started": sys.argv[7],
-    "expected_session_revision": sys.argv[8],
-}
-temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-temp.write_text(json.dumps(payload, indent=2) + "\n")
-os.replace(temp, path)
-PY
-}
-
-write_context_manifest() {
-  local pending_dir="$1"
-  shift
-  python3 - "$pending_dir/context_files.json" "$PROJECT_ROOT" "$@" <<'PY'
-from pathlib import Path
-import json
-import os
-import sys
-
-manifest_path = Path(sys.argv[1])
-project_root = Path(sys.argv[2]).resolve()
-files = []
-for raw_path in sys.argv[3:]:
-    path = Path(raw_path).resolve()
-    try:
-        path.relative_to(project_root)
-    except ValueError:
-        raise SystemExit(f"context file escapes the project root: {path}")
-    if not path.is_file():
-        raise SystemExit(f"context file does not exist: {path}")
-    value = os.path.relpath(path, project_root)
-    if value not in files:
-        files.append(value)
-
-payload = {
-    "version": 1,
-    "files": files,
-}
-manifest_path.write_text(json.dumps(payload, indent=2) + "\n")
-PY
-}
-
-write_review_context_manifest() {
-  local pending_dir="$1"
-  local context_files=(
-    "$RUN_DIR/task_brief.md"
-    "$CONTRACT_FILE"
-    "$pending_dir/engineer_update.md"
-  )
-  if [[ -n "${SECTION_KEY:-}" ]]; then
-    context_files+=(
-      "$SECTION_DIR/brief.md"
-      "$SECTION_DIR/state.md"
-      "$SECTION_DIR/handoff.md"
-    )
-    local dependency_rel
-    if [[ -f "$pending_dir/dependency_snapshots.txt" ]]; then
-      while IFS= read -r dependency_rel; do
-        [[ -n "$dependency_rel" ]] || continue
-        context_files+=("$PROJECT_ROOT/$dependency_rel")
-      done < "$pending_dir/dependency_snapshots.txt"
-    fi
-  fi
-  write_context_manifest "$pending_dir" "${context_files[@]}"
-}
-
-dependency_prompt_lines() {
-  local pending_dir="$1"
-  [[ -f "$pending_dir/dependency_snapshots.txt" ]] || return 0
-  local dependency_rel
-  while IFS= read -r dependency_rel; do
-    [[ -n "$dependency_rel" ]] || continue
-    printf -- '- %s\n' "$PROJECT_ROOT/$dependency_rel"
-  done < "$pending_dir/dependency_snapshots.txt"
-}
-
-snapshot_dependency_handoffs() {
-  local pending_dir="$1"
-  local snapshot_dir="$pending_dir/dependencies"
-  local snapshots_file="$pending_dir/dependency_snapshots.txt"
-  mkdir -p "$snapshot_dir"
-  : > "$snapshots_file"
-  [[ -n "${SECTION_DIR:-}" && -f "$SECTION_DIR/dependency_handoffs.txt" ]] || return 0
-  local dependency_rel dependency_key snapshot_path
-  while IFS= read -r dependency_rel; do
-    [[ -n "$dependency_rel" ]] || continue
-    dependency_key="$(basename "$(dirname "$dependency_rel")")"
-    snapshot_path="$snapshot_dir/${dependency_key}-handoff.md"
-    /bin/cp "$PROJECT_ROOT/$dependency_rel" "$snapshot_path"
-    printf '%s\n' "$(repo_relative_path "$snapshot_path")" >> "$snapshots_file"
-  done < "$SECTION_DIR/dependency_handoffs.txt"
+    fail "section cannot be marked done; latest completion decision is ${completion_decision:-missing}"
 }
 
 cmd_validate() {
@@ -1549,9 +1044,6 @@ create_run() {
   RUN_DIR="$run_dir"
   TASK_NAME="$task_name"
   TASK_SLUG="$task_slug"
-  SESSION_ID=""
-  SESSION_STARTED="0"
-  SESSION_REVISION="0"
   CREATED_AT_UTC="$(now_iso_utc)"
 
   printf '%s\n' "$task_brief" > "$RUN_DIR/task_brief.md"
@@ -1560,21 +1052,14 @@ create_run() {
   local contract_body
   contract_body="$(read_contract)"
   {
-    if [[ -n "${SECTION_KEY:-}" ]]; then
-      printf '# Section PM Flow Transcript\n\n'
-      printf -- '- section_name: %s\n' "$SECTION_NAME"
-      printf -- '- section_key: %s\n' "$SECTION_KEY"
-    else
-      printf '# Claude PM Flow Transcript\n\n'
-    fi
+    printf '# Section run record\n\n'
+    printf -- '- section_name: %s\n' "$SECTION_NAME"
+    printf -- '- section_key: %s\n' "$SECTION_KEY"
     printf -- '- task_name: %s\n' "$TASK_NAME"
     printf -- '- task_slug: %s\n' "$TASK_SLUG"
     printf -- '- created_at_utc: %s\n' "$CREATED_AT_UTC"
-    printf -- '- session_id: %s\n' "$SESSION_ID"
     if [[ -n "${SECTION_KEY:-}" ]]; then
-      printf -- '- rule: this section owns one isolated PM session and every developer assignment uses a fresh sub-agent\n'
-    else
-      printf -- '- rule: this legacy run owns a fresh Claude session and does not reuse unrelated conversations\n'
+      printf -- '- rule: every role runs as a fresh process; continuity lives in this section'"'"'s files\n'
     fi
     printf '\n## Task Brief\n\n%s\n\n' "$task_brief"
     printf '## Task Contract\n\n%s\n\n' "$contract_body"
@@ -1583,21 +1068,6 @@ create_run() {
   if [[ "$update_project_pointer" == "1" ]]; then
     write_current_run_file "$RUN_DIR"
   fi
-}
-
-cmd_init() {
-  local task_name="${1:-}"
-  [[ -n "$task_name" ]] || fail "init requires a task name"
-  [[ -z "${SECTION_OVERRIDE:-}" ]] || fail "use init-section to create a section-scoped PM run"
-
-  local task_brief
-  task_brief="$(read_stdin_body)"
-  SECTION_KEY=""
-  SECTION_NAME=""
-  SECTION_DIR=""
-  create_run "$task_name" "$task_brief" "1"
-
-  printf '%s\n' "$RUN_DIR"
 }
 
 cmd_init_section() {
@@ -1746,9 +1216,6 @@ cmd_section_handoff() {
         ;;
     esac
   fi
-  if [[ "$section_status" == "done" || "$section_status" == "cancelled" ]]; then
-    assert_no_active_pending
-  fi
   if [[ "$section_status" == "done" ]]; then
     assert_current_done_completion
   fi
@@ -1773,418 +1240,6 @@ cmd_section_handoff() {
   printf 'section=%s\n' "$(slugify "$section_input")"
   printf 'status=%s\n' "$section_status"
   printf 'handoff=%s\n' "$section_dir/handoff.md"
-}
-
-cmd_adopt_pending() {
-  local pending_dir_input="${1:-}"
-  load_pending "$pending_dir_input"
-  [[ "${PENDING_SCHEMA_VERSION:-1}" == "1" ]] || \
-    fail "pending review already uses the current lifecycle schema"
-  acquire_record_lock
-  load_pending "$pending_dir_input"
-  assert_no_active_pending
-  [[ ! -d "$PENDING_DIR/.execution-claimed" ]] || \
-    fail "legacy pending review has an unexpected execution claim"
-
-  local legacy_resume_id=""
-  if [[ "${MODE_FLAG:-start}" == "resume" ]]; then
-    legacy_resume_id="$(python3 - "$PENDING_DIR/command.txt" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-text = Path(sys.argv[1]).read_text()
-match = re.search(r"(?:^|\s)--resume\s+([A-Za-z0-9._:-]+)", text)
-print(match.group(1) if match else "")
-PY
-)"
-    [[ -n "$legacy_resume_id" ]] || \
-      fail "could not recover the legacy pending review's expected session id"
-    [[ "${SESSION_STARTED:-0}" == "1" && "$legacy_resume_id" == "${SESSION_ID:-}" ]] || \
-      fail "legacy pending review is stale; its resume session is no longer current"
-  elif [[ "${MODE_FLAG:-start}" == "start" ]]; then
-    [[ "${SESSION_STARTED:-0}" == "0" && -z "${SESSION_ID:-}" ]] || \
-      fail "legacy pending review is stale; the run has since started a PM session"
-  else
-    fail "legacy pending review has an invalid mode: ${MODE_FLAG:-missing}"
-  fi
-  case "${KIND:-}" in
-    step|complete) ;;
-    *) fail "legacy pending review has an invalid kind: ${KIND:-missing}" ;;
-  esac
-
-  local response_result=""
-  local response_ready="0"
-  if [[ -s "$PENDING_DIR/response.json" ]]; then
-    if ! response_result="$(extract_json_field "$PENDING_DIR/response.json" "result" 2>/dev/null)"; then
-      fail "legacy response.json is not valid JSON"
-    fi
-    if [[ -n "$response_result" ]]; then
-      response_ready="1"
-    fi
-  fi
-
-  record_pending_meta "$PENDING_DIR" "$KIND" "$LABEL" "$(session_mode_flag)"
-  if [[ "$response_ready" == "0" ]]; then
-    write_command_file "$PENDING_DIR/command.txt" "$PENDING_DIR" "$(session_mode_flag)"
-  fi
-  {
-    printf 'adopted_at_utc=%s\n' "$(now_iso_utc)"
-    printf 'response_already_executed=%s\n' "$response_ready"
-  } > "$PENDING_DIR/legacy-adoption.txt"
-  if [[ "$response_ready" == "1" ]]; then
-    mkdir "$PENDING_DIR/.execution-claimed"
-    {
-      printf 'claimed_at_utc=%s\n' "$(now_iso_utc)"
-      printf 'claimant_pid=%s\n' "$$"
-      printf 'session_revision=%s\n' "${SESSION_REVISION:-0}"
-      printf 'source=legacy-adoption\n'
-    } > "$PENDING_DIR/.execution-claimed/claim.txt"
-  fi
-  claim_active_pending "$PENDING_DIR"
-  release_record_lock
-
-  printf 'adopted=pending\n'
-  printf 'pending_dir=%s\n' "$PENDING_DIR"
-  printf 'response_already_executed=%s\n' "$response_ready"
-}
-
-cmd_claim_execution() {
-  local pending_dir_input="${1:-}"
-  load_pending "$pending_dir_input"
-  assert_current_pending_schema
-  acquire_record_lock
-  assert_active_pending
-  assert_pending_session_current
-  local claim_dir="$PENDING_DIR/.execution-claimed"
-  if ! mkdir "$claim_dir" 2>/dev/null; then
-    fail "pending review execution was already claimed; refusing a duplicate PM call"
-  fi
-  {
-    printf 'claimed_at_utc=%s\n' "$(now_iso_utc)"
-    printf 'claimant_pid=%s\n' "$$"
-    printf 'session_revision=%s\n' "${SESSION_REVISION:-0}"
-  } > "$claim_dir/claim.txt"
-  release_record_lock
-  printf 'claimed=execution\n'
-  printf 'pending_dir=%s\n' "$PENDING_DIR"
-}
-
-cmd_cancel_pending() {
-  local pending_dir_input="${1:-}"
-  local reason="${2:-cancelled before completion}"
-  load_pending "$pending_dir_input"
-  assert_current_pending_schema
-  acquire_record_lock
-  assert_active_pending
-
-  local session_rotated="0"
-  if [[ -d "$PENDING_DIR/.execution-claimed" ]]; then
-    SESSION_ID=""
-    SESSION_STARTED="0"
-    SESSION_REVISION="$(( ${SESSION_REVISION:-0} + 1 ))"
-    persist_meta "$RUN_DIR/meta.json"
-    session_rotated="1"
-  fi
-  {
-    printf '## Pending Review Cancelled: %s\n\n' "$LABEL"
-    printf -- '- timestamp_utc: %s\n' "$(now_iso_utc)"
-    printf -- '- pending_dir: %s\n' "$(repo_relative_path "$PENDING_DIR")"
-    printf -- '- reason: %s\n' "$reason"
-    printf -- '- session_rotated: %s\n\n' "$session_rotated"
-  } >> "$RUN_DIR/transcript.md"
-  release_active_pending
-  release_record_lock
-  printf 'cancelled=pending\n'
-  printf 'session_rotated=%s\n' "$session_rotated"
-}
-
-cmd_rotate_session() {
-  local run_dir_input="${1:-}"
-  local reason="${2:-manual session rotation}"
-  load_run "$run_dir_input"
-  local locked_run_dir="$RUN_DIR"
-  acquire_record_lock
-  load_run "$locked_run_dir"
-  assert_no_active_pending
-  local old_session_id="$SESSION_ID"
-  SESSION_ID=""
-  SESSION_STARTED="0"
-  SESSION_REVISION="$(( ${SESSION_REVISION:-0} + 1 ))"
-  persist_meta "$RUN_DIR/meta.json"
-  {
-    printf '## Session Rotation\n\n'
-    printf -- '- timestamp_utc: %s\n' "$(now_iso_utc)"
-    printf -- '- old_session_id: %s\n' "$old_session_id"
-    printf -- '- new_session_id: pending_first_response\n'
-    printf -- '- reason: %s\n\n' "$reason"
-  } >> "$RUN_DIR/transcript.md"
-  release_record_lock
-  printf 'rotated_session_id=pending_first_response\n'
-}
-
-cmd_prepare_step() {
-  local run_dir_input="${1:-}"
-  local stage_name="${2:-}"
-  [[ -n "$stage_name" ]] || fail "prepare-step requires a stage name"
-  local body_mode="stdin"
-  local body_path=""
-  if [[ "${3:-}" == "--file" ]]; then
-    body_mode="file"
-    body_path="${4:-}"
-  elif [[ -n "${3:-}" ]]; then
-    fail "unknown prepare-step argument: ${3:-}"
-  fi
-  load_run "$run_dir_input"
-  assert_ready_to_prepare
-
-  local engineer_body prompt mode_flag pending_dir section_context
-  engineer_body="$(read_body_arg "$body_mode" "$body_path")"
-  mode_flag="$(session_mode_flag)"
-  pending_dir="$(prepare_pending_dir "step" "$stage_name")"
-  snapshot_dependency_handoffs "$pending_dir"
-  section_context=""
-  if [[ -n "${SECTION_KEY:-}" ]]; then
-    section_context="$(cat <<EOF
-- $SECTION_DIR/brief.md
-- $SECTION_DIR/state.md
-- $SECTION_DIR/handoff.md
-$(dependency_prompt_lines "$pending_dir")
-
-Section boundary:
-- Own only section "$SECTION_NAME" ($SECTION_KEY).
-- Do not read another section's transcript or developer conversation.
-- Read another section only through a dependency handoff explicitly required by this section brief.
-- Every new implementation assignment goes to a no-history developer sub-agent, and a developer conversation is never resumed.
-EOF
-)"
-  fi
-  prompt="$(cat <<EOF
-You are reviewing a proposed engineering step inside an ongoing task.
-
-Task name: $TASK_NAME
-Stage: $stage_name
-Section: ${SECTION_NAME:-legacy task}
-
-Read these files from the workspace before answering:
-- $RUN_DIR/task_brief.md
-- $CONTRACT_FILE
-- $pending_dir/engineer_update.md
-$section_context
-
-Respond with these sections only, each as a Markdown heading:
-1. Assessment
-2. Drift review
-3. Risks
-4. Improvements
-5. Decision
-6. Next action
-
-The Decision section must contain exactly one line, and that line must begin
-with one of these exact tokens: GO, GO_WITH_CHANGES, NO_GO. A short
-justification may follow the token on the same line.
-EOF
-)"
-
-  printf '%s\n' "$engineer_body" > "$pending_dir/engineer_update.md"
-  printf '%s\n' "$prompt" > "$pending_dir/prompt.md"
-  printf '%s\n' "$PM_SYSTEM_PROMPT" > "$pending_dir/system_prompt.txt"
-  : > "$pending_dir/response.json"
-  write_review_context_manifest "$pending_dir"
-  record_pending_meta "$pending_dir" "step" "$stage_name" "$mode_flag"
-  write_command_file \
-    "$pending_dir/command.txt" \
-    "$pending_dir" \
-    "$mode_flag"
-  activate_prepared_pending "$pending_dir"
-
-  printf 'pending_dir=%s\n' "$pending_dir"
-  printf 'mode=%s\n' "$mode_flag"
-  printf 'command_file=%s\n' "$pending_dir/command.txt"
-  printf 'response_file=%s\n' "$pending_dir/response.json"
-}
-
-cmd_prepare_complete() {
-  local run_dir_input="${1:-}"
-  local body_mode="stdin"
-  local body_path=""
-  if [[ "${2:-}" == "--file" ]]; then
-    body_mode="file"
-    body_path="${3:-}"
-  elif [[ -n "${2:-}" ]]; then
-    fail "unknown prepare-complete argument: ${2:-}"
-  fi
-  load_run "$run_dir_input"
-  assert_ready_to_prepare
-
-  local engineer_body prompt mode_flag pending_dir section_context
-  engineer_body="$(read_body_arg "$body_mode" "$body_path")"
-  mode_flag="$(session_mode_flag)"
-  pending_dir="$(prepare_pending_dir "complete" "final")"
-  snapshot_dependency_handoffs "$pending_dir"
-  section_context=""
-  if [[ -n "${SECTION_KEY:-}" ]]; then
-    section_context="$(cat <<EOF
-- $SECTION_DIR/brief.md
-- $SECTION_DIR/state.md
-- $SECTION_DIR/handoff.md
-$(dependency_prompt_lines "$pending_dir")
-
-Section boundary:
-- Assess only section "$SECTION_NAME" ($SECTION_KEY).
-- Do not load another section's transcript or developer conversation.
-- A DONE decision still requires a bounded section-handoff before the root coordinator treats the section as done.
-EOF
-)"
-  fi
-  prompt="$(cat <<EOF
-You are reviewing the completion report for an engineering task.
-
-Task name: $TASK_NAME
-Section: ${SECTION_NAME:-legacy task}
-
-Read these files from the workspace before answering:
-- $RUN_DIR/task_brief.md
-- $CONTRACT_FILE
-- $pending_dir/engineer_update.md
-$section_context
-
-Respond with these sections only, each as a Markdown heading:
-1. Outcome assessment
-2. Drift review
-3. Expected vs observed
-4. Feedback
-5. Recommended next steps
-6. Decision
-
-The Decision section must contain exactly one line, and that line must begin
-with one of these exact tokens: DONE, FOLLOW_UP, REWORK. A short justification
-may follow the token on the same line.
-EOF
-)"
-
-  printf '%s\n' "$engineer_body" > "$pending_dir/engineer_update.md"
-  printf '%s\n' "$prompt" > "$pending_dir/prompt.md"
-  printf '%s\n' "$PM_SYSTEM_PROMPT" > "$pending_dir/system_prompt.txt"
-  : > "$pending_dir/response.json"
-  write_review_context_manifest "$pending_dir"
-  record_pending_meta "$pending_dir" "complete" "final" "$mode_flag"
-  write_command_file \
-    "$pending_dir/command.txt" \
-    "$pending_dir" \
-    "$mode_flag"
-  activate_prepared_pending "$pending_dir"
-
-  printf 'pending_dir=%s\n' "$pending_dir"
-  printf 'mode=%s\n' "$mode_flag"
-  printf 'command_file=%s\n' "$pending_dir/command.txt"
-  printf 'response_file=%s\n' "$pending_dir/response.json"
-}
-
-cmd_record_step() {
-  local pending_dir_input="${1:-}"
-  local response_file_override=""
-  if [[ "${2:-}" == "--response-file" ]]; then
-    response_file_override="${3:-}"
-  elif [[ -n "${2:-}" ]]; then
-    fail "unknown record-step argument: ${2:-}"
-  fi
-  load_pending "$pending_dir_input"
-  [[ "$KIND" == "step" ]] || fail "record-step requires a pending step review"
-  assert_current_pending_schema
-  acquire_record_lock
-  assert_active_pending
-  assert_execution_claimed
-  assert_pending_session_current
-
-  local response_path="$PENDING_DIR/response.json"
-  if [[ -n "$response_file_override" ]]; then
-    response_path="$response_file_override"
-  fi
-  [[ -f "$response_path" ]] || fail "response file not found: $response_path"
-
-  local engineer_body claude_response claude_is_error
-  engineer_body="$(/bin/cat "$PENDING_DIR/engineer_update.md")"
-  claude_is_error="$(extract_json_field "$response_path" "is_error")"
-  claude_response="$(extract_json_field "$response_path" "result")"
-  [[ -n "$claude_response" ]] || fail "response file is empty: $response_path"
-  if [[ "$claude_is_error" == "True" || "$claude_is_error" == "true" ]]; then
-    fail "Claude CLI returned an error: $claude_response"
-  fi
-  validate_step_response "$claude_response"
-  update_session_from_response "$response_path"
-  SESSION_REVISION="$(( ${SESSION_REVISION:-0} + 1 ))"
-  persist_meta "$RUN_DIR/meta.json"
-  append_exchange "Step Review" "$LABEL" "$engineer_body" "$claude_response"
-  release_active_pending
-  release_record_lock
-  printf 'recorded=step\n'
-}
-
-cmd_record_complete() {
-  local pending_dir_input="${1:-}"
-  local response_file_override=""
-  if [[ "${2:-}" == "--response-file" ]]; then
-    response_file_override="${3:-}"
-  elif [[ -n "${2:-}" ]]; then
-    fail "unknown record-complete argument: ${2:-}"
-  fi
-  load_pending "$pending_dir_input"
-  [[ "$KIND" == "complete" ]] || fail "record-complete requires a pending completion review"
-  assert_current_pending_schema
-  acquire_record_lock
-  assert_active_pending
-  assert_execution_claimed
-  assert_pending_session_current
-
-  local response_path="$PENDING_DIR/response.json"
-  if [[ -n "$response_file_override" ]]; then
-    response_path="$response_file_override"
-  fi
-  [[ -f "$response_path" ]] || fail "response file not found: $response_path"
-
-  local engineer_body claude_response claude_is_error completion_decision
-  engineer_body="$(/bin/cat "$PENDING_DIR/engineer_update.md")"
-  claude_is_error="$(extract_json_field "$response_path" "is_error")"
-  claude_response="$(extract_json_field "$response_path" "result")"
-  [[ -n "$claude_response" ]] || fail "response file is empty: $response_path"
-  if [[ "$claude_is_error" == "True" || "$claude_is_error" == "true" ]]; then
-    fail "Claude CLI returned an error: $claude_response"
-  fi
-  validate_completion_response "$claude_response"
-  completion_decision="$(extract_markdown_decision "$claude_response" "DONE,FOLLOW_UP,REWORK")"
-  update_session_from_response "$response_path"
-  SESSION_REVISION="$(( ${SESSION_REVISION:-0} + 1 ))"
-  persist_meta "$RUN_DIR/meta.json"
-  append_exchange "Completion Review" "$LABEL" "$engineer_body" "$claude_response"
-  write_completion_marker "$completion_decision" "$PENDING_DIR"
-  release_active_pending
-  release_record_lock
-  printf 'recorded=complete\n'
-  if [[ -n "${SECTION_KEY:-}" ]]; then
-    printf 'handoff_required=%s\n' "$SECTION_DIR/handoff.md"
-  fi
-}
-
-cmd_print_command() {
-  local pending_dir_input="${1:-}"
-  load_pending "$pending_dir_input"
-  /bin/cat "$PENDING_DIR/command.txt"
-}
-
-cmd_current_run() {
-  local abs_run_dir rel_run_dir
-  abs_run_dir="$(resolve_current_run)" || fail "current run pointer is empty: $CURRENT_RUN_FILE"
-  if [[ -n "${SECTION_OVERRIDE:-}" ]]; then
-    local section_dir
-    section_dir="$(resolve_section_dir "$SECTION_OVERRIDE")"
-    rel_run_dir="$(/usr/bin/head -n 1 "$section_dir/run_path.txt" | tr -d '\r')"
-    printf 'section=%s\n' "$(slugify "$SECTION_OVERRIDE")"
-  else
-    rel_run_dir="$(/usr/bin/head -n 1 "$CURRENT_RUN_FILE" | tr -d '\r')"
-  fi
-  printf 'current_run_relative=%s\n' "$rel_run_dir"
-  printf 'current_run_absolute=%s\n' "$abs_run_dir"
 }
 
 [[ -f "$SCRIPT_DIR/driver.zsh" ]] || fail "missing driver: $SCRIPT_DIR/driver.zsh"
@@ -2244,10 +1299,6 @@ main() {
       shift || true
       cmd_consult_panel "$@"
       ;;
-    init)
-      shift || true
-      cmd_init "$@"
-      ;;
     init-section)
       shift || true
       cmd_init_section "$@"
@@ -2267,46 +1318,6 @@ main() {
     section-handoff)
       shift || true
       cmd_section_handoff "$@"
-      ;;
-    adopt-pending)
-      shift || true
-      cmd_adopt_pending "$@"
-      ;;
-    claim-execution)
-      shift || true
-      cmd_claim_execution "$@"
-      ;;
-    cancel-pending)
-      shift || true
-      cmd_cancel_pending "$@"
-      ;;
-    rotate-session)
-      shift || true
-      cmd_rotate_session "$@"
-      ;;
-    prepare-step)
-      shift || true
-      cmd_prepare_step "$@"
-      ;;
-    record-step)
-      shift || true
-      cmd_record_step "$@"
-      ;;
-    prepare-complete)
-      shift || true
-      cmd_prepare_complete "$@"
-      ;;
-    record-complete)
-      shift || true
-      cmd_record_complete "$@"
-      ;;
-    print-command)
-      shift || true
-      cmd_print_command "$@"
-      ;;
-    current-run)
-      shift || true
-      cmd_current_run "$@"
       ;;
     -h|--help|help|"")
       usage

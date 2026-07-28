@@ -222,101 +222,8 @@ assert_file_contains "$TEST_ROOT/expected-failure.log" "owned paths overlap" "ow
   printf 'Validation:\n- Run focused tests.\n'
 } > "$TEST_ROOT/developer-report.md"
 
-alpha_prepare="$("$PM" --section alpha prepare-step current first --file "$TEST_ROOT/developer-report.md")"
-beta_prepare="$("$PM" --section beta prepare-step current first --file "$TEST_ROOT/developer-report.md")"
-alpha_pending="$(output_value "$alpha_prepare" pending_dir)"
-beta_pending="$(output_value "$beta_prepare" pending_dir)"
-
-assert_not_contains "$(/bin/cat "$alpha_pending/command.txt")" "--resume" "alpha first PM call"
-assert_not_contains "$(/bin/cat "$beta_pending/command.txt")" "--resume" "beta first PM call"
-assert_file_contains "$alpha_pending/prompt.md" "sections/alpha/state.md" "alpha prompt scope"
-assert_not_contains "$(/bin/cat "$alpha_pending/prompt.md")" "sections/beta/state.md" "alpha prompt excludes beta"
-assert_file_contains "$alpha_pending/command.txt" "claim-execution" "generated command claims exactly-once execution"
-assert_file_contains "$alpha_pending/command.txt" "prompt.md" "generated command sends the structured prompt file"
-assert_not_contains \
-  "$(/bin/cat "$alpha_pending/command.txt")" \
-  "Respond\\ with" \
-  "generated command does not inline a flattened prompt"
-assert_file_contains "$alpha_pending/prompt.md" "1. Assessment" "structured prompt keeps its section list"
-[[ "$(/bin/cat "$alpha_pending/prompt.md" | wc -l | tr -d '[:space:]')" -gt 5 ]] || \
-  fail "prompt.md was flattened to a single line"
-assert_file_contains \
-  "$beta_pending/context_files.json" \
-  "dependencies/alpha-handoff.md" \
-  "dependency handoff snapshot is included in bounded review context"
-assert_file_contains \
-  "$beta_pending/dependencies/alpha-handoff.md" \
-  "Section initialized; no implementation outcome yet." \
-  "dependency context is frozen when the review is prepared"
-
-write_step_response "$alpha_pending/response.json" "alpha-session-1"
-"$PM" claim-execution "$alpha_pending" > "$TEST_ROOT/claim-alpha.out"
-"$PM" record-step "$alpha_pending" > "$TEST_ROOT/record-alpha.out"
-
-alpha_second="$("$PM" --section alpha prepare-step current second --file "$TEST_ROOT/developer-report.md")"
-alpha_second_pending="$(output_value "$alpha_second" pending_dir)"
-assert_contains "$(/bin/cat "$alpha_second_pending/command.txt")" "--resume alpha-session-1" "alpha resumes its PM"
-assert_not_contains "$(/bin/cat "$beta_pending/command.txt")" "alpha-session-1" "beta does not share alpha PM"
-
-"$PM" claim-execution "$alpha_second_pending" > "$TEST_ROOT/claim-alpha-second.out"
-write_step_response "$alpha_second_pending/response.json" "alpha-session-1"
-: >> "$alpha_run/.record.lock"
-zsh -fc "zmodload zsh/system; zsystem flock -f held '$alpha_run/.record.lock'; sleep 6" &
-lock_holder_pid=$!
-sleep 1
-PM_FLOW_LOCK_WAIT=2 expect_failure "same-section record lock" "$PM" record-step "$alpha_second_pending"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "waiting for .record.lock" "record lock error"
-kill "$lock_holder_pid" 2>/dev/null || true
-wait "$lock_holder_pid" 2>/dev/null || true
-"$PM" record-step "$alpha_second_pending" > "$TEST_ROOT/record-alpha-second.out"
-
-alpha_parallel_one="$("$PM" --section alpha prepare-step current parallel-one --file "$TEST_ROOT/developer-report.md")"
-alpha_parallel_one_dir="$(output_value "$alpha_parallel_one" pending_dir)"
-pending_count_before_rejection="$(ls -d "$alpha_run"/pending/*/ | wc -l | tr -d '[:space:]')"
-expect_failure \
-  "parallel same-section prepare" \
-  "$PM" --section alpha prepare-step current parallel-two --file "$TEST_ROOT/developer-report.md"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "active pending review" "same-section pending serialization"
-pending_count_after_rejection="$(ls -d "$alpha_run"/pending/*/ | wc -l | tr -d '[:space:]')"
-[[ "$pending_count_before_rejection" == "$pending_count_after_rejection" ]] || \
-  fail "rejected prepare left an orphan pending directory"
-write_step_response "$alpha_parallel_one_dir/response.json" "alpha-session-1"
-"$PM" claim-execution "$alpha_parallel_one_dir" > "$TEST_ROOT/claim-alpha-parallel.out"
-"$PM" record-step "$alpha_parallel_one_dir" > "$TEST_ROOT/record-alpha-parallel.out"
-expect_failure "duplicate same-section response" "$PM" record-step "$alpha_parallel_one_dir"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "not the active review" "duplicate response error"
-
-alpha_justified="$("$PM" --section alpha prepare-step current justified --file "$TEST_ROOT/developer-report.md")"
-alpha_justified_dir="$(output_value "$alpha_justified" pending_dir)"
-{
-  printf '{\n'
-  printf '  "is_error": false,\n'
-  printf '  "result": "## Assessment\\nAligned.\\n\\n## Drift review\\nNo drift.\\n\\n## Risks\\nLow.\\n\\n## Improvements\\nNarrow the scope.\\n\\n## Decision\\nGO_WITH_CHANGES - narrow the scope to the owned paths first.\\n\\n## Next action\\nUse a fresh developer.",\n'
-  printf '  "session_id": "alpha-session-1",\n'
-  printf '  "session_resumable": true,\n'
-  printf '  "pm_backend": "claude"\n'
-  printf '}\n'
-} > "$alpha_justified_dir/response.json"
-"$PM" claim-execution "$alpha_justified_dir" > "$TEST_ROOT/claim-alpha-justified.out"
-"$PM" record-step "$alpha_justified_dir" > "$TEST_ROOT/record-alpha-justified.out"
-
-write_step_response "$beta_pending/response.json" "beta-session-1"
-"$PM" claim-execution "$beta_pending" > "$TEST_ROOT/claim-beta.out"
-"$PM" record-step "$beta_pending" > "$TEST_ROOT/record-beta.out"
-beta_fallback="$("$PM" --section beta prepare-step current fallback --file "$TEST_ROOT/developer-report.md")"
-beta_fallback_dir="$(output_value "$beta_fallback" pending_dir)"
-assert_contains "$(/bin/cat "$beta_fallback_dir/command.txt")" "--resume beta-session-1" "beta resumes before fallback"
-write_step_response "$beta_fallback_dir/response.json" "" "codex" "false"
-"$PM" claim-execution "$beta_fallback_dir" > "$TEST_ROOT/claim-beta-fallback.out"
-"$PM" record-step "$beta_fallback_dir" > "$TEST_ROOT/record-beta-fallback.out"
-beta_after_fallback="$("$PM" --section beta prepare-step current after-fallback --file "$TEST_ROOT/developer-report.md")"
-beta_after_fallback_dir="$(output_value "$beta_after_fallback" pending_dir)"
-assert_not_contains "$(/bin/cat "$beta_after_fallback_dir/command.txt")" "--resume" "stateless fallback clears resume"
-
-alpha_after_beta="$("$PM" --section alpha prepare-step current after-beta --file "$TEST_ROOT/developer-report.md")"
-alpha_after_beta_dir="$(output_value "$alpha_after_beta" pending_dir)"
-assert_contains "$(/bin/cat "$alpha_after_beta_dir/command.txt")" "--resume alpha-session-1" "beta changes do not affect alpha"
-
+# The section lifecycle is now driven by `run`; what pm_flow.sh still owns
+# directly is section creation, ownership isolation, and the handoff contract.
 {
   printf '## Outcome\n\n- Alpha behavior is validated.\n\n'
   printf '## Decisions\n\n- Kept the bounded implementation.\n\n'
@@ -324,46 +231,28 @@ assert_contains "$(/bin/cat "$alpha_after_beta_dir/command.txt")" "--resume alph
   printf '## Risks\n\n- None open.\n\n'
   printf '## Next action\n\n- Integrate from the root coordinator.\n'
 } > "$TEST_ROOT/handoff.md"
-expect_failure \
-  "done while review active" \
-  "$PM" section-handoff alpha done "Alpha validated and ready to integrate" --file "$TEST_ROOT/handoff.md"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "active pending review" "done rejects in-flight PM work"
-"$PM" claim-execution "$alpha_after_beta_dir" > "$TEST_ROOT/claim-alpha-cancel.out"
-cancel_output="$("$PM" cancel-pending "$alpha_after_beta_dir" "simulated aborted PM invocation")"
-assert_contains "$cancel_output" "session_rotated=1" "claimed cancellation rotates uncertain session"
-expect_failure \
-  "done without PM completion" \
-  "$PM" section-handoff alpha done "Alpha validated and ready to integrate" --file "$TEST_ROOT/handoff.md"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "completion review" "done requires PM completion"
 
-alpha_complete="$("$PM" --section alpha prepare-complete current --file "$TEST_ROOT/developer-report.md")"
-alpha_complete_dir="$(output_value "$alpha_complete" pending_dir)"
-assert_not_contains "$(/bin/cat "$alpha_complete_dir/command.txt")" "--resume" "cancelled claimed call resets PM session"
-write_completion_response "$alpha_complete_dir/response.json" "alpha-completion-session" "DONE"
-"$PM" claim-execution "$alpha_complete_dir" > "$TEST_ROOT/claim-alpha-complete.out"
-expect_failure "completion pending recorded as step" "$PM" record-step "$alpha_complete_dir"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "pending step review" "pending review kind is enforced"
-"$PM" record-complete "$alpha_complete_dir" > "$TEST_ROOT/record-alpha-complete.out"
-"$PM" section-handoff alpha done "Alpha validated and ready to integrate" --file "$TEST_ROOT/handoff.md" > "$TEST_ROOT/handoff.out"
-sections_output="$("$PM" list-sections)"
-assert_contains "$sections_output" "| alpha | done | Alpha validated and ready to integrate |" "done handoff updates registry"
 expect_failure \
-  "terminal section PM work" \
-  "$PM" --section alpha prepare-step current post-done --file "$TEST_ROOT/developer-report.md"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "publish an active or planned handoff" "terminal section is not silently reopened"
+  "done without a completion decision" \
+  "$PM" section-handoff alpha done "Alpha validated" --file "$TEST_ROOT/handoff.md"
+assert_file_contains "$TEST_ROOT/expected-failure.log" "completion review" "done still requires a recorded completion"
+
+"$PM" section-handoff alpha active "Alpha under way" --file "$TEST_ROOT/handoff.md" > "$TEST_ROOT/handoff.out"
+sections_output="$("$PM" list-sections)"
+assert_contains "$sections_output" "| alpha | active | Alpha under way |" "a published handoff updates the registry"
+
 {
-  printf '## Objective\n\n- Replace completed alpha ownership.\n\n'
-  printf '## Scope\n\n- Follow-up alpha implementation.\n\n'
+  printf '## Objective\n\n- Replace alpha ownership.\n\n'
+  printf '## Scope\n\n- Follow-up alpha work.\n\n'
   printf '## Owned paths\n\n- `src/alpha/**`\n\n'
   printf '## Dependencies\n\n- None.\n\n'
   printf '## Acceptance\n\n- Replacement tests pass.\n\n'
   printf '## Rejection conditions\n\n- Scope drift.\n'
 } > "$TEST_ROOT/reassigned-section.md"
-"$PM" init-section alpha-replacement --file "$TEST_ROOT/reassigned-section.md" > "$TEST_ROOT/reassigned-init.out"
 expect_failure \
-  "reopen section with reassigned ownership" \
-  "$PM" section-handoff alpha active "Attempting conflicting reopen" --file "$TEST_ROOT/handoff.md"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "owned paths overlap" "reopen revalidates path ownership"
+  "ownership overlap with a live section" \
+  "$PM" init-section alpha-replacement --file "$TEST_ROOT/reassigned-section.md"
+assert_file_contains "$TEST_ROOT/expected-failure.log" "owned paths overlap" "a live section keeps its paths"
 
 {
   printf '## Outcome\n\n'
@@ -391,6 +280,16 @@ expect_failure \
   "$PM" section-handoff beta active "Unbroken context payload" --file "$TEST_ROOT/oversized-byte-handoff.md"
 assert_file_contains "$TEST_ROOT/expected-failure.log" "8192-byte context budget" "handoff byte budget error"
 
+# The retired prepare/record lifecycle must be gone, not merely unused.
+for retired_command in init prepare-step record-step prepare-complete record-complete \
+                       claim-execution cancel-pending rotate-session adopt-pending \
+                       print-command current-run; do
+  expect_failure "retired command $retired_command" "$PM" "$retired_command"
+  assert_file_contains "$TEST_ROOT/expected-failure.log" "unknown command" \
+    "$retired_command is no longer accepted"
+done
+
+
 handoff_before="$(/bin/cat "$PROJECT_DIR/sections/alpha/handoff.md")"
 printf '\nPreserve this project plan marker.\n' >> "$PROJECT_DIR/project_state/plan.md"
 {
@@ -400,7 +299,7 @@ printf '\nPreserve this project plan marker.\n' >> "$PROJECT_DIR/project_state/p
 "$REPO_ROOT/install.sh" "$FIXTURE_REPO" --name "Fixture Project" > "$TEST_ROOT/reinstall.out"
 handoff_after="$(/bin/cat "$PROJECT_DIR/sections/alpha/handoff.md")"
 [[ "$handoff_before" == "$handoff_after" ]] || fail "reinstall overwrote section handoff"
-assert_file_contains "$PROJECT_DIR/sections/alpha/status.txt" "done" "reinstall preserves section status"
+assert_file_contains "$PROJECT_DIR/sections/alpha/status.txt" "active" "reinstall preserves section status"
 assert_file_contains "$PROJECT_DIR/project_state/plan.md" "Preserve this project plan marker." "reinstall preserves project plan"
 assert_file_contains "$PROJECT_DIR/project_state/start.md" "# Project coordinator start prompt" "reinstall refreshes coordinator prompt"
 assert_file_contains \
@@ -408,63 +307,6 @@ assert_file_contains \
   "Legacy coordinator instructions" \
   "reinstall backs up legacy coordinator prompt"
 
-legacy_run="$(printf 'Legacy task brief.\n' | "$PM" init legacy-task)"
-[[ -d "$legacy_run" ]] || fail "legacy init compatibility failed"
-rm "$legacy_run/meta.json"
-legacy_meta_injection_marker="$TEST_ROOT/unsafe-run-metadata-was-executed"
-{
-  printf 'RUN_DIR=$(touch %s)\n' "$legacy_meta_injection_marker"
-  printf 'TASK_NAME=%q\n' "legacy-task"
-  printf 'TASK_SLUG=%q\n' "legacy-task"
-  printf 'SECTION_KEY=%q\n' ""
-  printf 'SECTION_NAME=%q\n' ""
-  printf 'SESSION_ID=%q\n' ""
-  printf 'SESSION_STARTED=%q\n' "0"
-  printf 'SESSION_REVISION=%q\n' "0"
-  printf 'CREATED_AT_UTC=%q\n' "2026-01-01T00:00:00Z"
-} > "$legacy_run/meta.env"
-legacy_current="$("$PM" current-run)"
-assert_contains "$legacy_current" "$legacy_run" "legacy current-run compatibility"
-
-legacy_prepare="$("$PM" prepare-step "$legacy_run" legacy-upgrade --file "$TEST_ROOT/developer-report.md")"
-[[ ! -e "$legacy_meta_injection_marker" ]] || fail "legacy run metadata was executed as shell code"
-legacy_pending="$(output_value "$legacy_prepare" pending_dir)"
-rm "$legacy_run/.active-pending/path.txt"
-rmdir "$legacy_run/.active-pending"
-rm "$legacy_pending/pending.json"
-legacy_injection_marker="$TEST_ROOT/unsafe-metadata-was-executed"
-{
-  printf 'RUN_DIR=$(touch %s)\n' "$legacy_injection_marker"
-  printf 'KIND=%q\n' "step"
-  printf 'LABEL=%q\n' "legacy-upgrade"
-  printf 'MODE_FLAG=%q\n' "start"
-  printf 'SECTION_KEY=%q\n' ""
-} > "$legacy_pending/pending.env"
-expect_failure "legacy pending requires adoption" "$PM" record-step "$legacy_pending"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "adopt-pending" "legacy migration guidance"
-adopt_output="$("$PM" adopt-pending "$legacy_pending")"
-[[ ! -e "$legacy_injection_marker" ]] || fail "legacy metadata was executed as shell code"
-assert_contains "$adopt_output" "response_already_executed=0" "unexecuted legacy review is adopted safely"
-assert_file_contains "$legacy_pending/pending.json" '"version": 2' "legacy pending schema upgraded"
-assert_file_contains "$legacy_pending/command.txt" "claim-execution" "legacy command regenerated with execution claim"
-"$PM" claim-execution "$legacy_pending" > "$TEST_ROOT/claim-legacy.out"
-write_step_response "$legacy_pending/response.json" "legacy-session-1"
-"$PM" record-step "$legacy_pending" > "$TEST_ROOT/record-legacy.out"
-
-(
-  printf 'Parallel legacy brief one.\n' | "$PM" init same-legacy-task > "$TEST_ROOT/parallel-init-one.out"
-) &
-parallel_init_one_pid=$!
-(
-  printf 'Parallel legacy brief two.\n' | "$PM" init same-legacy-task > "$TEST_ROOT/parallel-init-two.out"
-) &
-parallel_init_two_pid=$!
-wait "$parallel_init_one_pid"
-wait "$parallel_init_two_pid"
-parallel_run_one="$(/bin/cat "$TEST_ROOT/parallel-init-one.out")"
-parallel_run_two="$(/bin/cat "$TEST_ROOT/parallel-init-two.out")"
-[[ "$parallel_run_one" != "$parallel_run_two" ]] || fail "parallel legacy init reused one run directory"
-[[ -d "$parallel_run_one" && -d "$parallel_run_two" ]] || fail "parallel legacy init did not create both runs"
 
 readme_before_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/agentic/pm_flow/README.md")"
 pm_script_before_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/agentic/pm_flow/pm_flow.sh")"
@@ -484,38 +326,6 @@ pm_script_after_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/agentic/pm_flow/pm_flo
   fail "failed template fetch truncated a live installed file"
 [[ "$pm_script_before_failed_upgrade" == "$pm_script_after_failed_upgrade" ]] || \
   fail "late template fetch failure partially upgraded installed scripts"
-
-assert_file_contains \
-  "$FIXTURE_REPO/agentic/pm_flow/codex_pm_review.sh" \
-  '"session_resumable": False' \
-  "Codex fallback marks responses stateless"
-
-mkdir "$TEST_ROOT/fake-bin"
-{
-  printf '#!/bin/zsh -f\n'
-  printf 'set -euo pipefail\n'
-  printf 'out_file=""\n'
-  printf 'last_arg=""\n'
-  printf 'while [[ $# -gt 0 ]]; do\n'
-  printf '  if [[ "$1" == "-o" ]]; then out_file="$2"; shift 2; continue; fi\n'
-  printf '  last_arg="$1"\n'
-  printf '  shift\n'
-  printf 'done\n'
-  printf 'printf "%%s\\n" "$last_arg" > "$FAKE_CODEX_CAPTURE"\n'
-  printf 'printf "Assessment from fake Codex.\\n" > "$out_file"\n'
-} > "$TEST_ROOT/fake-bin/codex"
-chmod +x "$TEST_ROOT/fake-bin/codex"
-if ! FAKE_CODEX_CAPTURE="$TEST_ROOT/codex-prompt.txt" \
-    PATH="$TEST_ROOT/fake-bin:$PATH" \
-    zsh -f "$FIXTURE_REPO/agentic/pm_flow/codex_pm_review.sh" "$beta_after_fallback_dir" \
-    > "$TEST_ROOT/codex-fallback.out" 2>&1; then
-  /bin/cat "$TEST_ROOT/codex-fallback.out" >&2
-  fail "Codex fallback execution"
-fi
-assert_file_contains "$TEST_ROOT/codex-prompt.txt" "## Objective" "fallback inlines section brief in spaced path"
-assert_file_contains "$TEST_ROOT/codex-prompt.txt" "Implement beta." "fallback preserves spaced-path context"
-assert_file_contains "$TEST_ROOT/codex-prompt.txt" "Proposed change:" "fallback inlines developer report"
-assert_not_contains "$(/bin/cat "$TEST_ROOT/codex-prompt.txt")" "file not found" "fallback context manifest"
 
 MOVE_SOURCE="$TEST_ROOT/move source"
 MOVE_DESTINATION="$TEST_ROOT/move destination"
@@ -554,13 +364,9 @@ assert_contains "$("$MOVED_PM" list-sections)" "| mover | planned |" "moved inst
 assert_file_contains "$MOVE_DESTINATION/agentic/pm_flow/.project-key" "move-source" "project key persists across rename"
 [[ ! -d "$MOVE_DESTINATION/agentic/pm_flow/move-destination" ]] || \
   fail "reinstall after rename created a second project workspace"
-moved_prepare="$("$MOVED_PM" --section mover prepare-step current moved --file "$TEST_ROOT/developer-report.md")"
-moved_pending="$(output_value "$moved_prepare" pending_dir)"
-assert_contains "$moved_pending" "$MOVE_DESTINATION" "moved run resolves its current canonical path"
-assert_not_contains "$moved_pending" "$MOVE_SOURCE" "moved run does not retain its old absolute path"
-expect_failure "cross-project pending containment" "$PM" print-command "$moved_pending"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "outside the selected project" "pending cannot cross project boundary"
-"$MOVED_PM" cancel-pending "$moved_pending" "relocation test complete" > "$TEST_ROOT/cancel-moved.out"
+moved_status="$("$MOVED_PM" status)"
+assert_contains "$moved_status" "mover" "a relocated install still resolves its sections"
+assert_contains "$moved_status" "scope" "a relocated section still derives its next action"
 
 # --- role/domain personas and the agent dispatcher -------------------------
 
