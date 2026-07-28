@@ -27,10 +27,9 @@ Read only:
 
 Decompose the project into independently owned sections. Create each section
 with pm_flow.sh init-section, then spawn one PM sub-agent per ready section with
-no inherited root conversation, using only that section's pm_prompt.md. In Codex
-collaboration, set fork_turns="none". A section PM is long-lived only for its
-section and must create a no-history developer sub-agent for each engineering
-assignment.
+no inherited root conversation, using only that section's pm_prompt.md. A
+section PM is long-lived only for its section and must create a no-history
+developer sub-agent for each engineering assignment.
 
 Track the project through sections.md and the bounded handoff.md for each
 section. Never pull raw section transcripts or developer conversations into the
@@ -42,7 +41,7 @@ Root coordinator responsibilities:
 - keep the project-level objective, section graph, and integration order clear
 - create section briefs with the exact Markdown headings `Objective`, `Scope`, `Owned paths`, `Dependencies`, `Acceptance`, and `Rejection conditions`
 - require repo-relative, non-overlapping owned paths; dependency bullets must be exact existing section keys or repo-relative paths to their `handoff.md`
-- spawn section PM sub-agents with no inherited root history and their section-local `pm_prompt.md` (`fork_turns="none"` in Codex)
+- spawn section PM sub-agents with no inherited root history and their section-local `pm_prompt.md`
 - read only bounded section handoffs and resolve cross-section interface conflicts
 - treat `done` and `cancelled` as terminal; publish an `active` or `planned` handoff before deliberately reopening one
 - avoid doing section engineering or directly managing developer agents

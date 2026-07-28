@@ -26,7 +26,7 @@ when Claude is unavailable.
 - One section owns one PM run, session, transcript, state file, and handoff.
 - The root coordinator never loads raw section transcripts or developer conversations.
 - A section PM owns only its section and reads dependencies through bounded handoffs.
-- Every section PM starts with no inherited root conversation (`fork_turns="none"` in Codex collaboration).
+- Every section PM starts with no inherited root conversation.
 - Every engineering assignment uses a fresh developer sub-agent with no inherited PM conversation; developer conversations are never resumed.
 - A root-facing handoff is at most 500 words and 8192 bytes, and contains Outcome, Decisions, Interfaces, Risks, and Next action.
 - Context transitions happen through explicit state and handoff files, not automatic compaction.
@@ -150,6 +150,10 @@ The command creates:
 - a `run_path.txt` pointer
 - a refreshed project section registry
 
+A new section starts at status `planned`. It becomes `active` when its PM
+publishes the first handoff, so the registry distinguishes sections that exist
+from sections that are under way.
+
 Launch a PM sub-agent with the generated prompt:
 
 ```bash
@@ -157,9 +161,10 @@ Launch a PM sub-agent with the generated prompt:
 ```
 
 The host agent should pass that output to its native sub-agent creation
-mechanism without inherited root history (`fork_turns="none"` in Codex
-collaboration). The section PM then delegates each implementation assignment to
-a new developer sub-agent with `fork_turns="none"` as well.
+mechanism without inherited root history. The section PM then delegates each
+implementation assignment to a new developer sub-agent the same way. Claude Code
+subagents already start with a fresh context; in Codex collaboration this
+requires `fork_turns="none"`.
 
 ## Track the project without loading section detail
 
@@ -213,7 +218,6 @@ run pointer.
 The pending directory contains:
 
 - `prompt.md`
-- `prompt_one_line.txt`
 - `system_prompt.txt`
 - `command.txt`
 - `response.json`

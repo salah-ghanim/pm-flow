@@ -1,10 +1,4 @@
 .DS_Store
-template/.claude/pm_flow/reports/*
-template/.claude/pm_flow/runs/*
-!template/.claude/pm_flow/reports/.gitkeep
-!template/.claude/pm_flow/runs/.gitkeep
-template/agentic/pm_flow/project/runs/*
-!template/agentic/pm_flow/project/runs/.gitkeep
 .idea/
 template/agentic/pm_flow/project/runs/*
 !template/agentic/pm_flow/project/runs/.gitkeep

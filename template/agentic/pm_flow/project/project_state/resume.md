@@ -29,9 +29,9 @@ sections, and any done-section handoffs needed for unresolved dependencies or
 integration. Do not eagerly load irrelevant completed handoffs. Reconcile
 dependencies at the handoff level.
 For each ready section, spawn a section PM sub-agent with no inherited root
-conversation using only its pm_prompt.md. In Codex collaboration, use
-fork_turns="none". Each section PM may be long-lived within that section, but
-every developer assignment must use a fresh no-history developer sub-agent.
+conversation using only its pm_prompt.md. Each section PM may be long-lived
+within that section, but every developer assignment must use a fresh no-history
+developer sub-agent.
 Treat done and cancelled sections as terminal. If new project-level evidence
 requires more work, reopen the section explicitly with an active or planned
 bounded handoff before its PM prepares another review.

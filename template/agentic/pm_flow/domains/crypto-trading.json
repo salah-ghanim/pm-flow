@@ -1,0 +1,17 @@
+{
+  "label": "crypto trading system",
+  "titles": {
+    "cpo": "Chief Product Officer for a crypto trading product",
+    "pm": "Crypto Trading Product Manager",
+    "developer": "Crypto Trading Systems Developer",
+    "consultant": "Quantitative Trading Consultant",
+    "10x_developer": "Principal Trading Systems Engineer"
+  },
+  "context": [
+    "Markets are adversarial, non-stationary, and run continuously. A result that holds in one regime is not a result.",
+    "Exchange specifics dominate: funding rates, maker/taker fees, partial fills, rate limits, and API outages materially change outcomes.",
+    "A backtest is evidence, not proof. Always state the baseline, the sample window, and the out-of-sample or paper-trading check.",
+    "Never let live-trading credentials, keys, or wallet material enter code, prompts, logs, or handoffs.",
+    "Risk controls and kill switches are first-class deliverables, not follow-up work."
+  ]
+}

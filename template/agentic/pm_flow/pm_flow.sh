@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
 PROJECT_ROOT="$(cd -P -- "$SCRIPT_DIR/../.." && pwd -P)"
-PM_SYSTEM_PROMPT="You are a section-scoped project manager for another software agent. Own only the assigned project section. Review proposed engineering steps and completion reports, critique reasoning, detect mission drift, suggest improvements, approve or reject the path forward, and recommend the next action. Do not write code. Delegate each implementation assignment to a fresh developer sub-agent created with no inherited conversation; in Codex collaboration use fork_turns=\"none\". Never resume or reuse a developer conversation. Seed the developer only with the bounded assignment and explicitly allowlisted files. Keep durable detail in the section files and return only bounded handoffs to the root project coordinator. Focus on scope control, validation, sequencing, risks, interfaces, and drift management. Be direct and concrete."
+PM_SYSTEM_PROMPT="You are a section-scoped project management reviewer for another software agent. You are not the acting PM and you have no sub-agents: your entire output is a written review that the calling section PM will act on. Reason only about the assigned project section. Review the proposed engineering step or completion report, critique the reasoning, detect mission drift, suggest improvements, approve or reject the path forward, and name the next bounded assignment. Do not write code, do not edit files, and do not attempt to launch agents or run the flow's commands yourself. Recommend that each implementation assignment go to a fresh developer sub-agent with no inherited conversation, seeded only with the bounded assignment and explicitly allowlisted files. Focus on scope control, validation, sequencing, risks, interfaces, and drift management. Be direct and concrete, and answer only with the requested sections."
 PROJECT_OVERRIDE="${PM_FLOW_PROJECT:-}"
 SECTION_OVERRIDE="${PM_FLOW_SECTION:-}"
 PROJECT_KEY=""
@@ -26,6 +26,9 @@ usage() {
   cat <<'EOF'
 Usage:
   pm_flow.sh [--project <name>] validate
+  pm_flow.sh [--project <name>] config
+  pm_flow.sh [--project <name>] role-prompt <role>
+  pm_flow.sh [--project <name>] consult-panel <section-name> [--file <markdown-file>]
   pm_flow.sh [--project <name>] init <task-name>
   pm_flow.sh [--project <name>] init-section <section-name>
   pm_flow.sh [--project <name>] init-section <section-name> --file <markdown-file>
@@ -184,9 +187,261 @@ resolve_project_key() {
   fail "could not resolve project under $SCRIPT_DIR; use --project <name>"
 }
 
+AGENT_CONFIG_FILE=""
+ROLES_DIR=""
+DOMAINS_DIR=""
+
+# Roles are named, never vendors. This composes a role's persona with the
+# project's configured domain so prompts read as a real practitioner in the
+# problem space instead of a generic assistant.
+compose_role_prompt() {
+  local role="$1"
+  [[ -f "$AGENT_CONFIG_FILE" ]] || fail "missing agent config: $AGENT_CONFIG_FILE"
+  local role_file="$ROLES_DIR/$role.md"
+  [[ -f "$role_file" ]] || fail "unknown role '$role'; no persona at $role_file"
+  local project_name="$PROJECT_KEY"
+  if [[ -f "$CONTRACT_FILE" ]]; then
+    local contract_heading
+    contract_heading="$(/usr/bin/head -n 1 "$CONTRACT_FILE" | sed -E 's/^#[[:space:]]*//; s/[[:space:]]+Task Contract[[:space:]]*$//')"
+    [[ -z "$contract_heading" ]] || project_name="$contract_heading"
+  fi
+  python3 - "$AGENT_CONFIG_FILE" "$DOMAINS_DIR" "$role_file" "$role" "$project_name" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_path, domains_dir, role_path, role, project_name = sys.argv[1:]
+config = json.loads(Path(config_path).read_text())
+domain = config.get("domain") or "generic"
+domain_file = Path(domains_dir) / f"{domain}.json"
+if not domain_file.is_file():
+    raise SystemExit(f"unknown domain {domain!r}; no definition at {domain_file}")
+definition = json.loads(domain_file.read_text())
+titles = definition.get("titles", {})
+if role not in titles:
+    raise SystemExit(f"domain {domain!r} does not define a title for role {role!r}")
+context = definition.get("context", [])
+rendered = Path(role_path).read_text()
+rendered = rendered.replace("{{ROLE_TITLE}}", titles[role])
+rendered = rendered.replace("{{DOMAIN_LABEL}}", definition.get("label", "software project"))
+rendered = rendered.replace("{{DOMAIN_CONTEXT}}", "\n".join(f"- {line}" for line in context))
+rendered = rendered.replace("{{PROJECT_NAME}}", project_name)
+sys.stdout.write(rendered)
+PY
+}
+
+role_seat_count() {
+  local role="$1"
+  python3 - "$AGENT_CONFIG_FILE" "$role" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config = json.loads(Path(sys.argv[1]).read_text())
+binding = config.get("roles", {}).get(sys.argv[2])
+if binding is None:
+    raise SystemExit(f"unknown role: {sys.argv[2]}")
+print(len(binding) if isinstance(binding, list) else 1)
+PY
+}
+
+# Compose a role's standing persona with the specific task it is being asked to
+# perform on this call. Persona and task are separate so the same role can be
+# given different work without rewriting who it is.
+compose_role_task() {
+  local role="$1"
+  local task_file="$2"
+  shift 2
+  compose_role_prompt "$role"
+  printf '\n'
+  python3 - "$task_file" "$@" <<'PY'
+import sys
+from pathlib import Path
+
+rendered = Path(sys.argv[1]).read_text()
+for pair in sys.argv[2:]:
+    if "=" not in pair:
+        raise SystemExit(f"task substitution must be key=value, got {pair!r}")
+    key, value = pair.split("=", 1)
+    rendered = rendered.replace("{{" + key + "}}", value)
+sys.stdout.write(rendered)
+PY
+}
+
+# Run every consultant seat against the same brief, at the same time, with no
+# seat able to see another's answer. Independence is the whole point of a panel.
+cmd_consult_panel() {
+  local section_input="${1:-}"
+  [[ -n "$section_input" ]] || fail "consult-panel requires a section name"
+  local body_mode="stdin"
+  local body_path=""
+  if [[ "${2:-}" == "--file" ]]; then
+    body_mode="file"
+    body_path="${3:-}"
+  elif [[ -n "${2:-}" ]]; then
+    fail "unknown consult-panel argument: ${2:-}"
+  fi
+
+  local section_dir failure_brief
+  section_dir="$(resolve_section_dir "$section_input")"
+  failure_brief="$(read_body_arg "$body_mode" "$body_path")"
+  [[ -n "$failure_brief" ]] || fail "the failure brief must not be empty"
+
+  local seat_count
+  seat_count="$(role_seat_count consultant)"
+  [[ "$seat_count" -ge 1 ]] || fail "the consultant role has no seats"
+
+  local panel_dir="$section_dir/panels/$(now_compact_utc)-$(lower_uuid | cut -c1-8)"
+  mkdir -p "$panel_dir"
+  printf '%s\n' "$failure_brief" > "$panel_dir/failure_brief.md"
+
+  local consultant_persona="$panel_dir/consultant_prompt.md"
+  {
+    compose_role_prompt consultant
+    printf '\n---\n\n# The section that failed\n\n'
+    printf 'Section: %s\n\n' "$(basename "$section_dir")"
+    printf 'Read `%s` for the section brief and `%s` for the failure history.\n\n' \
+      "$(repo_relative_path "$section_dir/brief.md")" \
+      "$(repo_relative_path "$panel_dir/failure_brief.md")"
+    printf 'Respond with these sections only, each as a Markdown heading:\n'
+    printf '1. Diagnosis\n2. Prior art considered\n3. Alternatives\n4. What would prove each one\n5. Decision\n\n'
+    printf 'The Decision section must contain exactly one line, and that line must\n'
+    printf 'begin with one of these exact tokens: ALTERNATIVE, RETRY_INFORMED, ABANDON.\n'
+    printf 'A short justification may follow the token on the same line.\n'
+  } > "$consultant_persona"
+
+  local seat pids=() seat_status=0
+  for seat in {1..$seat_count}; do
+    (
+      "$SCRIPT_DIR/agent_exec.sh" consultant \
+        --seat "$seat" \
+        --prompt-file "$consultant_persona" \
+        --output "$panel_dir/proposal_${seat}.json" \
+        --heartbeat "$panel_dir/heartbeat.txt" \
+        --label "consultant seat $seat" \
+        > "$panel_dir/seat_${seat}.log" 2>&1
+    ) &
+    pids+=($!)
+  done
+  for seat in {1..$seat_count}; do
+    wait "${pids[$seat]}" || seat_status=1
+  done
+
+  # A seat that errors, times out, or returns something unreadable must not take
+  # the panel down with it. That tolerance is the reason to run a panel at all.
+  local delivered=0
+  for seat in {1..$seat_count}; do
+    [[ -f "$panel_dir/proposal_${seat}.json" ]] || continue
+    if python3 - "$panel_dir/proposal_${seat}.json" "$panel_dir/proposal_${seat}.md" <<'PY' 2>>"$panel_dir/seat_errors.log"
+import json
+import sys
+from pathlib import Path
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text())
+except json.JSONDecodeError as error:
+    raise SystemExit(f"seat response is not valid JSON: {error}")
+if payload.get("is_error"):
+    raise SystemExit(f"seat reported an error: {payload.get('failure_reason', 'unknown')}")
+text = (payload.get("result") or "").strip()
+if not text:
+    raise SystemExit("seat returned an empty proposal")
+Path(sys.argv[2]).write_text(text + "\n")
+PY
+    then
+      delivered=$(( delivered + 1 ))
+    else
+      printf 'WARNING: consultant seat %d did not produce a usable proposal\n' "$seat" >&2
+    fi
+  done
+
+  [[ "$delivered" -ge 1 ]] || fail "no consultant seat produced a usable proposal; see $panel_dir"
+  if [[ "$delivered" -lt "$seat_count" ]]; then
+    printf 'WARNING: only %d of %d consultant seats answered; adjudicating on what arrived\n' \
+      "$delivered" "$seat_count" >&2
+  fi
+
+  local panel_files=""
+  for seat in {1..$seat_count}; do
+    [[ -f "$panel_dir/proposal_${seat}.md" ]] || continue
+    panel_files+="- Proposal ${seat}: $(repo_relative_path "$panel_dir/proposal_${seat}.md")"$'\n'
+  done
+  panel_files+="- Failure brief: $(repo_relative_path "$panel_dir/failure_brief.md")"$'\n'
+  panel_files+="- Section brief: $(repo_relative_path "$section_dir/brief.md")"
+
+  compose_role_task cpo \
+    "$SCRIPT_DIR/tasks/consultant_panel_adjudication.md" \
+    "SECTION_KEY=$(basename "$section_dir")" \
+    "PANEL_FILES=$panel_files" \
+    > "$panel_dir/adjudication_prompt.md"
+
+  printf 'panel_dir=%s\n' "$panel_dir"
+  printf 'seats=%s\n' "$seat_count"
+  printf 'proposals=%s\n' "$delivered"
+  printf 'adjudication_prompt=%s\n' "$panel_dir/adjudication_prompt.md"
+  [[ "$seat_status" == "0" ]] || printf 'note=at least one seat failed; see the seat logs\n'
+}
+
+cmd_role_prompt() {
+  local role="${1:-}"
+  [[ -n "$role" ]] || fail "role-prompt requires a role name"
+  compose_role_prompt "$role"
+}
+
+cmd_config() {
+  [[ -f "$AGENT_CONFIG_FILE" ]] || fail "missing agent config: $AGENT_CONFIG_FILE"
+  python3 - "$AGENT_CONFIG_FILE" "$DOMAINS_DIR" "$ROLES_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_path, domains_dir, roles_dir = sys.argv[1:]
+config = json.loads(Path(config_path).read_text())
+if config.get("version") != 1:
+    raise SystemExit(f"unsupported config version: {config.get('version')!r}")
+domain = config.get("domain") or "generic"
+domain_file = Path(domains_dir) / f"{domain}.json"
+if not domain_file.is_file():
+    raise SystemExit(f"unknown domain {domain!r}; no definition at {domain_file}")
+titles = json.loads(domain_file.read_text()).get("titles", {})
+
+print(f"domain={domain}")
+roles = config.get("roles", {})
+if not roles:
+    raise SystemExit("config.json defines no roles")
+for name in sorted(roles):
+    binding = roles[name]
+    seats = binding if isinstance(binding, list) else [binding]
+    if not seats:
+        raise SystemExit(f"role {name!r} is an empty panel")
+    if not (Path(roles_dir) / f"{name}.md").is_file():
+        raise SystemExit(f"role {name!r} has no persona file under {roles_dir}")
+    if name not in titles:
+        raise SystemExit(f"domain {domain!r} does not define a title for role {name!r}")
+    print(f"{name}: seats={len(seats)} title={titles[name]!r}")
+    for index, seat in enumerate(seats, start=1):
+        if not isinstance(seat, dict):
+            raise SystemExit(f"role {name!r} seat {index} has an invalid binding")
+        cli = seat.get("cli", "")
+        if cli not in {"claude", "codex", "copilot"}:
+            raise SystemExit(f"role {name!r} seat {index} has an unsupported cli: {cli!r}")
+        difficulty = seat.get("difficulty", "medium")
+        if difficulty not in {"low", "medium", "high", "xhigh", "max"}:
+            raise SystemExit(f"role {name!r} seat {index} has an invalid difficulty: {difficulty!r}")
+        print(f"  seat {index}: cli={cli} model={seat.get('model') or '(cli default)'} "
+              f"difficulty={difficulty}")
+    if len(seats) > 1 and len({seat.get("cli") for seat in seats}) == 1:
+        print(f"  note: every {name} seat uses the same cli, which weakens an "
+              f"independent panel")
+PY
+}
+
 initialize_project_paths() {
   PROJECT_KEY="$(resolve_project_key)"
   PROJECT_DIR="$SCRIPT_DIR/$PROJECT_KEY"
+  AGENT_CONFIG_FILE="$SCRIPT_DIR/config.json"
+  ROLES_DIR="$SCRIPT_DIR/roles"
+  DOMAINS_DIR="$SCRIPT_DIR/domains"
   RUNS_DIR="$PROJECT_DIR/runs"
   STATE_DIR="$PROJECT_DIR/project_state"
   CURRENT_RUN_FILE="$STATE_DIR/current_run.txt"
@@ -348,9 +603,9 @@ write_section_pm_prompt() {
 
 You are the long-lived PM sub-agent for exactly one project section: \`$section_name\` (\`$section_key\`).
 The root agent coordinates the whole project; you own this section end to end.
-You must have been created without inherited root conversation history. In
-Codex collaboration, the root must launch you with \`fork_turns="none"\` and
-seed you only with this prompt.
+You must have been created without inherited root conversation history, seeded
+only with this prompt. (Claude Code subagents already start fresh; in Codex
+collaboration the root must launch you with \`fork_turns="none"\`.)
 
 Read only the bounded context needed to start:
 
@@ -365,7 +620,7 @@ The audit run is \`$(repo_relative_path "$run_path")\`. Do not load its full tra
 Operating contract:
 
 - Break this section into bounded engineering assignments.
-- Spawn a fresh developer sub-agent for every assignment with no inherited PM conversation. In Codex collaboration, use \`fork_turns="none"\`.
+- Spawn a fresh developer sub-agent for every assignment with no inherited PM conversation.
 - Never resume, reuse, or keep a developer conversation alive.
 - Give each developer only its objective, owned paths, constraints, acceptance checks, and the minimum relevant files.
 - Review the developer's report and validation evidence before deciding the next assignment.
@@ -774,6 +1029,14 @@ assert_section_open_for_work() {
   esac
 }
 
+# Cheap pre-flight so a rejected prepare fails before writing a pending
+# directory. activate_prepared_pending still re-checks under the record lock,
+# which is what actually makes the decision safe.
+assert_ready_to_prepare() {
+  assert_section_open_for_work
+  assert_no_active_pending
+}
+
 activate_prepared_pending() {
   local pending_dir="$1"
   local run_dir_before_lock="$RUN_DIR"
@@ -865,10 +1128,14 @@ for line in lines:
         values.append(value)
 if not inside or not values:
     raise SystemExit("response Decision section is empty")
-decision = values[0]
+# The decision line must lead with the verdict token. A trailing justification
+# on the same line is accepted so a well-formed review is not discarded after
+# the PM call has already been spent.
+token = re.match(r"^([A-Z][A-Z_]*)\b", values[0])
+decision = token.group(1) if token else values[0]
 if decision not in allowed:
     raise SystemExit(
-        f"response Decision must be exactly one of {sorted(allowed)}, got {decision!r}"
+        f"response Decision must begin with one of {sorted(allowed)}, got {values[0]!r}"
     )
 print(decision)
 ' "$allowed_csv" || fail "content missing valid decision"
@@ -1101,11 +1368,6 @@ update_session_from_response() {
   fi
 }
 
-serialize_prompt_for_claude() {
-  local prompt="$1"
-  printf '%s' "$prompt" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
-}
-
 session_mode_flag() {
   if [[ "${SESSION_STARTED:-0}" == "1" && -n "${SESSION_ID:-}" ]]; then
     printf '%s\n' "resume"
@@ -1118,13 +1380,14 @@ write_command_file() {
   local command_path="$1"
   local pending_dir="$2"
   local mode_flag="$3"
-  local prompt_path="$pending_dir/prompt_one_line.txt"
+  local prompt_path="$pending_dir/prompt.md"
   local system_prompt_path="$pending_dir/system_prompt.txt"
   local response_path="$pending_dir/response.json"
   local net_exec_path="./agentic/pm_flow/net_exec.sh"
   local pm_flow_path="./agentic/pm_flow/pm_flow.sh"
-  local prompt_one_line
-  prompt_one_line="$(/bin/cat "$prompt_path")"
+  # The prompt is passed by command substitution rather than inlined, so the
+  # PM receives the structured multi-line prompt exactly as written in
+  # prompt.md instead of a flattened single line.
   {
     printf '%q --project %q claim-execution %q && ' "$pm_flow_path" "$PROJECT_KEY" "$pending_dir"
     printf '%q claude -p --output-format json ' "$net_exec_path"
@@ -1132,7 +1395,8 @@ write_command_file() {
     if [[ "$mode_flag" == "resume" && -n "${SESSION_ID:-}" ]]; then
       printf -- '--resume %q ' "$SESSION_ID"
     fi
-    printf -- '--append-system-prompt-file %q -- %q > %q\n' "$system_prompt_path" "$prompt_one_line" "$response_path"
+    printf -- '--append-system-prompt-file %q -- ' "$system_prompt_path"
+    printf -- '"$(/bin/cat %q)" > %q\n' "$prompt_path" "$response_path"
   } > "$command_path"
 }
 
@@ -1382,8 +1646,8 @@ cmd_init_section() {
   printf '%s\n' "$SECTION_NAME" > "$SECTION_DIR/name.txt"
   printf '%s\n' "$owned_paths" > "$SECTION_DIR/owned_paths.txt"
   printf '%s\n' "$dependency_handoffs" > "$SECTION_DIR/dependency_handoffs.txt"
-  printf 'active\n' > "$SECTION_DIR/status.txt"
-  printf 'Section initialized; the section PM has not reported a material outcome yet.\n' > "$SECTION_DIR/summary.txt"
+  printf 'planned\n' > "$SECTION_DIR/status.txt"
+  printf 'Section created; its PM sub-agent has not been launched yet.\n' > "$SECTION_DIR/summary.txt"
   printf '%s\n' "$(now_iso_utc)" > "$SECTION_DIR/updated_at.txt"
   printf '%s\n' "$section_brief" > "$SECTION_DIR/brief.md"
   {
@@ -1682,8 +1946,9 @@ cmd_prepare_step() {
     fail "unknown prepare-step argument: ${3:-}"
   fi
   load_run "$run_dir_input"
+  assert_ready_to_prepare
 
-  local engineer_body prompt prompt_one_line mode_flag pending_dir section_context
+  local engineer_body prompt mode_flag pending_dir section_context
   engineer_body="$(read_body_arg "$body_mode" "$body_path")"
   mode_flag="$(session_mode_flag)"
   pending_dir="$(prepare_pending_dir "step" "$stage_name")"
@@ -1700,7 +1965,7 @@ Section boundary:
 - Own only section "$SECTION_NAME" ($SECTION_KEY).
 - Do not read another section's transcript or developer conversation.
 - Read another section only through a dependency handoff explicitly required by this section brief.
-- Every new implementation assignment goes to a no-history developer sub-agent; in Codex collaboration use fork_turns="none" and never resume a developer conversation.
+- Every new implementation assignment goes to a no-history developer sub-agent, and a developer conversation is never resumed.
 EOF
 )"
   fi
@@ -1717,7 +1982,7 @@ Read these files from the workspace before answering:
 - $pending_dir/engineer_update.md
 $section_context
 
-Respond with these sections only:
+Respond with these sections only, each as a Markdown heading:
 1. Assessment
 2. Drift review
 3. Risks
@@ -1725,14 +1990,14 @@ Respond with these sections only:
 5. Decision
 6. Next action
 
-Decision must be one of: GO, GO_WITH_CHANGES, or NO_GO.
+The Decision section must contain exactly one line, and that line must begin
+with one of these exact tokens: GO, GO_WITH_CHANGES, NO_GO. A short
+justification may follow the token on the same line.
 EOF
 )"
-  prompt_one_line="$(serialize_prompt_for_claude "$prompt")"
 
   printf '%s\n' "$engineer_body" > "$pending_dir/engineer_update.md"
   printf '%s\n' "$prompt" > "$pending_dir/prompt.md"
-  printf '%s\n' "$prompt_one_line" > "$pending_dir/prompt_one_line.txt"
   printf '%s\n' "$PM_SYSTEM_PROMPT" > "$pending_dir/system_prompt.txt"
   : > "$pending_dir/response.json"
   write_review_context_manifest "$pending_dir"
@@ -1760,8 +2025,9 @@ cmd_prepare_complete() {
     fail "unknown prepare-complete argument: ${2:-}"
   fi
   load_run "$run_dir_input"
+  assert_ready_to_prepare
 
-  local engineer_body prompt prompt_one_line mode_flag pending_dir section_context
+  local engineer_body prompt mode_flag pending_dir section_context
   engineer_body="$(read_body_arg "$body_mode" "$body_path")"
   mode_flag="$(session_mode_flag)"
   pending_dir="$(prepare_pending_dir "complete" "final")"
@@ -1793,7 +2059,7 @@ Read these files from the workspace before answering:
 - $pending_dir/engineer_update.md
 $section_context
 
-Respond with these sections only:
+Respond with these sections only, each as a Markdown heading:
 1. Outcome assessment
 2. Drift review
 3. Expected vs observed
@@ -1801,14 +2067,14 @@ Respond with these sections only:
 5. Recommended next steps
 6. Decision
 
-Decision must be one of: DONE, FOLLOW_UP, or REWORK.
+The Decision section must contain exactly one line, and that line must begin
+with one of these exact tokens: DONE, FOLLOW_UP, REWORK. A short justification
+may follow the token on the same line.
 EOF
 )"
-  prompt_one_line="$(serialize_prompt_for_claude "$prompt")"
 
   printf '%s\n' "$engineer_body" > "$pending_dir/engineer_update.md"
   printf '%s\n' "$prompt" > "$pending_dir/prompt.md"
-  printf '%s\n' "$prompt_one_line" > "$pending_dir/prompt_one_line.txt"
   printf '%s\n' "$PM_SYSTEM_PROMPT" > "$pending_dir/system_prompt.txt"
   : > "$pending_dir/response.json"
   write_review_context_manifest "$pending_dir"
@@ -1960,6 +2226,18 @@ main() {
     validate)
       shift || true
       cmd_validate "$@"
+      ;;
+    config)
+      shift || true
+      cmd_config "$@"
+      ;;
+    role-prompt)
+      shift || true
+      cmd_role_prompt "$@"
+      ;;
+    consult-panel)
+      shift || true
+      cmd_consult_panel "$@"
       ;;
     init)
       shift || true

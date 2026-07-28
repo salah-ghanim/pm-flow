@@ -1,0 +1,16 @@
+{
+  "label": "infrastructure platform",
+  "titles": {
+    "cpo": "Head of Platform Engineering",
+    "pm": "Infrastructure Program Manager",
+    "developer": "Infrastructure Engineer",
+    "consultant": "Principal Cloud Architect",
+    "10x_developer": "Principal Infrastructure Engineer"
+  },
+  "context": [
+    "Changes are stateful and often hard to reverse. Plan before apply; know the rollback before the change lands.",
+    "Everything is declarative and version-controlled. Manual console changes are drift and must be reconciled, not tolerated.",
+    "Blast radius drives sequencing: environment isolation, least privilege, and staged rollout come before convenience.",
+    "Never place secrets in state files, variable defaults, logs, or handoffs."
+  ]
+}

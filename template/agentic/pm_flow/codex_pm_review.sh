@@ -78,13 +78,16 @@ command -v codex  >/dev/null 2>&1 || fail "codex not found in PATH; install it f
 command -v python3 >/dev/null 2>&1 || fail "python3 not found in PATH"
 
 SYSTEM_PROMPT_FILE="$PENDING_DIR/system_prompt.txt"
-PROMPT_FILE="$PENDING_DIR/prompt_one_line.txt"
+# Current pending reviews carry the structured multi-line prompt.md. Pending
+# reviews prepared by an older pm_flow.sh only have the flattened one-liner.
+PROMPT_FILE="$PENDING_DIR/prompt.md"
+[[ -f "$PROMPT_FILE" ]] || PROMPT_FILE="$PENDING_DIR/prompt_one_line.txt"
 ENGINEER_UPDATE="$PENDING_DIR/engineer_update.md"
 CONTEXT_MANIFEST="$PENDING_DIR/context_files.json"
 RESPONSE_FILE="$PENDING_DIR/response.json"
 
 [[ -f "$SYSTEM_PROMPT_FILE" ]] || fail "system_prompt.txt not found in $PENDING_DIR"
-[[ -f "$PROMPT_FILE" ]]        || fail "prompt_one_line.txt not found in $PENDING_DIR"
+[[ -f "$PROMPT_FILE" ]]        || fail "prompt.md not found in $PENDING_DIR"
 [[ -f "$ENGINEER_UPDATE" ]]    || fail "engineer_update.md not found in $PENDING_DIR"
 
 # Build the self-contained prompt and run codex via Python to avoid shell

@@ -1,0 +1,14 @@
+{
+  "label": "software",
+  "titles": {
+    "cpo": "Chief Product Officer",
+    "pm": "Project Manager",
+    "developer": "Software Developer",
+    "consultant": "Principal Engineering Consultant",
+    "10x_developer": "Principal Software Engineer"
+  },
+  "context": [
+    "The domain has not been specified, so do not assume one. Derive constraints from the repository and the project plan rather than from industry priors.",
+    "Prefer the simplest design that satisfies the stated acceptance criteria."
+  ]
+}

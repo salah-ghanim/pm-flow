@@ -10,7 +10,7 @@ TEMPLATE_CACHE_DIR=""
 usage() {
   cat <<'EOF'
 Usage:
-  install.sh [target-repo] [--name <project-name>] [--project-key <key>] [--mission <text>] [--baseline <text>] [--repo-raw-base <url>] [--force]
+  install.sh [target-repo] [--name <project-name>] [--project-key <key>] [--domain <domain>] [--mission <text>] [--baseline <text>] [--repo-raw-base <url>] [--force]
 
 Installs the generic Claude PM flow template into the target repository.
 
@@ -19,7 +19,10 @@ Default reinstall behavior:
 - refresh per-project `task_contract.md`, `start.md`, and `resume.md`
 - back up pre-section start/resume prompts once with a `.pre-sections.md` suffix
 - preserve the project plan, section workspaces, generated registry, and run history
+- preserve config.json (cli, model, and difficulty bindings per role)
 - use `--force` only when a full project-template replacement is intended
+
+Domains: generic (default), saas, prop-trading, crypto-trading, infrastructure.
 
 Examples:
   ./install.sh /path/to/repo --name "My Repo"
@@ -79,6 +82,19 @@ prefetch_templates() {
     "template/agentic/pm_flow/pm_flow.sh"
     "template/agentic/pm_flow/net_exec.sh"
     "template/agentic/pm_flow/codex_pm_review.sh"
+    "template/agentic/pm_flow/agent_exec.sh"
+    "template/agentic/pm_flow/config.json"
+    "template/agentic/pm_flow/roles/cpo.md"
+    "template/agentic/pm_flow/roles/pm.md"
+    "template/agentic/pm_flow/roles/developer.md"
+    "template/agentic/pm_flow/roles/consultant.md"
+    "template/agentic/pm_flow/roles/10x_developer.md"
+    "template/agentic/pm_flow/domains/generic.json"
+    "template/agentic/pm_flow/domains/saas.json"
+    "template/agentic/pm_flow/domains/prop-trading.json"
+    "template/agentic/pm_flow/domains/crypto-trading.json"
+    "template/agentic/pm_flow/domains/infrastructure.json"
+    "template/agentic/pm_flow/tasks/consultant_panel_adjudication.md"
     "template/agentic/pm_flow/local_env.sh.example"
     "template/agentic/pm_flow/projects.md"
     "template/agentic/pm_flow/project/project_state/README.md"
@@ -221,7 +237,8 @@ resolve_install_project_key() {
       return
     fi
     if [[ "${#candidates[@]}" -gt "1" ]]; then
-      fail "multiple pm-flow project workspaces exist; rerun with --project-key <key>"
+      fail "$(printf 'multiple pm-flow project workspaces exist under %s; rerun with --project-key <key>\nFound: %s\nOnly the selected workspace has its task_contract.md, start.md, and resume.md refreshed.' \
+        "$flow_dir" "${(j:, :)candidates}")"
     fi
   fi
 
@@ -287,6 +304,7 @@ main() {
   local primary_mission="$DEFAULT_MISSION"
   local baseline_name="$DEFAULT_BASELINE"
   local repo_raw_base="${PM_FLOW_REPO_RAW_BASE:-}"
+  local domain="generic"
   local force="0"
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -309,6 +327,14 @@ main() {
         shift || fail "--baseline requires a value"
         baseline_name="${1:-}"
         [[ -n "$baseline_name" ]] || fail "--baseline requires a value"
+        ;;
+      --domain)
+        shift || fail "--domain requires a value"
+        domain="${1:-}"
+        case "$domain" in
+          generic|saas|prop-trading|crypto-trading|infrastructure) ;;
+          *) fail "unknown --domain '$domain'; choose generic, saas, prop-trading, crypto-trading, or infrastructure" ;;
+        esac
         ;;
       --repo-raw-base)
         shift || fail "--repo-raw-base requires a value"
@@ -377,6 +403,23 @@ main() {
   copy_template "template/agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
   copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
   copy_template "template/agentic/pm_flow/codex_pm_review.sh" "$flow_dir/codex_pm_review.sh"
+  copy_template "template/agentic/pm_flow/agent_exec.sh" "$flow_dir/agent_exec.sh"
+  local role_name domain_name
+  for role_name in cpo pm developer consultant 10x_developer; do
+    copy_template "template/agentic/pm_flow/roles/$role_name.md" "$flow_dir/roles/$role_name.md"
+  done
+  for domain_name in generic saas prop-trading crypto-trading infrastructure; do
+    copy_template "template/agentic/pm_flow/domains/$domain_name.json" "$flow_dir/domains/$domain_name.json"
+  done
+  copy_template "template/agentic/pm_flow/tasks/consultant_panel_adjudication.md" \
+    "$flow_dir/tasks/consultant_panel_adjudication.md"
+  # config.json carries the operator's cli/model/difficulty choices, so a
+  # reinstall must never overwrite it.
+  if [[ ! -f "$flow_dir/config.json" || "$force" == "1" ]]; then
+    fetch_template "template/agentic/pm_flow/config.json" \
+      | sed -e "s|{{DOMAIN}}|$(escape_sed_replacement "$domain")|g" > "$flow_dir/.config.json.tmp"
+    mv "$flow_dir/.config.json.tmp" "$flow_dir/config.json"
+  fi
   copy_template "template/agentic/pm_flow/local_env.sh.example" "$flow_dir/local_env.sh.example"
   if [[ ! -f "$flow_dir/projects.md" || "$force" == "1" ]]; then
     render_template \
@@ -483,6 +526,7 @@ main() {
   chmod +x "$flow_dir/pm_flow.sh"
   chmod +x "$flow_dir/net_exec.sh"
   chmod +x "$flow_dir/codex_pm_review.sh"
+  chmod +x "$flow_dir/agent_exec.sh"
 
   touch "$project_dir/runs/.gitkeep"
   touch "$project_dir/sections/.gitkeep"
@@ -496,6 +540,22 @@ main() {
   printf 'project_name=%s\n' "$project_name"
   printf 'project_key=%s\n' "$project_key"
   printf 'project_dir=%s\n' "$project_dir"
+
+  # The shared scripts are refreshed for every workspace in this flow dir, but
+  # only the selected workspace gets a refreshed contract and prompts. Say so,
+  # because the others now run new code against older rules.
+  local other_workspaces=()
+  local candidate
+  for candidate in "$flow_dir"/*(/N); do
+    if [[ -f "$candidate/task_contract.md" && "$(basename "$candidate")" != "$project_key" ]]; then
+      other_workspaces+=("$(basename "$candidate")")
+    fi
+  done
+  if [[ "${#other_workspaces[@]}" -gt 0 ]]; then
+    printf 'WARNING: %d other project workspace(s) share the upgraded scripts but keep their existing task_contract.md, start.md, and resume.md: %s\n' \
+      "${#other_workspaces[@]}" "${(j:, :)other_workspaces}" >&2
+    printf 'WARNING: rerun the installer with --project-key <key> for each one to bring its rules in line.\n' >&2
+  fi
   if [[ -n "$REPO_RAW_BASE" ]]; then
     printf 'install_source=remote\n'
   else

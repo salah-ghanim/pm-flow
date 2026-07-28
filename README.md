@@ -21,7 +21,7 @@ Claude is the default PM reviewer. When Claude is unavailable,
 ## Core invariants
 
 - Each section owns an independent PM session and audit run.
-- Every PM and developer sub-agent launch requires no inherited parent conversation (`fork_turns="none"` in Codex collaboration).
+- Every PM and developer sub-agent launch requires no inherited parent conversation.
 - The root context receives section handoffs capped at 500 words and 8192 bytes.
 - Section transitions and PM restarts use explicit file checkpoints instead of automatic compaction.
 - Independent sections can proceed concurrently only when their owned paths do not overlap.

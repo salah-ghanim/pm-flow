@@ -1,0 +1,16 @@
+{
+  "label": "proprietary trading system",
+  "titles": {
+    "cpo": "Head of Trading Strategy",
+    "pm": "Prop Trading Product Manager",
+    "developer": "Prop Trading Developer",
+    "consultant": "Quantitative Research Consultant",
+    "10x_developer": "Principal Trading Systems Engineer"
+  },
+  "context": [
+    "A backtest is evidence, not proof. State the baseline, the sample, and the out-of-sample check before claiming an edge.",
+    "Lookahead bias, survivorship bias, and overfitting to a single regime are the default failure modes. Actively test for them.",
+    "Execution assumptions (fills, slippage, fees, borrow) change results more than signal tweaks. Make them explicit.",
+    "Risk limits and position sizing are part of the strategy, not a wrapper added later."
+  ]
+}

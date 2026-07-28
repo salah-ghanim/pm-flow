@@ -104,6 +104,11 @@ assert_file_contains \
   "installer renders the actual project key"
 assert_file_contains "$FIXTURE_REPO/CLAUDE.md" "Preserve this custom rule." "installer preserves existing CLAUDE rules"
 assert_file_contains "$FIXTURE_REPO/CLAUDE.md" "<!-- pm-flow:begin -->" "installer activates managed CLAUDE rules"
+assert_file_contains "$FIXTURE_REPO/CLAUDE.md" "Identify your role before acting" "managed rules route by role"
+assert_not_contains \
+  "$(/bin/cat "$FIXTURE_REPO/CLAUDE.md")" \
+  "Create independently owned sections with" \
+  "managed rules do not give every agent coordinator instructions"
 assert_file_contains "$FIXTURE_REPO/CLAUDE.pre-pm-flow.md" "Preserve this custom rule." "installer backs up CLAUDE rules"
 
 alpha_output="$("$PM" init-section alpha <<'EOF'
@@ -166,8 +171,8 @@ beta_run="$(output_value "$beta_output" run_dir)"
 [[ "$alpha_run" != "$beta_run" ]] || fail "sections share a run"
 
 sections_output="$("$PM" list-sections)"
-assert_contains "$sections_output" "| alpha | active |" "alpha registry row"
-assert_contains "$sections_output" "| beta | active |" "beta registry row"
+assert_contains "$sections_output" "| alpha | planned |" "alpha registry row"
+assert_contains "$sections_output" "| beta | planned |" "beta registry row"
 assert_contains "$sections_output" "[handoff](../sections/alpha/handoff.md)" "registry handoff link"
 assert_file_contains \
   "$PROJECT_DIR/sections/alpha/pm_prompt.md" \
@@ -179,8 +184,12 @@ assert_file_contains \
   "section PM context boundary"
 assert_file_contains \
   "$PROJECT_DIR/sections/alpha/pm_prompt.md" \
-  'fork_turns="none"' \
+  "without inherited root conversation history" \
   "section PM no-history launch"
+assert_not_contains \
+  "$(/bin/cat "$PROJECT_DIR/sections/alpha/pm_prompt.md")" \
+  'In Codex collaboration, use' \
+  "section PM prompt states the requirement, not one host's mechanism"
 assert_file_contains "$PROJECT_DIR/sections/alpha/owned_paths.txt" "src/alpha/**" "owned paths are persisted"
 assert_file_contains \
   "$PROJECT_DIR/sections/beta/dependency_handoffs.txt" \
@@ -223,6 +232,14 @@ assert_not_contains "$(/bin/cat "$beta_pending/command.txt")" "--resume" "beta f
 assert_file_contains "$alpha_pending/prompt.md" "sections/alpha/state.md" "alpha prompt scope"
 assert_not_contains "$(/bin/cat "$alpha_pending/prompt.md")" "sections/beta/state.md" "alpha prompt excludes beta"
 assert_file_contains "$alpha_pending/command.txt" "claim-execution" "generated command claims exactly-once execution"
+assert_file_contains "$alpha_pending/command.txt" "prompt.md" "generated command sends the structured prompt file"
+assert_not_contains \
+  "$(/bin/cat "$alpha_pending/command.txt")" \
+  "Respond\\ with" \
+  "generated command does not inline a flattened prompt"
+assert_file_contains "$alpha_pending/prompt.md" "1. Assessment" "structured prompt keeps its section list"
+[[ "$(/bin/cat "$alpha_pending/prompt.md" | wc -l | tr -d '[:space:]')" -gt 5 ]] || \
+  fail "prompt.md was flattened to a single line"
 assert_file_contains \
   "$beta_pending/context_files.json" \
   "dependencies/alpha-handoff.md" \
@@ -253,15 +270,33 @@ rmdir "$alpha_run/.record.lock"
 
 alpha_parallel_one="$("$PM" --section alpha prepare-step current parallel-one --file "$TEST_ROOT/developer-report.md")"
 alpha_parallel_one_dir="$(output_value "$alpha_parallel_one" pending_dir)"
+pending_count_before_rejection="$(ls -d "$alpha_run"/pending/*/ | wc -l | tr -d '[:space:]')"
 expect_failure \
   "parallel same-section prepare" \
   "$PM" --section alpha prepare-step current parallel-two --file "$TEST_ROOT/developer-report.md"
 assert_file_contains "$TEST_ROOT/expected-failure.log" "active pending review" "same-section pending serialization"
+pending_count_after_rejection="$(ls -d "$alpha_run"/pending/*/ | wc -l | tr -d '[:space:]')"
+[[ "$pending_count_before_rejection" == "$pending_count_after_rejection" ]] || \
+  fail "rejected prepare left an orphan pending directory"
 write_step_response "$alpha_parallel_one_dir/response.json" "alpha-session-1"
 "$PM" claim-execution "$alpha_parallel_one_dir" > "$TEST_ROOT/claim-alpha-parallel.out"
 "$PM" record-step "$alpha_parallel_one_dir" > "$TEST_ROOT/record-alpha-parallel.out"
 expect_failure "duplicate same-section response" "$PM" record-step "$alpha_parallel_one_dir"
 assert_file_contains "$TEST_ROOT/expected-failure.log" "not the active review" "duplicate response error"
+
+alpha_justified="$("$PM" --section alpha prepare-step current justified --file "$TEST_ROOT/developer-report.md")"
+alpha_justified_dir="$(output_value "$alpha_justified" pending_dir)"
+{
+  printf '{\n'
+  printf '  "is_error": false,\n'
+  printf '  "result": "## Assessment\\nAligned.\\n\\n## Drift review\\nNo drift.\\n\\n## Risks\\nLow.\\n\\n## Improvements\\nNarrow the scope.\\n\\n## Decision\\nGO_WITH_CHANGES - narrow the scope to the owned paths first.\\n\\n## Next action\\nUse a fresh developer.",\n'
+  printf '  "session_id": "alpha-session-1",\n'
+  printf '  "session_resumable": true,\n'
+  printf '  "pm_backend": "claude"\n'
+  printf '}\n'
+} > "$alpha_justified_dir/response.json"
+"$PM" claim-execution "$alpha_justified_dir" > "$TEST_ROOT/claim-alpha-justified.out"
+"$PM" record-step "$alpha_justified_dir" > "$TEST_ROOT/record-alpha-justified.out"
 
 write_step_response "$beta_pending/response.json" "beta-session-1"
 "$PM" claim-execution "$beta_pending" > "$TEST_ROOT/claim-beta.out"
@@ -512,7 +547,7 @@ MOVE_PM="$MOVE_SOURCE/agentic/pm_flow/pm_flow.sh"
 EOF
 mv "$MOVE_SOURCE" "$MOVE_DESTINATION"
 MOVED_PM="$MOVE_DESTINATION/agentic/pm_flow/pm_flow.sh"
-assert_contains "$("$MOVED_PM" list-sections)" "| mover | active |" "moved install resolves persisted project key"
+assert_contains "$("$MOVED_PM" list-sections)" "| mover | planned |" "moved install resolves persisted project key"
 "$REPO_ROOT/install.sh" "$MOVE_DESTINATION" --name "Movable Project" > "$TEST_ROOT/move-reinstall.out"
 assert_file_contains "$MOVE_DESTINATION/agentic/pm_flow/.project-key" "move-source" "project key persists across rename"
 [[ ! -d "$MOVE_DESTINATION/agentic/pm_flow/move-destination" ]] || \
@@ -525,4 +560,240 @@ expect_failure "cross-project pending containment" "$PM" print-command "$moved_p
 assert_file_contains "$TEST_ROOT/expected-failure.log" "outside the selected project" "pending cannot cross project boundary"
 "$MOVED_PM" cancel-pending "$moved_pending" "relocation test complete" > "$TEST_ROOT/cancel-moved.out"
 
+# --- role/domain personas and the agent dispatcher -------------------------
+
+ROLE_REPO="$TEST_ROOT/role repo"
+mkdir "$ROLE_REPO"
+"$REPO_ROOT/install.sh" "$ROLE_REPO" --name "Alpha Signals" --domain crypto-trading \
+  > "$TEST_ROOT/role-install.out"
+ROLE_PM="$ROLE_REPO/agentic/pm_flow/pm_flow.sh"
+ROLE_FLOW="$ROLE_REPO/agentic/pm_flow"
+AGENT_EXEC="$ROLE_FLOW/agent_exec.sh"
+
+[[ -x "$AGENT_EXEC" ]] || fail "installer did not create executable agent_exec.sh"
+assert_file_contains "$ROLE_FLOW/config.json" '"domain": "crypto-trading"' "installer records the chosen domain"
+
+role_config="$("$ROLE_PM" config)"
+assert_contains "$role_config" "domain=crypto-trading" "config reports the domain"
+assert_contains "$role_config" "title='Crypto Trading Product Manager'" "domain specializes the pm title"
+assert_contains "$role_config" "10x_developer:" "config lists the rescue role"
+
+consultant_prompt="$("$ROLE_PM" role-prompt consultant)"
+assert_contains "$consultant_prompt" "Quantitative Trading Consultant" "consultant persona uses the domain title"
+assert_contains "$consultant_prompt" "Alpha Signals" "role prompt carries the project name"
+assert_contains "$consultant_prompt" "backtest is evidence, not proof" "role prompt carries domain context"
+assert_not_contains "$consultant_prompt" "{{" "role prompt has no unrendered placeholders"
+assert_not_contains "$consultant_prompt" "claude" "role prompt does not name a vendor cli"
+
+generic_repo="$TEST_ROOT/generic repo"
+mkdir "$generic_repo"
+"$REPO_ROOT/install.sh" "$generic_repo" --name "Plain Project" > "$TEST_ROOT/generic-install.out"
+generic_prompt="$("$generic_repo/agentic/pm_flow/pm_flow.sh" role-prompt cpo)"
+assert_contains "$generic_prompt" "Chief Product Officer" "generic domain falls back to a neutral title"
+assert_contains "$generic_prompt" "domain has not been specified" "generic domain avoids industry priors"
+
+expect_failure "unknown domain rejected" \
+  "$REPO_ROOT/install.sh" "$TEST_ROOT/bad domain repo" --domain nonsense
+assert_file_contains "$TEST_ROOT/expected-failure.log" "unknown --domain" "domain validation"
+
+# Every role binds to a cli, a model, and a difficulty, and the difficulty is
+# translated into whatever knob that cli actually exposes.
+rebind_role() {
+  python3 - "$ROLE_FLOW/config.json" "$1" "$2" "$3" "$4" <<'PY'
+import json, sys
+from pathlib import Path
+path, role, cli, model, difficulty = sys.argv[1:]
+config_path = Path(path)
+config = json.loads(config_path.read_text())
+config["roles"][role] = {"cli": cli, "model": model, "difficulty": difficulty}
+config["supervision"] = {
+    "heartbeat_stall_seconds": 60, "max_attempts": 3,
+    "retry_backoff_seconds": 1, "usage_limit_pause_seconds": 1,
+}
+config_path.write_text(json.dumps(config, indent=2) + "\n")
+PY
+}
+printf 'Review the proposal.\nSecond line.\n' > "$TEST_ROOT/role-prompt.md"
+
+dry_run_argv() {
+  "$AGENT_EXEC" "$1" --prompt-file "$TEST_ROOT/role-prompt.md" \
+    --output "$TEST_ROOT/role-response.json" --dry-run
+}
+
+rebind_role developer claude claude-sonnet-5 medium
+developer_dry="$(dry_run_argv developer)"
+assert_contains "$developer_dry" "--effort medium" "claude difficulty maps to --effort"
+assert_contains "$developer_dry" "acceptEdits" "building roles get write access"
+
+rebind_role pm codex gpt-5.1-codex max
+pm_dry="$(dry_run_argv pm)"
+assert_contains "$pm_dry" "model_reasoning_effort=high" "codex collapses the top difficulty levels"
+assert_contains "$pm_dry" "sandbox read-only" "reviewing roles stay read-only"
+
+rebind_role consultant copilot claude-opus-4.6 xhigh
+consultant_dry="$(dry_run_argv consultant)"
+assert_contains "$consultant_dry" "--effort xhigh" "copilot difficulty maps to --effort"
+assert_contains "$consultant_dry" "no-custom-instructions" "copilot ignores repo instructions for a role prompt"
+
+expect_failure "unknown role rejected" \
+  "$AGENT_EXEC" architect --prompt-file "$TEST_ROOT/role-prompt.md" \
+  --output "$TEST_ROOT/role-response.json" --dry-run
+assert_file_contains "$TEST_ROOT/expected-failure.log" "unknown role" "role validation"
+
+# Supervision: a real error must not be retried, transient faults must be, and a
+# usage limit must pause rather than burn the remaining attempts.
+mkdir "$TEST_ROOT/agent-bin"
+stub_cli() {
+  printf '#!/bin/zsh -f\n%s\n' "$1" > "$TEST_ROOT/agent-bin/claude"
+  chmod +x "$TEST_ROOT/agent-bin/claude"
+}
+run_supervised() {
+  PATH="$TEST_ROOT/agent-bin:$PATH" "$AGENT_EXEC" developer \
+    --prompt-file "$TEST_ROOT/role-prompt.md" \
+    --output "$TEST_ROOT/role-response.json" \
+    --heartbeat "$TEST_ROOT/heartbeat.txt" > "$TEST_ROOT/supervised.out" 2>&1 || true
+}
+response_field() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' \
+    "$TEST_ROOT/role-response.json" "$1"
+}
+
+rebind_role developer claude "" low
+stub_cli 'print -u2 "Error: invalid model specified"; exit 1'
+run_supervised
+[[ "$(response_field attempts)" == "1" ]] || fail "a fatal CLI error must not be retried"
+[[ "$(response_field failure_reason)" == "fatal" ]] || fail "fatal failure was misclassified"
+
+stub_cli 'print -u2 "fetch failed: ECONNRESET"; exit 1'
+run_supervised
+[[ "$(response_field attempts)" == "3" ]] || fail "a network fault must exhaust the retry budget"
+[[ "$(response_field failure_reason)" == "network" ]] || fail "network failure was misclassified"
+
+: > "$TEST_ROOT/heartbeat.txt"
+rm -f "$TEST_ROOT/usage-limit-tried"
+stub_cli "if [[ -f $TEST_ROOT/usage-limit-tried ]]; then
+  printf '{\"is_error\":false,\"result\":\"recovered\",\"session_id\":\"s1\"}'
+else
+  touch $TEST_ROOT/usage-limit-tried
+  print -u2 '429 usage limit reached'
+  exit 1
+fi"
+run_supervised
+[[ "$(response_field result)" == "recovered" ]] || fail "usage limit pause did not recover"
+[[ "$(response_field attempts)" == "2" ]] || fail "usage limit recovery took the wrong number of attempts"
+[[ "$(response_field session_resumable)" == "False" ]] || \
+  fail "a dispatched role must not advertise a resumable session"
+assert_file_contains "$TEST_ROOT/heartbeat.txt" "usage_limit" "heartbeat records why an attempt failed"
+assert_file_contains "$TEST_ROOT/heartbeat.txt" "finished" "heartbeat records completion"
+
+# --- consultant panel ------------------------------------------------------
+
+assert_contains "$role_config" "consultant: seats=2" "consultant is a panel by default"
+assert_contains "$role_config" "seat 1: cli=claude" "panel seat one"
+assert_contains "$role_config" "seat 2: cli=codex" "panel seat two uses a different model family"
+
+# The dispatcher tests above rebound consultant to a single seat. Restore the
+# two-seat panel, and keep the short supervision budget so a stubbed failure
+# does not stall the suite.
+python3 - "$ROLE_FLOW/config.json" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+config["roles"]["consultant"] = [
+    {"cli": "claude", "model": "claude-opus-5", "difficulty": "xhigh"},
+    {"cli": "codex", "model": "gpt-5.1-codex", "difficulty": "high"},
+]
+config["supervision"] = {
+    "heartbeat_stall_seconds": 60, "max_attempts": 1,
+    "retry_backoff_seconds": 1, "usage_limit_pause_seconds": 1,
+}
+path.write_text(json.dumps(config, indent=2) + "\n")
+PY
+assert_contains "$("$ROLE_PM" config)" "consultant: seats=2" "panel restored for the panel tests"
+
+"$ROLE_PM" init-section signal-model <<'EOF' > "$TEST_ROOT/panel-section.out"
+## Objective
+
+- Build the signal model.
+
+## Scope
+
+- Signal generation only.
+
+## Owned paths
+
+- `src/signal/**`
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- Out-of-sample performance beats the baseline.
+
+## Rejection conditions
+
+- Any lookahead bias.
+EOF
+
+panel_prompt="$("$ROLE_PM" role-prompt consultant)"
+assert_contains "$panel_prompt" "one of several independent consultants" "consultants know they are a panel"
+assert_contains "$panel_prompt" "cannot see the others" "panel seats are blind to each other"
+
+mkdir "$TEST_ROOT/panel-bin"
+{
+  printf '#!/bin/zsh -f\n'
+  printf 'sleep 1\n'
+  printf 'python3 -c "import json;print(json.dumps({\\"is_error\\":False,\\"result\\":\\"## Diagnosis\\\\nRegime overfit.\\\\n\\\\n## Decision\\\\nALTERNATIVE - walk-forward split\\",\\"session_id\\":\\"\\"}))"\n'
+} > "$TEST_ROOT/panel-bin/claude"
+{
+  printf '#!/bin/zsh -f\n'
+  printf 'sleep 1\n'
+  printf 'out=""\n'
+  printf 'while [[ $# -gt 0 ]]; do [[ "$1" == "-o" ]] && { out="$2"; shift 2; continue; }; shift; done\n'
+  printf 'printf "## Diagnosis\\nFeature leakage.\\n\\n## Decision\\nALTERNATIVE - rebuild features causally\\n" > "$out"\n'
+} > "$TEST_ROOT/panel-bin/codex"
+chmod +x "$TEST_ROOT/panel-bin/claude" "$TEST_ROOT/panel-bin/codex"
+printf 'Two attempts failed: overfit in sample, no out-of-sample edge.\n' > "$TEST_ROOT/panel-failure.md"
+
+panel_started="$(date +%s)"
+panel_output="$(PATH="$TEST_ROOT/panel-bin:$PATH" "$ROLE_PM" \
+  consult-panel signal-model --file "$TEST_ROOT/panel-failure.md")"
+panel_elapsed=$(( $(date +%s) - panel_started ))
+[[ "$panel_elapsed" -lt 4 ]] || fail "consultant seats did not run in parallel (${panel_elapsed}s)"
+
+assert_contains "$panel_output" "seats=2" "panel dispatched both seats"
+assert_contains "$panel_output" "proposals=2" "both seats delivered a proposal"
+panel_dir="$(output_value "$panel_output" panel_dir)"
+assert_file_contains "$panel_dir/proposal_1.md" "Regime overfit" "seat one proposal is captured"
+assert_file_contains "$panel_dir/proposal_2.md" "Feature leakage" "seat two proposal is captured"
+
+adjudication="$(/bin/cat "$panel_dir/adjudication_prompt.md")"
+assert_contains "$adjudication" "Chief Product Officer for a crypto trading product" "adjudication uses the CPO persona"
+assert_contains "$adjudication" "Task: adjudicate a consultant panel" "adjudication carries its task"
+assert_contains "$adjudication" "proposal_1.md" "adjudication references every proposal"
+assert_contains "$adjudication" "proposal_2.md" "adjudication references every proposal"
+assert_contains "$adjudication" "ADOPT_PARALLEL" "the CPO may pursue several paths at once"
+assert_not_contains "$adjudication" "{{" "adjudication prompt has no unrendered placeholders"
+
+# One failed seat must degrade the panel, not destroy it.
+printf '#!/bin/zsh -f\nprint -u2 "Error: model unavailable"; exit 1\n' > "$TEST_ROOT/panel-bin/codex"
+chmod +x "$TEST_ROOT/panel-bin/codex"
+degraded_output="$(PATH="$TEST_ROOT/panel-bin:$PATH" "$ROLE_PM" \
+  consult-panel signal-model --file "$TEST_ROOT/panel-failure.md" 2>/dev/null)"
+assert_contains "$degraded_output" "proposals=1" "a failed seat does not abort the panel"
+assert_contains "$degraded_output" "note=at least one seat failed" "a failed seat is reported"
+
+# Every seat failing is a real failure.
+printf '#!/bin/zsh -f\nprint -u2 "Error: model unavailable"; exit 1\n' > "$TEST_ROOT/panel-bin/claude"
+chmod +x "$TEST_ROOT/panel-bin/claude"
+expect_failure "panel with no usable proposal" \
+  env PATH="$TEST_ROOT/panel-bin:$PATH" "$ROLE_PM" \
+  consult-panel signal-model --file "$TEST_ROOT/panel-failure.md"
+assert_file_contains "$TEST_ROOT/expected-failure.log" "no consultant seat produced" "empty panel is an error"
+
 printf 'PASS: section-scoped PM flow\n'
+printf 'PASS: role personas, agent dispatch, and supervision\n'
+printf 'PASS: independent consultant panel and CPO adjudication\n'

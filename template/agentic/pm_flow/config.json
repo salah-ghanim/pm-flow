@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "domain": "{{DOMAIN}}",
+  "roles": {
+    "cpo": {
+      "cli": "claude",
+      "model": "claude-opus-5",
+      "difficulty": "high"
+    },
+    "pm": {
+      "cli": "claude",
+      "model": "claude-opus-5",
+      "difficulty": "medium"
+    },
+    "developer": {
+      "cli": "claude",
+      "model": "claude-sonnet-5",
+      "difficulty": "medium"
+    },
+    "consultant": [
+      {
+        "cli": "claude",
+        "model": "claude-opus-5",
+        "difficulty": "xhigh"
+      },
+      {
+        "cli": "codex",
+        "model": "gpt-5.1-codex",
+        "difficulty": "high"
+      }
+    ],
+    "10x_developer": {
+      "cli": "claude",
+      "model": "claude-opus-5",
+      "difficulty": "max"
+    }
+  },
+  "escalation": {
+    "failures_before_consultant": 2,
+    "max_rescue_attempts": 1
+  },
+  "supervision": {
+    "heartbeat_stall_seconds": 900,
+    "max_attempts": 4,
+    "retry_backoff_seconds": 30,
+    "usage_limit_pause_seconds": 1800
+  }
+}
