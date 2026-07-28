@@ -101,6 +101,7 @@ prefetch_templates() {
     "template/agentic/pm_flow/tasks/section_handoff.md"
     "template/agentic/pm_flow/tasks/section_rescue.md"
     "template/agentic/pm_flow/tasks/developer_assignment.md"
+    "template/agentic/pm_flow/tasks/project_decomposition.md"
     "template/agentic/pm_flow/local_env.sh.example"
     "template/agentic/pm_flow/projects.md"
     "template/agentic/pm_flow/project/project_state/README.md"
@@ -420,7 +421,8 @@ main() {
   done
   local task_name
   for task_name in consultant_panel_adjudication section_scope section_review \
-                   section_handoff section_rescue developer_assignment; do
+                   section_handoff section_rescue developer_assignment \
+                   project_decomposition; do
     copy_template "template/agentic/pm_flow/tasks/$task_name.md" "$flow_dir/tasks/$task_name.md"
   done
   # config.json carries the operator's cli/model/difficulty choices, so a

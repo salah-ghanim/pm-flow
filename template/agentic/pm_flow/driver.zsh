@@ -28,6 +28,15 @@ first_line_or() {
   printf '%s\n' "${value:-$fallback}"
 }
 
+# Take the first line without a pipe. `producer | head -n 1` makes head close
+# the pipe early, which kills the producer with SIGPIPE; under `set -o pipefail`
+# that becomes the pipeline's status and aborts the run. It only shows up once
+# the producer has more than one line to emit.
+first_line_of() {
+  local text="$1"
+  printf '%s\n' "${text%%$'\n'*}"
+}
+
 section_cycles_dir() {
   printf '%s\n' "$1/cycles"
 }
@@ -443,7 +452,7 @@ do_rescue() {
     path_count="$(printf '%s\n' "$paths" | wc -l | tr -d '[:space:]')"
   else
     path_count=1
-    paths="$(printf '%s\n' "$paths" | /usr/bin/head -n 1)"
+    paths="$(first_line_of "$paths")"
   fi
   claim_step "$escalation_dir/.claim-rescue"
 
@@ -588,6 +597,7 @@ perform_action() {
     review-rescue) do_review_rescue "$section_dir" ;;
     abandon)       do_abandon "$section_dir" ;;
     complete)      do_complete "$section_dir" ;;
+    decompose)     do_decompose ;;
     *) fail "unknown driver action: $action" ;;
   esac
 }
@@ -613,8 +623,14 @@ cmd_tick() {
       return 0
     fi
   else
-    section_dir="$(actionable_sections | /usr/bin/head -n 1)"
+    section_dir="$(first_line_of "$(actionable_sections)")"
     if [[ -z "$section_dir" ]]; then
+      if [[ "$(project_next_action)" == "decompose" ]]; then
+        printf 'section=%s\n' "(project)"
+        printf 'action=decompose\n'
+        printf 'result=%s\n' "$(do_decompose)"
+        return 0
+      fi
       printf 'idle=project\n'
       return 0
     fi
@@ -647,9 +663,15 @@ cmd_run() {
       section_dir="$(resolve_section_dir "$SECTION_OVERRIDE")"
       [[ "$(section_next_action "$section_dir")" != "idle" ]] || section_dir=""
     else
-      section_dir="$(actionable_sections | /usr/bin/head -n 1)"
+      section_dir="$(first_line_of "$(actionable_sections)")"
     fi
     if [[ -z "$section_dir" ]]; then
+      if [[ -z "${SECTION_OVERRIDE:-}" && "$(project_next_action)" == "decompose" ]]; then
+        (( tick += 1 ))
+        printf '[tick %d] (project): decompose\n' "$tick"
+        do_decompose | sed 's/^/          /'
+        continue
+      fi
       printf 'run finished after %d tick(s): no section has actionable work\n' "$tick"
       return 0
     fi
@@ -672,4 +694,88 @@ cmd_status() {
     action="$(section_next_action "$section_dir")"
     printf '%-24s %-10s %s\n' "$(basename "$section_dir")" "$lifecycle" "$action"
   done
+}
+
+# --- project level ---------------------------------------------------------
+
+# The product officer cuts the product into sections once, before any section
+# work exists. This is derived like everything else: no sections on disk means
+# the project has not been decomposed yet.
+project_next_action() {
+  local section_dir
+  if [[ -d "$SECTIONS_DIR" ]]; then
+    for section_dir in "$SECTIONS_DIR"/*(/N); do
+      [[ "$(basename "$section_dir")" != .* ]] || continue
+      printf 'idle\n'
+      return
+    done
+  fi
+  printf 'decompose\n'
+}
+
+split_section_blocks() {
+  local response="$1"
+  local out_dir="$2"
+  python3 - "$response" "$out_dir" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text()
+out_dir = Path(sys.argv[2])
+out_dir.mkdir(parents=True, exist_ok=True)
+
+blocks = re.split(r"^##\s+Section:\s*(.+?)\s*$", text, flags=re.MULTILINE)
+if len(blocks) < 3:
+    raise SystemExit("the decomposition contained no '## Section: <name>' blocks")
+
+required = ["Objective", "Scope", "Owned paths", "Dependencies", "Acceptance",
+            "Rejection conditions"]
+names = []
+for index in range(1, len(blocks), 2):
+    raw_name = blocks[index].strip().strip("`")
+    body = blocks[index + 1]
+    key = re.sub(r"[^a-z0-9]+", "-", raw_name.lower()).strip("-")
+    if not key:
+        raise SystemExit(f"section {raw_name!r} has no usable name")
+    if key in names:
+        raise SystemExit(f"the decomposition names section {key!r} twice")
+    for heading in required:
+        if not re.search(rf"^#{{1,6}}\s+{re.escape(heading)}\s*$", body,
+                         re.MULTILINE | re.IGNORECASE):
+            raise SystemExit(f"section {key!r} is missing the {heading!r} heading")
+    names.append(key)
+    (out_dir / f"{len(names):02d}-{key}.md").write_text(body.strip() + "\n")
+
+print("\n".join(names))
+PY
+}
+
+do_decompose() {
+  local state_claim="$STATE_DIR/.claim-decompose"
+  mkdir -p "$STATE_DIR"
+  claim_step "$state_claim"
+
+  local prompt context brief_dir names name brief_file created=0
+  brief_dir="$STATE_DIR/decomposition"
+  mkdir -p "$brief_dir"
+  context="$(context_bullet_list "$STATE_DIR/plan.md" "$CONTRACT_FILE")"
+  prompt="$brief_dir/prompt.md"
+  compose_role_task cpo "$(task_file project_decomposition)" \
+    "CONTEXT_FILES=$context" > "$prompt"
+
+  dispatch_role cpo "$prompt" "$brief_dir/sections.md" "" "decompose the product"
+  names="$(split_section_blocks "$brief_dir/sections.md" "$brief_dir/briefs")"
+
+  # Created in the order the officer emitted them, because a dependency must
+  # already exist before the section that names it.
+  for name in ${(f)names}; do
+    brief_file="$(first_line_of "$(/bin/ls "$brief_dir/briefs" | grep -- "-${name}.md$")")"
+    [[ -n "$brief_file" ]] || fail "no brief was written for section '$name'"
+    if ! cmd_init_section "$name" --file "$brief_dir/briefs/$brief_file" >/dev/null; then
+      fail "section '$name' could not be created; see $brief_dir/briefs/$brief_file"
+    fi
+    created=$(( created + 1 ))
+  done
+  printf 'decompose -> %d section(s): %s\n' "$created" "${names//$'\n'/, }"
 }

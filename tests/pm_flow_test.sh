@@ -943,6 +943,43 @@ assert_contains "$("$DRIVER_PM" status)" "cancelled" "the abandoned section is c
   fail "parallel rescue did not create an isolated attempt per path"
 
 printf 'PASS: headless driver, escalation, and parallel rescue\n'
+# The product officer cuts the product into sections before any section exists,
+# and a run started from an empty project drives them all to completion.
+DECOMP_REPO="$TEST_ROOT/decomp repo"
+mkdir "$DECOMP_REPO"
+"$REPO_ROOT/install.sh" "$DECOMP_REPO" --name "Decomp Project" --domain saas \
+  --mission "ship a usable task tracker" > "$TEST_ROOT/decomp-install.out"
+DECOMP_FLOW="$DECOMP_REPO/agentic/pm_flow"
+python3 - "$DECOMP_FLOW/config.json" <<'PYCFG'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+for role in ("cpo", "pm", "developer", "10x_developer"):
+    config["roles"][role] = {"cli": "claude", "model": "", "difficulty": "low"}
+config["supervision"] = {
+    "heartbeat_stall_seconds": 30, "max_attempts": 1,
+    "retry_backoff_seconds": 1, "usage_limit_pause_seconds": 1,
+}
+path.write_text(json.dumps(config, indent=2) + "\n")
+PYCFG
+
+mkdir "$TEST_ROOT/decomp-bin"
+/bin/cp "$REPO_ROOT/tests/fixtures/stub_decompose.zsh" "$TEST_ROOT/decomp-bin/claude"
+chmod +x "$TEST_ROOT/decomp-bin/claude"
+
+assert_not_contains "$("$DECOMP_FLOW/pm_flow.sh" status)" "widget" "an empty project has no sections yet"
+decomp_run="$(PM_DONE_FLAG="$TEST_ROOT/decomp.flag" PATH="$TEST_ROOT/decomp-bin:$PATH" \
+  "$DECOMP_FLOW/pm_flow.sh" run --max-ticks 20 2>&1)"
+assert_contains "$decomp_run" "(project): decompose" "an empty project decomposes first"
+assert_contains "$decomp_run" "decompose -> 2 section(s)" "the officer emits several sections"
+assert_contains "$decomp_run" "data-model" "the decomposition names its sections"
+assert_contains "$decomp_run" "no section has actionable work" "the whole project run terminates"
+decomp_status="$("$DECOMP_FLOW/pm_flow.sh" status)"
+assert_contains "$decomp_status" "api" "the dependent section was created"
+assert_not_contains "$decomp_status" "planned" "every decomposed section reached a terminal state"
+
+printf 'PASS: product decomposition and a full headless project run\n'
 
 printf 'PASS: section-scoped PM flow\n'
 printf 'PASS: role personas, agent dispatch, and supervision\n'
