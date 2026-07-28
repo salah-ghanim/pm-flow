@@ -78,9 +78,20 @@ if [[ -f "$SCRIPT_DIR/local_env.sh" ]]; then
   source "$SCRIPT_DIR/local_env.sh"
 fi
 
+# The flow directory hosts several projects and each records its own domain, so
+# resolve the calling project before falling back to the flow-wide default.
+PROJECT_CONFIG_FILE=""
+agent_project_key="${PM_FLOW_PROJECT:-}"
+if [[ -z "$agent_project_key" && -f "$SCRIPT_DIR/.project-key" ]]; then
+  agent_project_key="$(/usr/bin/head -n 1 "$SCRIPT_DIR/.project-key" | tr -d '\r')"
+fi
+if [[ -n "$agent_project_key" && -f "$SCRIPT_DIR/$agent_project_key/project.json" ]]; then
+  PROJECT_CONFIG_FILE="$SCRIPT_DIR/$agent_project_key/project.json"
+fi
+
 # Resolve the role binding once, up front, so a misconfigured role fails before
 # any model is called.
-role_binding="$(python3 - "$CONFIG_FILE" "$ROLE" "$SEAT" <<'PY'
+role_binding="$(python3 - "$CONFIG_FILE" "$ROLE" "$SEAT" "$PROJECT_CONFIG_FILE" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -88,6 +99,7 @@ from pathlib import Path
 config = json.loads(Path(sys.argv[1]).read_text())
 role = sys.argv[2]
 seat = int(sys.argv[3])
+project_config = sys.argv[4]
 if config.get("version") != 1:
     raise SystemExit(f"unsupported config version: {config.get('version')!r}")
 roles = config.get("roles")
@@ -135,7 +147,10 @@ print("write" if role in {"developer", "10x_developer"} else "read")
 print(positive_int(supervision, "max_attempts", 4))
 print(positive_int(supervision, "retry_backoff_seconds", 30))
 print(positive_int(supervision, "usage_limit_pause_seconds", 1800))
-print(config.get("domain", "generic"))
+project_domain = ""
+if project_config:
+    project_domain = json.loads(Path(project_config).read_text()).get("domain") or ""
+print(project_domain or config.get("domain") or "generic")
 print(positive_int(supervision, "heartbeat_stall_seconds", 900))
 PY
 )" || fail "could not resolve role '$ROLE' from $CONFIG_FILE"

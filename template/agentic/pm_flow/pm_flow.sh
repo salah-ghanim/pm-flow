@@ -138,8 +138,32 @@ resolve_project_key() {
 }
 
 AGENT_CONFIG_FILE=""
+PROJECT_CONFIG_FILE=""
 ROLES_DIR=""
 DOMAINS_DIR=""
+DOMAIN=""
+DOMAIN_SOURCE=""
+
+# A flow directory hosts several projects and they are not all the same kind of
+# work, so the domain belongs to the project. config.json only supplies the
+# default for projects installed before domains were recorded per project.
+resolve_domain() {
+  DOMAIN=""
+  DOMAIN_SOURCE="flow default"
+  if [[ -f "$PROJECT_CONFIG_FILE" ]]; then
+    DOMAIN="$(extract_json_field "$PROJECT_CONFIG_FILE" domain)"
+    [[ -z "$DOMAIN" ]] || DOMAIN_SOURCE="project.json"
+  fi
+  if [[ -z "$DOMAIN" && -f "$AGENT_CONFIG_FILE" ]]; then
+    DOMAIN="$(extract_json_field "$AGENT_CONFIG_FILE" domain)"
+  fi
+  if [[ -z "$DOMAIN" ]]; then
+    DOMAIN="generic"
+    DOMAIN_SOURCE="built-in default"
+  fi
+  [[ -f "$DOMAINS_DIR/$DOMAIN.json" ]] || \
+    fail "unknown domain '$DOMAIN'; no definition at $DOMAINS_DIR/$DOMAIN.json"
+}
 
 # Roles are named, never vendors. This composes a role's persona with the
 # project's configured domain so prompts read as a real practitioner in the
@@ -147,6 +171,7 @@ DOMAINS_DIR=""
 compose_role_prompt() {
   local role="$1"
   [[ -f "$AGENT_CONFIG_FILE" ]] || fail "missing agent config: $AGENT_CONFIG_FILE"
+  resolve_domain
   local role_file="$ROLES_DIR/$role.md"
   [[ -f "$role_file" ]] || fail "unknown role '$role'; no persona at $role_file"
   local project_name="$PROJECT_KEY"
@@ -155,14 +180,12 @@ compose_role_prompt() {
     contract_heading="$(/usr/bin/head -n 1 "$CONTRACT_FILE" | sed -E 's/^#[[:space:]]*//; s/[[:space:]]+Task Contract[[:space:]]*$//')"
     [[ -z "$contract_heading" ]] || project_name="$contract_heading"
   fi
-  python3 - "$AGENT_CONFIG_FILE" "$DOMAINS_DIR" "$role_file" "$role" "$project_name" <<'PY'
+  python3 - "$DOMAIN" "$DOMAINS_DIR" "$role_file" "$role" "$project_name" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-config_path, domains_dir, role_path, role, project_name = sys.argv[1:]
-config = json.loads(Path(config_path).read_text())
-domain = config.get("domain") or "generic"
+domain, domains_dir, role_path, role, project_name = sys.argv[1:]
 domain_file = Path(domains_dir) / f"{domain}.json"
 if not domain_file.is_file():
     raise SystemExit(f"unknown domain {domain!r}; no definition at {domain_file}")
@@ -340,22 +363,22 @@ cmd_role_prompt() {
 
 cmd_config() {
   [[ -f "$AGENT_CONFIG_FILE" ]] || fail "missing agent config: $AGENT_CONFIG_FILE"
-  python3 - "$AGENT_CONFIG_FILE" "$DOMAINS_DIR" "$ROLES_DIR" <<'PY'
+  resolve_domain
+  python3 - "$AGENT_CONFIG_FILE" "$DOMAINS_DIR" "$ROLES_DIR" "$DOMAIN" "$DOMAIN_SOURCE" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-config_path, domains_dir, roles_dir = sys.argv[1:]
+config_path, domains_dir, roles_dir, domain, domain_source = sys.argv[1:]
 config = json.loads(Path(config_path).read_text())
 if config.get("version") != 1:
     raise SystemExit(f"unsupported config version: {config.get('version')!r}")
-domain = config.get("domain") or "generic"
 domain_file = Path(domains_dir) / f"{domain}.json"
 if not domain_file.is_file():
     raise SystemExit(f"unknown domain {domain!r}; no definition at {domain_file}")
 titles = json.loads(domain_file.read_text()).get("titles", {})
 
-print(f"domain={domain}")
+print(f"domain={domain} ({domain_source})")
 roles = config.get("roles", {})
 if not roles:
     raise SystemExit("config.json defines no roles")
@@ -389,7 +412,10 @@ PY
 initialize_project_paths() {
   PROJECT_KEY="$(resolve_project_key)"
   PROJECT_DIR="$SCRIPT_DIR/$PROJECT_KEY"
+  # Dispatched roles resolve the same project, so they read the same domain.
+  export PM_FLOW_PROJECT="$PROJECT_KEY"
   AGENT_CONFIG_FILE="$SCRIPT_DIR/config.json"
+  PROJECT_CONFIG_FILE="$PROJECT_DIR/project.json"
   ROLES_DIR="$SCRIPT_DIR/roles"
   DOMAINS_DIR="$SCRIPT_DIR/domains"
   RUNS_DIR="$PROJECT_DIR/runs"

@@ -10,7 +10,7 @@ TEMPLATE_CACHE_DIR=""
 usage() {
   cat <<'EOF'
 Usage:
-  install.sh [target-repo] [--name <project-name>] [--project-key <key>] [--domain <domain>] [--mission <text>] [--baseline <text>] [--repo-raw-base <url>] [--force]
+  install.sh [target-repo] [--name <project-name>] [--project-key <key>] [--domain <domain>] [--mission <text>] [--baseline <text>] [--repo-raw-base <url>] [--add-project] [--force]
 
 Installs the generic Claude PM flow template into the target repository.
 
@@ -20,9 +20,16 @@ Default reinstall behavior:
 - back up pre-section start/resume prompts once with a `.pre-sections.md` suffix
 - preserve the project plan, section workspaces, generated registry, and run history
 - preserve config.json (cli, model, and difficulty bindings per role)
+- preserve each project's recorded domain unless --domain is given
 - use `--force` only when a full project-template replacement is intended
 
-Domains: generic (default), saas, prop-trading, crypto-trading, infrastructure.
+Domains: generic (default), saas, prop-trading, crypto-trading, infrastructure,
+migration. The domain is recorded per project in <project>/project.json, so one
+flow directory can host projects of different kinds.
+
+Use `--add-project` with `--project-key` to create a second project alongside
+the existing ones. Naming a project that already exists is a plain reinstall of
+that project and needs no extra flag.
 
 Examples:
   ./install.sh /path/to/repo --name "My Repo"
@@ -94,6 +101,7 @@ prefetch_templates() {
     "template/agentic/pm_flow/domains/prop-trading.json"
     "template/agentic/pm_flow/domains/crypto-trading.json"
     "template/agentic/pm_flow/domains/infrastructure.json"
+    "template/agentic/pm_flow/domains/migration.json"
     "template/agentic/pm_flow/tasks/consultant_panel_adjudication.md"
     "template/agentic/pm_flow/tasks/section_scope.md"
     "template/agentic/pm_flow/tasks/section_review.md"
@@ -108,6 +116,7 @@ prefetch_templates() {
     "template/agentic/pm_flow/project/project_state/start.md"
     "template/agentic/pm_flow/project/project_state/resume.md"
     "template/agentic/pm_flow/project/project_state/sections.md"
+    "template/agentic/pm_flow/project/project.json"
     "template/agentic/pm_flow/project/task_contract.md"
     "template/CLAUDE.md"
   )
@@ -205,6 +214,7 @@ resolve_install_project_key() {
   local requested_key="$2"
   local default_key="$3"
   local force="$4"
+  local add_project="$5"
   local key_file="$flow_dir/.project-key"
   local persisted_key=""
 
@@ -217,8 +227,13 @@ resolve_install_project_key() {
   if [[ -n "$requested_key" ]]; then
     local normalized_requested
     normalized_requested="$(slugify "$requested_key")"
+    # A flow directory hosts several projects, so naming a sibling workspace is a
+    # reinstall of that sibling rather than a replacement of this one's identity.
+    # Only creating a workspace that does not exist yet needs stated intent.
     if [[ -n "$persisted_key" && "$persisted_key" != "$normalized_requested" && "$force" != "1" ]]; then
-      fail "requested project key '$normalized_requested' differs from persisted key '$persisted_key'; use --force only for an intentional identity replacement"
+      if [[ ! -d "$flow_dir/$normalized_requested" && "$add_project" != "1" ]]; then
+        fail "no project '$normalized_requested' under $flow_dir; pass --add-project to create it alongside '$persisted_key', or --force to replace the install identity"
+      fi
     fi
     printf '%s\n' "$normalized_requested"
     return
@@ -310,6 +325,8 @@ main() {
   local baseline_name="$DEFAULT_BASELINE"
   local repo_raw_base="${PM_FLOW_REPO_RAW_BASE:-}"
   local domain="generic"
+  local domain_explicit="0"
+  local add_project="0"
   local force="0"
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -337,14 +354,18 @@ main() {
         shift || fail "--domain requires a value"
         domain="${1:-}"
         case "$domain" in
-          generic|saas|prop-trading|crypto-trading|infrastructure) ;;
-          *) fail "unknown --domain '$domain'; choose generic, saas, prop-trading, crypto-trading, or infrastructure" ;;
+          generic|saas|prop-trading|crypto-trading|infrastructure|migration) ;;
+          *) fail "unknown --domain '$domain'; choose generic, saas, prop-trading, crypto-trading, infrastructure, or migration" ;;
         esac
+        domain_explicit="1"
         ;;
       --repo-raw-base)
         shift || fail "--repo-raw-base requires a value"
         repo_raw_base="${1:-}"
         [[ -n "$repo_raw_base" ]] || fail "--repo-raw-base requires a value"
+        ;;
+      --add-project)
+        add_project="1"
         ;;
       --force)
         force="1"
@@ -379,7 +400,8 @@ main() {
     "$flow_dir" \
     "$requested_project_key" \
     "$(slugify "$(basename "$abs_target")")" \
-    "$force")"
+    "$force" \
+    "$add_project")"
   local project_dir="$flow_dir/$project_key"
   local flow_exists="0"
   if [[ -d "$flow_dir" ]]; then
@@ -413,7 +435,7 @@ main() {
   for role_name in cpo pm developer consultant 10x_developer; do
     copy_template "template/agentic/pm_flow/roles/$role_name.md" "$flow_dir/roles/$role_name.md"
   done
-  for domain_name in generic saas prop-trading crypto-trading infrastructure; do
+  for domain_name in generic saas prop-trading crypto-trading infrastructure migration; do
     copy_template "template/agentic/pm_flow/domains/$domain_name.json" "$flow_dir/domains/$domain_name.json"
   done
   local task_name
@@ -492,6 +514,15 @@ main() {
       "template/agentic/pm_flow/project/project_state/sections.md" \
       "$project_dir/project_state/sections.md"
   fi
+  # The domain belongs to the project, not the flow directory, so one repository
+  # can run an infrastructure project and a migration project side by side. An
+  # existing project keeps its recorded domain unless --domain says otherwise.
+  if [[ ! -f "$project_dir/project.json" || "$domain_explicit" == "1" || "$force" == "1" ]]; then
+    fetch_template "template/agentic/pm_flow/project/project.json" \
+      | sed -e "s|{{DOMAIN}}|$(escape_sed_replacement "$domain")|g" > "$project_dir/.project.json.tmp"
+    mv "$project_dir/.project.json.tmp" "$project_dir/project.json"
+  fi
+
   render_template \
     "template/agentic/pm_flow/project/task_contract.md" \
     "$project_dir/task_contract.md" \

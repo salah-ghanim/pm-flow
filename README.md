@@ -18,12 +18,24 @@ product officer          cuts the product into sections, adjudicates failures
 ./install.sh /path/to/repo --name "My Product" --domain saas
 ```
 
-Domains — `generic`, `saas`, `prop-trading`, `crypto-trading`, `infrastructure` —
-specialise every role for the problem space. `generic` is the default and is
-deliberately neutral: it tells agents not to assume a domain they were not given.
+Domains — `generic`, `saas`, `prop-trading`, `crypto-trading`, `infrastructure`,
+`migration` — specialise every role for the problem space. `generic` is the
+default and is deliberately neutral: it tells agents not to assume a domain they
+were not given.
+
+One repository can run several projects, and they need not be the same kind of
+work. Each project records its own domain, so a platform project and the
+migration that replaces it can share a flow directory without sharing personas:
+
+```bash
+./install.sh /path/to/repo --project-key platform  --domain infrastructure
+./install.sh /path/to/repo --project-key migration --domain migration --add-project
+./agentic/pm_flow/pm_flow.sh --project migration run
+```
 
 Reinstalling refreshes the scripts, prompts, and contract while preserving
-`config.json`, the project plan, section workspaces, and run history.
+`config.json`, each project's recorded domain, the project plan, section
+workspaces, and run history.
 
 ## Run it
 

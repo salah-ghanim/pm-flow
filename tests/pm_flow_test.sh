@@ -387,6 +387,64 @@ generic_prompt="$("$generic_repo/agentic/pm_flow/pm_flow.sh" role-prompt cpo)"
 assert_contains "$generic_prompt" "Chief Product Officer" "generic domain falls back to a neutral title"
 assert_contains "$generic_prompt" "domain has not been specified" "generic domain avoids industry priors"
 
+migration_repo="$TEST_ROOT/migration repo"
+mkdir "$migration_repo"
+"$REPO_ROOT/install.sh" "$migration_repo" --name "Golden Grid Migration" --domain migration \
+  > "$TEST_ROOT/migration-install.out"
+migration_prompt="$("$migration_repo/agentic/pm_flow/pm_flow.sh" role-prompt pm)"
+assert_contains "$migration_prompt" "AI Tooling Migration Manager" "migration domain specializes the pm title"
+assert_contains "$migration_prompt" "Context is a first-class artifact" "migration domain carries its own priors"
+assert_not_contains "$migration_prompt" "{{" "migration role prompt has no unrendered placeholders"
+
+# A flow directory hosts several projects and they are not all the same kind of
+# work, so each project carries its own domain.
+multi_repo="$TEST_ROOT/multi domain repo"
+mkdir "$multi_repo"
+MULTI_FLOW="$multi_repo/agentic/pm_flow"
+MULTI_PM="$MULTI_FLOW/pm_flow.sh"
+"$REPO_ROOT/install.sh" "$multi_repo" --name "Grid Platform" --project-key platform \
+  --domain infrastructure > "$TEST_ROOT/multi-platform-install.out"
+"$REPO_ROOT/install.sh" "$multi_repo" --name "Grid Migration" --project-key migration \
+  --domain migration --add-project > "$TEST_ROOT/multi-migration-install.out"
+
+assert_file_contains "$MULTI_FLOW/platform/project.json" '"domain": "infrastructure"' \
+  "the first project records its own domain"
+assert_file_contains "$MULTI_FLOW/migration/project.json" '"domain": "migration"' \
+  "an added project records a different domain"
+
+platform_config="$("$MULTI_PM" --project platform config)"
+migration_config="$("$MULTI_PM" --project migration config)"
+assert_contains "$platform_config" "domain=infrastructure" "sibling projects resolve their own domain"
+assert_contains "$migration_config" "domain=migration" "an added project resolves its own domain"
+assert_contains "$migration_config" "project.json" "config reports where the domain came from"
+
+platform_persona="$("$MULTI_PM" --project platform role-prompt consultant)"
+migration_persona="$("$MULTI_PM" --project migration role-prompt consultant)"
+assert_contains "$platform_persona" "Principal Cloud Architect" "one project's persona follows its own domain"
+assert_contains "$migration_persona" "Principal Migration Architect" "a sibling project gets a different persona"
+
+migration_dispatch="$(PM_FLOW_PROJECT=migration "$MULTI_FLOW/agent_exec.sh" pm \
+  --prompt-file "$MULTI_FLOW/migration/task_contract.md" --output "$TEST_ROOT/multi-dry.json" --dry-run)"
+assert_contains "$migration_dispatch" "domain=migration" "a dispatch reports the calling project's domain"
+
+# Reinstalling a project without --domain must not silently rewrite its domain.
+"$REPO_ROOT/install.sh" "$multi_repo" --name "Grid Migration" --project-key migration \
+  > "$TEST_ROOT/multi-reinstall.out"
+assert_file_contains "$MULTI_FLOW/migration/project.json" '"domain": "migration"' \
+  "a reinstall preserves the project's recorded domain"
+
+# A project installed before domains were per-project falls back to config.json.
+rm "$MULTI_FLOW/migration/project.json"
+legacy_config="$("$MULTI_PM" --project migration config)"
+assert_contains "$legacy_config" "domain=infrastructure" "a project with no project.json uses the flow default"
+"$REPO_ROOT/install.sh" "$multi_repo" --name "Grid Migration" --project-key migration \
+  --domain migration > "$TEST_ROOT/multi-restore.out"
+
+expect_failure "creating an unknown project needs stated intent" \
+  "$REPO_ROOT/install.sh" "$multi_repo" --project-key mgration
+assert_file_contains "$TEST_ROOT/expected-failure.log" "--add-project" \
+  "a mistyped project key is not silently created"
+
 expect_failure "unknown domain rejected" \
   "$REPO_ROOT/install.sh" "$TEST_ROOT/bad domain repo" --domain nonsense
 assert_file_contains "$TEST_ROOT/expected-failure.log" "unknown --domain" "domain validation"

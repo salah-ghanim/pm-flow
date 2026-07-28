@@ -19,7 +19,6 @@ difficulty, so nothing in the flow depends on which vendor is behind a role:
 
 ```json
 {
-  "domain": "crypto-trading",
   "roles": {
     "cpo":           { "cli": "claude",  "model": "claude-opus-5",  "difficulty": "high" },
     "pm":            { "cli": "claude",  "model": "claude-opus-5",  "difficulty": "medium" },
@@ -48,15 +47,24 @@ planning roles are dispatched read-only, so a review cannot quietly edit code.
 ## Personas
 
 Each role is specialised for the project's domain, set at install with
-`--domain`: `generic`, `saas`, `prop-trading`, `crypto-trading`, or
-`infrastructure`. A consultant on a crypto project opens as a *Quantitative
-Trading Consultant* who knows that a backtest is evidence rather than proof;
-the same role on an infrastructure project is a *Principal Cloud Architect* who
-plans before apply. `generic` is deliberately neutral and tells the agent not to
-assume a domain it was not given.
+`--domain`: `generic`, `saas`, `prop-trading`, `crypto-trading`,
+`infrastructure`, or `migration`. A consultant on a crypto project opens as a
+*Quantitative Trading Consultant* who knows that a backtest is evidence rather
+than proof; the same role on an infrastructure project is a *Principal Cloud
+Architect* who plans before apply. `migration` is for moving an existing AI
+automation toolchain onto a new one, where prompts, configuration, and
+documentation have to land in the same change as the code. `generic` is
+deliberately neutral and tells the agent not to assume a domain it was not
+given.
+
+The domain belongs to the project, not to this directory: it is recorded in
+`<project>/project.json`, so sibling projects can be different kinds of work.
+`config.json` carries the domain only as a fallback for projects installed
+before that was true.
 
 ```bash
-./agentic/pm_flow/pm_flow.sh role-prompt consultant
+./agentic/pm_flow/pm_flow.sh --project migration role-prompt consultant
+./agentic/pm_flow/pm_flow.sh --project migration config   # domain=... (project.json)
 ```
 
 ## Running a project
@@ -155,14 +163,17 @@ agentic/pm_flow/
 ├── domains/             how each role is specialised per domain
 ├── tasks/               what a role is being asked to do on a given call
 └── <project>/
+    ├── project.json      this project's domain
     ├── task_contract.md
     ├── project_state/   plan.md, sections.md, start.md, resume.md
     ├── sections/
     └── runs/
 ```
 
-`agentic/pm_flow/.project-key` is the durable project identity and survives the
-repository being renamed. Pass `--project <key>` to select one explicitly.
+`agentic/pm_flow/.project-key` is the durable identity of the *default* project
+and survives the repository being renamed. Pass `--project <key>` to select
+another. Everything above `<project>/` is shared by every project here; anything
+that differs between them, the domain included, belongs inside the project.
 
 Copy `local_env.sh.example` to `local_env.sh` to set environment for every
 dispatched role.
