@@ -24,7 +24,9 @@ To see where things stand before continuing:
 `STATUS` is the section's lifecycle — `planned`, `active`, `blocked`, `done`,
 `cancelled`. `NEXT ACTION` is what the next tick would do: `scope`, `develop`,
 `review`, `escalate`, `adjudicate`, `rescue`, `review-rescue`, `complete`,
-`abandon`, or `idle`.
+`abandon`, `waiting-dependencies`, or `idle`. A blocked section is idle until
+deliberately reopened; a section waiting on dependencies cannot be dispatched
+until every required section is done.
 
 A section sitting at `escalate` has failed enough consecutive reviews to earn a
 consultant panel. A section at `abandon` has exhausted its rescue rounds; read

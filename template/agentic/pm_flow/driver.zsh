@@ -85,6 +85,34 @@ escalation_dir_for() {
   printf '%s/escalation\n' "$1"
 }
 
+section_dependencies_ready() {
+  local section_dir="$1"
+  local dependencies_file="$section_dir/dependency_handoffs.txt"
+  local relative_handoff absolute_handoff dependency_dir
+  [[ -f "$dependencies_file" ]] || return 0
+
+  while IFS= read -r relative_handoff; do
+    [[ -n "$relative_handoff" ]] || continue
+    absolute_handoff="$PROJECT_ROOT/$relative_handoff"
+    [[ -f "$absolute_handoff" ]] || return 1
+    dependency_dir="$(dirname "$absolute_handoff")"
+    [[ "$(first_line_or "$dependency_dir/status.txt" unknown)" == "done" ]] || return 1
+  done < "$dependencies_file"
+  return 0
+}
+
+section_dependency_context() {
+  local section_dir="$1"
+  local dependencies_file="$section_dir/dependency_handoffs.txt"
+  local relative_handoff
+  [[ -f "$dependencies_file" ]] || return 0
+
+  while IFS= read -r relative_handoff; do
+    [[ -n "$relative_handoff" ]] || continue
+    context_bullet_list "$PROJECT_ROOT/$relative_handoff"
+  done < "$dependencies_file"
+}
+
 # Derive the one action this section needs next. Pure observation; no writes.
 section_next_action() {
   local section_dir="$1"
@@ -92,8 +120,12 @@ section_next_action() {
 
   lifecycle="$(first_line_or "$section_dir/status.txt" active)"
   case "$lifecycle" in
-    done|cancelled) printf 'idle\n'; return ;;
+    blocked|done|cancelled) printf 'idle\n'; return ;;
   esac
+  if ! section_dependencies_ready "$section_dir"; then
+    printf 'waiting-dependencies\n'
+    return
+  fi
 
   escalation_dir="$(escalation_dir_for "$section_dir")"
   if [[ -d "$escalation_dir" ]]; then
@@ -303,6 +335,7 @@ do_scope() {
   claim_step "$cycle_dir/.claim-scope"
 
   context="$(context_bullet_list "$section_dir/brief.md" "$section_dir/state.md" "$CONTRACT_FILE")
+$(section_dependency_context "$section_dir")
 $(cycle_history_files "$section_dir" "${cycle_number#0}")"
   prompt="$cycle_dir/scope_prompt.md"
   compose_role_task pm "$(task_file section_scope)" \
@@ -603,11 +636,12 @@ perform_action() {
 }
 
 actionable_sections() {
-  local section_dir
+  local section_dir action
   [[ -d "$SECTIONS_DIR" ]] || return 0
   for section_dir in "$SECTIONS_DIR"/*(/N); do
     [[ "$(basename "$section_dir")" != .* ]] || continue
-    [[ "$(section_next_action "$section_dir")" != "idle" ]] || continue
+    action="$(section_next_action "$section_dir")"
+    [[ "$action" != "idle" && "$action" != "waiting-dependencies" ]] || continue
     printf '%s\n' "$section_dir"
   done
 }
@@ -618,7 +652,11 @@ cmd_tick() {
   if [[ -n "$requested_section" ]]; then
     section_dir="$(resolve_section_dir "$requested_section")"
     action="$(section_next_action "$section_dir")"
-    if [[ "$action" == "idle" ]]; then
+    if [[ "$action" == "idle" || "$action" == "waiting-dependencies" ]]; then
+      if [[ "$action" == "waiting-dependencies" ]]; then
+        printf 'waiting=%s\n' "$(basename "$section_dir")"
+        return 0
+      fi
       printf 'idle=%s\n' "$(basename "$section_dir")"
       return 0
     fi
@@ -661,7 +699,8 @@ cmd_run() {
   while (( tick < max_ticks )); do
     if [[ -n "${SECTION_OVERRIDE:-}" ]]; then
       section_dir="$(resolve_section_dir "$SECTION_OVERRIDE")"
-      [[ "$(section_next_action "$section_dir")" != "idle" ]] || section_dir=""
+      action="$(section_next_action "$section_dir")"
+      [[ "$action" != "idle" && "$action" != "waiting-dependencies" ]] || section_dir=""
     else
       section_dir="$(first_line_of "$(actionable_sections)")"
     fi

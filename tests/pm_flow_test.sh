@@ -756,6 +756,127 @@ run_driver() {
 }
 
 install_driver_stub "$REPO_ROOT/tests/fixtures/stub_success.zsh"
+
+# Dependencies are scheduling gates, not merely context allowlists. An
+# alphabetically earlier dependent must wait for its prerequisite, including
+# when selected explicitly, and blocked sections must never be dispatched.
+SCHED_REPO="$TEST_ROOT/scheduling repo"
+mkdir "$SCHED_REPO"
+"$REPO_ROOT/install.sh" "$SCHED_REPO" --name "Scheduling Project" \
+  > "$TEST_ROOT/scheduling-install.out"
+SCHED_PM="$SCHED_REPO/agentic/pm_flow/pm_flow.sh"
+SCHED_PROJECT="$SCHED_REPO/agentic/pm_flow/scheduling-repo"
+
+python3 - "$SCHED_REPO/agentic/pm_flow/config.json" <<'PYCFG'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+for role in ("cpo", "pm", "developer", "10x_developer"):
+    config["roles"][role] = {"cli": "claude", "model": "", "difficulty": "low"}
+path.write_text(json.dumps(config, indent=2) + "\n")
+PYCFG
+
+init_schedule_section() {
+  local name="$1"
+  local owned_path="$2"
+  local dependency="$3"
+  "$SCHED_PM" init-section "$name" <<SECTIONBRIEF > /dev/null
+## Objective
+
+- Deliver $name.
+
+## Scope
+
+- The bounded $name change only.
+
+## Owned paths
+
+- \`$owned_path\`
+
+## Dependencies
+
+- $dependency
+
+## Acceptance
+
+- The bounded result is validated.
+
+## Rejection conditions
+
+- Work starts before its dependency is done.
+SECTIONBRIEF
+}
+
+init_schedule_section z-prerequisite "src/prerequisite/**" "None."
+init_schedule_section a-dependent "src/dependent/**" "z-prerequisite"
+init_schedule_section b-blocked "src/blocked/**" "None."
+
+SCHED_DEPENDENT="$SCHED_PROJECT/sections/a-dependent"
+SCHED_PREREQUISITE="$SCHED_PROJECT/sections/z-prerequisite"
+SCHED_BLOCKED="$SCHED_PROJECT/sections/b-blocked"
+printf 'blocked\n' > "$SCHED_BLOCKED/status.txt"
+
+schedule_status="$("$SCHED_PM" status)"
+dependent_status_line="$(printf '%s\n' "$schedule_status" | awk '$1 == "a-dependent" {print}')"
+blocked_status_line="$(printf '%s\n' "$schedule_status" | awk '$1 == "b-blocked" {print}')"
+assert_contains "$dependent_status_line" "waiting-dependencies" "status exposes an unmet dependency"
+assert_contains "$blocked_status_line" "idle" "a blocked section is non-actionable"
+
+explicit_waiting_tick="$("$SCHED_PM" --section a-dependent tick)"
+assert_contains "$explicit_waiting_tick" "waiting=a-dependent" "explicit tick cannot bypass dependencies"
+explicit_waiting_run="$("$SCHED_PM" --section a-dependent run --max-ticks 1)"
+assert_contains \
+  "$explicit_waiting_run" \
+  "no section has actionable work" \
+  "explicit run cannot bypass dependencies"
+[[ ! -d "$SCHED_DEPENDENT/cycles" ]] || \
+  fail "an explicitly selected dependent section was dispatched before its prerequisite"
+
+SCHED_DONE_FLAG="$TEST_ROOT/scheduling-complete.flag"
+first_schedule_tick="$(PM_DONE_FLAG="$SCHED_DONE_FLAG" \
+  PATH="$TEST_ROOT/driver-bin:$PATH" "$SCHED_PM" tick)"
+assert_contains \
+  "$first_schedule_tick" \
+  "section=z-prerequisite" \
+  "the prerequisite is selected before its alphabetically earlier dependent"
+[[ -f "$SCHED_PREREQUISITE/cycles/001/assignment.md" ]] || \
+  fail "the selected prerequisite was not scoped"
+[[ ! -d "$SCHED_DEPENDENT/cycles" ]] || \
+  fail "the dependent section was dispatched while its prerequisite was unfinished"
+
+# Both pieces of completion evidence are required: status alone is not enough
+# without the accepted handoff file.
+printf 'done\n' > "$SCHED_PREREQUISITE/status.txt"
+rm "$SCHED_PREREQUISITE/handoff.md"
+missing_handoff_tick="$("$SCHED_PM" --section a-dependent tick)"
+assert_contains "$missing_handoff_tick" "waiting=a-dependent" "a missing dependency handoff keeps the section waiting"
+{
+  printf '# Accepted dependency\n\n'
+  printf 'DEPENDENCY_READY_EVIDENCE\n'
+} > "$SCHED_PREREQUISITE/handoff.md"
+
+second_schedule_tick="$(PM_DONE_FLAG="$SCHED_DONE_FLAG" \
+  PATH="$TEST_ROOT/driver-bin:$PATH" "$SCHED_PM" tick)"
+assert_contains \
+  "$second_schedule_tick" \
+  "section=a-dependent" \
+  "the dependent becomes actionable after its prerequisite is done"
+dependency_handoff="$(/usr/bin/head -n 1 "$SCHED_DEPENDENT/dependency_handoffs.txt")"
+assert_file_contains \
+  "$SCHED_DEPENDENT/cycles/001/scope_prompt.md" \
+  "$dependency_handoff" \
+  "the accepted dependency handoff enters the PM scope context"
+
+printf 'done\n' > "$SCHED_DEPENDENT/status.txt"
+blocked_tick="$("$SCHED_PM" --section b-blocked tick)"
+assert_contains "$blocked_tick" "idle=b-blocked" "explicit tick does not dispatch a blocked section"
+project_idle_tick="$("$SCHED_PM" tick)"
+assert_contains "$project_idle_tick" "idle=project" "automatic tick ignores a blocked section"
+[[ ! -d "$SCHED_BLOCKED/cycles" ]] || fail "a blocked section was dispatched"
+
+printf 'PASS: dependency scheduling and blocked sections\n'
+
 reset_driver_section
 success_run="$(run_driver 10)"
 assert_contains "$success_run" "scope 001 -> ASSIGN" "driver scopes the first assignment"

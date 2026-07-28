@@ -78,6 +78,12 @@ before that was true.
 Fill in `project_state/plan.md` first — it is what the product officer reads.
 With no sections yet, the first tick decomposes the product into them.
 
+Declared dependencies are scheduling gates. A section reports
+`waiting-dependencies` and cannot be scoped or dispatched until every dependency
+section is `done`; its manager then receives the accepted dependency handoffs in
+the next scope context. A section whose lifecycle is `blocked` is also
+non-actionable until it is deliberately reopened.
+
 The driver is level-triggered: it stores no record of what it was doing. Every
 tick observes the files on disk, derives the single next action, performs it,
 and exits. Resuming an interrupted run is therefore not a special case; it is
@@ -149,7 +155,8 @@ A brief needs the exact headings `Objective`, `Scope`, `Owned paths`,
 `Dependencies`, `Acceptance`, and `Rejection conditions`. Owned paths must be
 repo-relative and cannot overlap a section that is still live, because sections
 may run concurrently. Each dependency is an existing section key or a
-repo-relative path to its `handoff.md`.
+repo-relative path to its `handoff.md`; the dependency section must be `done`
+before the dependent section becomes actionable.
 
 ## Layout
 
