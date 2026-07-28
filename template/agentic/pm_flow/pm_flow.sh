@@ -27,6 +27,9 @@ usage() {
 Usage:
   pm_flow.sh [--project <name>] validate
   pm_flow.sh [--project <name>] config
+  pm_flow.sh [--project <name>] status
+  pm_flow.sh [--project <name>] [--section <name>] tick
+  pm_flow.sh [--project <name>] [--section <name>] run [--max-ticks <n>]
   pm_flow.sh [--project <name>] role-prompt <role>
   pm_flow.sh [--project <name>] consult-panel <section-name> [--file <markdown-file>]
   pm_flow.sh [--project <name>] init <task-name>
@@ -645,15 +648,17 @@ read_stdin_body() {
 
 read_body_arg() {
   local mode="${1:-stdin}"
-  local path="${2:-}"
+  # Not named `path`: zsh ties that name to $PATH, so assigning it here would
+  # wipe the command search path for the rest of the function.
+  local body_file="${2:-}"
   case "$mode" in
     stdin)
       read_stdin_body
       ;;
     file)
-      [[ -n "$path" ]] || fail "body file path is required"
-      [[ -f "$path" ]] || fail "body file not found: $path"
-      /bin/cat "$path"
+      [[ -n "$body_file" ]] || fail "body file path is required"
+      [[ -f "$body_file" ]] || fail "body file not found: $body_file"
+      /bin/cat "$body_file"
       ;;
     *)
       fail "unknown body mode: $mode"
@@ -2182,6 +2187,9 @@ cmd_current_run() {
   printf 'current_run_absolute=%s\n' "$abs_run_dir"
 }
 
+[[ -f "$SCRIPT_DIR/driver.zsh" ]] || fail "missing driver: $SCRIPT_DIR/driver.zsh"
+source "$SCRIPT_DIR/driver.zsh"
+
 main() {
   local args=()
   while [[ $# -gt 0 ]]; do
@@ -2215,6 +2223,18 @@ main() {
     config)
       shift || true
       cmd_config "$@"
+      ;;
+    tick)
+      shift || true
+      cmd_tick "$@"
+      ;;
+    run)
+      shift || true
+      cmd_run "$@"
+      ;;
+    status)
+      shift || true
+      cmd_status "$@"
       ;;
     role-prompt)
       shift || true

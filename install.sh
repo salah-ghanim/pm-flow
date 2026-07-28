@@ -83,6 +83,7 @@ prefetch_templates() {
     "template/agentic/pm_flow/net_exec.sh"
     "template/agentic/pm_flow/codex_pm_review.sh"
     "template/agentic/pm_flow/agent_exec.sh"
+    "template/agentic/pm_flow/driver.zsh"
     "template/agentic/pm_flow/config.json"
     "template/agentic/pm_flow/roles/cpo.md"
     "template/agentic/pm_flow/roles/pm.md"
@@ -95,6 +96,11 @@ prefetch_templates() {
     "template/agentic/pm_flow/domains/crypto-trading.json"
     "template/agentic/pm_flow/domains/infrastructure.json"
     "template/agentic/pm_flow/tasks/consultant_panel_adjudication.md"
+    "template/agentic/pm_flow/tasks/section_scope.md"
+    "template/agentic/pm_flow/tasks/section_review.md"
+    "template/agentic/pm_flow/tasks/section_handoff.md"
+    "template/agentic/pm_flow/tasks/section_rescue.md"
+    "template/agentic/pm_flow/tasks/developer_assignment.md"
     "template/agentic/pm_flow/local_env.sh.example"
     "template/agentic/pm_flow/projects.md"
     "template/agentic/pm_flow/project/project_state/README.md"
@@ -404,6 +410,7 @@ main() {
   copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
   copy_template "template/agentic/pm_flow/codex_pm_review.sh" "$flow_dir/codex_pm_review.sh"
   copy_template "template/agentic/pm_flow/agent_exec.sh" "$flow_dir/agent_exec.sh"
+  copy_template "template/agentic/pm_flow/driver.zsh" "$flow_dir/driver.zsh"
   local role_name domain_name
   for role_name in cpo pm developer consultant 10x_developer; do
     copy_template "template/agentic/pm_flow/roles/$role_name.md" "$flow_dir/roles/$role_name.md"
@@ -411,8 +418,11 @@ main() {
   for domain_name in generic saas prop-trading crypto-trading infrastructure; do
     copy_template "template/agentic/pm_flow/domains/$domain_name.json" "$flow_dir/domains/$domain_name.json"
   done
-  copy_template "template/agentic/pm_flow/tasks/consultant_panel_adjudication.md" \
-    "$flow_dir/tasks/consultant_panel_adjudication.md"
+  local task_name
+  for task_name in consultant_panel_adjudication section_scope section_review \
+                   section_handoff section_rescue developer_assignment; do
+    copy_template "template/agentic/pm_flow/tasks/$task_name.md" "$flow_dir/tasks/$task_name.md"
+  done
   # config.json carries the operator's cli/model/difficulty choices, so a
   # reinstall must never overwrite it.
   if [[ ! -f "$flow_dir/config.json" || "$force" == "1" ]]; then

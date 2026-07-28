@@ -830,6 +830,120 @@ expect_failure "panel with no usable proposal" \
   consult-panel signal-model --file "$TEST_ROOT/panel-failure.md"
 assert_file_contains "$TEST_ROOT/expected-failure.log" "no consultant seat produced" "empty panel is an error"
 
+# --- headless driver -------------------------------------------------------
+
+DRIVER_REPO="$TEST_ROOT/driver repo"
+mkdir "$DRIVER_REPO"
+"$REPO_ROOT/install.sh" "$DRIVER_REPO" --name "Driver Project" > "$TEST_ROOT/driver-install.out"
+DRIVER_PM="$DRIVER_REPO/agentic/pm_flow/pm_flow.sh"
+DRIVER_FLOW="$DRIVER_REPO/agentic/pm_flow"
+DRIVER_SECTION="$DRIVER_REPO/agentic/pm_flow/driver-repo/sections/widget"
+
+python3 - "$DRIVER_FLOW/config.json" <<'PYCFG'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+for role in ("cpo", "pm", "developer", "10x_developer"):
+    config["roles"][role] = {"cli": "claude", "model": "", "difficulty": "low"}
+config["roles"]["consultant"] = [
+    {"cli": "claude", "model": "", "difficulty": "low"},
+    {"cli": "claude", "model": "", "difficulty": "low"},
+]
+config["escalation"] = {"failures_before_consultant": 2, "max_rescue_attempts": 1}
+config["supervision"] = {
+    "heartbeat_stall_seconds": 30, "max_attempts": 1,
+    "retry_backoff_seconds": 1, "usage_limit_pause_seconds": 1,
+}
+path.write_text(json.dumps(config, indent=2) + "\n")
+PYCFG
+
+"$DRIVER_PM" init-section widget <<'SECTIONBRIEF' > "$TEST_ROOT/driver-section.out"
+## Objective
+
+- Build the widget.
+
+## Scope
+
+- The widget only.
+
+## Owned paths
+
+- `src/widget/**`
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- Widget tests pass.
+
+## Rejection conditions
+
+- Scope drift.
+SECTIONBRIEF
+
+driver_status="$("$DRIVER_PM" status)"
+assert_contains "$driver_status" "widget" "status lists the section"
+assert_contains "$driver_status" "scope" "a fresh section needs scoping first"
+
+mkdir "$TEST_ROOT/driver-bin"
+install_driver_stub() {
+  /bin/cp "$1" "$TEST_ROOT/driver-bin/claude"
+  chmod +x "$TEST_ROOT/driver-bin/claude"
+}
+reset_driver_section() {
+  find "$DRIVER_SECTION" -mindepth 1 -maxdepth 1 -type d \
+    \( -name cycles -o -name panels -o -name 'escalation*' \) -exec rm -rf {} + 2>/dev/null || true
+  printf 'planned\n' > "$DRIVER_SECTION/status.txt"
+  rm -f "$TEST_ROOT/driver-complete.flag"
+}
+run_driver() {
+  PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
+  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" run --max-ticks "${1:-12}" 2>&1
+}
+
+install_driver_stub "$REPO_ROOT/tests/fixtures/stub_success.zsh"
+reset_driver_section
+success_run="$(run_driver 10)"
+assert_contains "$success_run" "scope 001 -> ASSIGN" "driver scopes the first assignment"
+assert_contains "$success_run" "develop 001 -> result" "driver dispatches the developer"
+assert_contains "$success_run" "review 001 -> GO" "driver reviews the result"
+assert_contains "$success_run" "complete -> section done" "driver completes the section"
+assert_contains "$success_run" "no section has actionable work" "the run terminates on its own"
+assert_contains "$("$DRIVER_PM" status)" "done" "a completed section is done"
+assert_file_contains "$DRIVER_SECTION/handoff.md" "Widget works." "the driver publishes the pm's handoff"
+
+# Resumption: a dispatch that died leaves a claim with no output. The next run
+# must derive the same next action from the files, with no recovery flag.
+reset_driver_section
+run_driver 2 > /dev/null
+mkdir -p "$DRIVER_SECTION/cycles/002/.claim-develop"
+/bin/cp "$DRIVER_SECTION/cycles/001/assignment.md" "$DRIVER_SECTION/cycles/002/assignment.md"
+printf '1\n' > "$DRIVER_SECTION/cycles/002/.claim-develop/attempts.txt"
+assert_contains "$("$DRIVER_PM" status)" "develop" "a crashed dispatch still needs its step"
+resumed_run="$(run_driver 8)"
+assert_contains "$resumed_run" "develop 002 -> result" "an interrupted run resumes without recovery state"
+assert_contains "$resumed_run" "complete -> section done" "a resumed run still reaches completion"
+
+install_driver_stub "$REPO_ROOT/tests/fixtures/stub_failing.zsh"
+reset_driver_section
+failing_run="$(run_driver 16)"
+assert_contains "$failing_run" "review 001 -> NO_GO (consecutive failures: 1)" "failures are counted from cycle history"
+assert_contains "$failing_run" "review 002 -> NO_GO (consecutive failures: 2)" "consecutive failures accumulate"
+assert_contains "$failing_run" "widget: escalate" "reaching the threshold escalates automatically"
+assert_contains "$failing_run" "adjudicate -> ADOPT_PARALLEL" "the product officer may adopt several paths"
+assert_contains "$failing_run" "rescue -> 2 of 2 path(s) delivered" "ADOPT_PARALLEL runs one rescue per path"
+assert_contains "$failing_run" "rescue round(s) exhausted" "a rescue that fails review is terminal"
+assert_contains "$failing_run" "abandon -> section cancelled" "an exhausted section is abandoned, not retried forever"
+assert_contains "$failing_run" "no section has actionable work" "the failing run also terminates"
+assert_contains "$("$DRIVER_PM" status)" "cancelled" "the abandoned section is cancelled"
+[[ -d "$DRIVER_SECTION/escalation/rescue_1" && -d "$DRIVER_SECTION/escalation/rescue_2" ]] || \
+  fail "parallel rescue did not create an isolated attempt per path"
+
+printf 'PASS: headless driver, escalation, and parallel rescue\n'
+
 printf 'PASS: section-scoped PM flow\n'
 printf 'PASS: role personas, agent dispatch, and supervision\n'
 printf 'PASS: independent consultant panel and CPO adjudication\n'
