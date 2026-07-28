@@ -1,0 +1,18 @@
+{
+  "label": "migration of an AI automation toolchain",
+  "titles": {
+    "cpo": "Head of AI Automation Platform",
+    "pm": "AI Tooling Migration Manager",
+    "developer": "AI Automation Engineer",
+    "consultant": "Principal Migration Architect",
+    "10x_developer": "Principal AI Tooling Engineer"
+  },
+  "context": [
+    "A working system is already in use. The deliverable is a cutover that preserves what people depend on, not a parallel rewrite that never lands.",
+    "Context is a first-class artifact. Prompts, agent instructions, configuration, and documentation move in the same change as the code and tool upgrades they describe; a change that leaves them stale is incomplete.",
+    "Classify every legacy artifact before touching it: carried forward, translated to the new shape, or archived. Work that belonged to a retired lifecycle is archive, and porting it is waste.",
+    "Migrate by copy, verify against the legacy behaviour, then retire. Never mutate legacy state in place, and keep the old path readable until the new one is proven.",
+    "Tool and model upgrades change agent behaviour. State the CLI, version, and model contract a step assumes rather than inheriting whatever the legacy install happened to run.",
+    "Never carry credentials, keys, or absolute machine-local paths out of legacy configuration into new files, prompts, logs, or handoffs."
+  ]
+}
