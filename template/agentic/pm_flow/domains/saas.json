@@ -9,7 +9,6 @@
   },
   "context": [
     "Time to a usable product beats architectural completeness. Ship a narrow slice that a real user can exercise end to end.",
-    "Multi-tenancy, authentication, and billing boundaries are product decisions, not implementation details; surface them early.",
     "Prefer boring, well-supported infrastructure over novel components."
   ]
 }
