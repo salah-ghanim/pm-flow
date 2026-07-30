@@ -134,7 +134,9 @@ You can convene a panel by hand:
 Every dispatch is supervised, because an unattended run cannot ask for help:
 
 - a usage limit pauses and retries
-- a network fault retries with backoff
+- a network fault retries with backoff, as does a model overload, which is
+  transient rather than a usage limit and is classified from whichever stream
+  the CLI reported it on
 - a real error is not retried at all, since retrying spends quota to get the
   same answer
 - an agent that stops reporting progress for `supervision.heartbeat_stall_seconds`

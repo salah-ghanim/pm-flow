@@ -274,21 +274,24 @@ build_command() {
 # transient network faults mean retry; anything else is a real failure and
 # retrying it just burns quota.
 classify_failure() {
-  local log_path="$1"
-  python3 - "$log_path" <<'PY'
+  python3 - "$@" <<'PY'
 import re
 import sys
 from pathlib import Path
 
-text = Path(sys.argv[1]).read_text(errors="replace").lower()
+text = "\n".join(
+    Path(path).read_text(errors="replace")
+    for path in sys.argv[1:]
+    if Path(path).is_file()
+).lower()
 usage = [
     r"usage limit", r"rate limit", r"rate.?limited", r"quota", r"429",
-    r"too many requests", r"insufficient.{0,20}credit", r"overloaded",
+    r"too many requests", r"insufficient.{0,20}credit",
 ]
 network = [
     r"econnreset", r"etimedout", r"enotfound", r"econnrefused", r"eai_again",
     r"network error", r"fetch failed", r"socket hang up", r"connection reset",
-    r"\b50[234]\b", r"timed? ?out",
+    r"\b50[2349]\b", r"overloaded", r"timed? ?out",
 ]
 for pattern in usage:
     if re.search(pattern, text):
@@ -371,6 +374,7 @@ fi
 
 attempt=1
 final_reason="none"
+failure_output="$ATTEMPT_LOG"
 while (( attempt <= MAX_ATTEMPTS )); do
   : > "$ATTEMPT_LOG"
   : > "$RAW_OUTPUT"
@@ -387,8 +391,10 @@ while (( attempt <= MAX_ATTEMPTS )); do
   if [[ "$STALLED" == "1" ]]; then
     reason="stall"
   else
-    reason="$(classify_failure "$ATTEMPT_LOG")"
+    reason="$(classify_failure "$ATTEMPT_LOG" "$RAW_OUTPUT")"
   fi
+  failure_output="$ATTEMPT_LOG"
+  [[ ! -s "$RAW_OUTPUT" ]] || failure_output="$RAW_OUTPUT"
   final_reason="$reason"
   if [[ -n "$HEARTBEAT_FILE" ]]; then
     printf '%s attempt %d of %d failed (%s)\n' \
@@ -416,7 +422,7 @@ while (( attempt <= MAX_ATTEMPTS )); do
       # A real error. Retrying spends quota to get the same answer.
       printf 'pm-flow: %s failed and the error is not transient\n' "$AGENT_CLI" >&2
       /usr/bin/tail -n 20 "$ATTEMPT_LOG" >&2 || true
-      write_response "$ATTEMPT_LOG" "1" "fatal" "$attempt"
+      write_response "$failure_output" "1" "fatal" "$attempt"
       exit 3
       ;;
   esac
@@ -426,7 +432,7 @@ done
 if [[ "$final_reason" != "none" ]]; then
   printf 'pm-flow: gave up on role %s after %d attempts (%s)\n' \
     "$ROLE" "$MAX_ATTEMPTS" "$final_reason" >&2
-  write_response "$ATTEMPT_LOG" "1" "$final_reason" "$MAX_ATTEMPTS"
+  write_response "$failure_output" "1" "$final_reason" "$MAX_ATTEMPTS"
   exit 3
 fi
 

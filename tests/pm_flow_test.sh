@@ -539,6 +539,37 @@ run_supervised
   fail "a dispatched role must not advertise a resumable session"
 assert_file_contains "$TEST_ROOT/heartbeat.txt" "usage_limit" "heartbeat records why an attempt failed"
 assert_file_contains "$TEST_ROOT/heartbeat.txt" "finished" "heartbeat records completion"
+# A claude overload is announced in the CLI's own stdout JSON rather than on
+# stderr, so classification has to read both streams. It is also a short
+# transient fault, not a usage limit: pausing half an hour for it wastes the
+# window in which the service recovers.
+: > "$TEST_ROOT/heartbeat.txt"
+rm -f "$TEST_ROOT/overload-tried"
+stub_cli "if [[ -f $TEST_ROOT/overload-tried ]]; then
+  printf '{\"is_error\":false,\"result\":\"recovered from overload\",\"session_id\":\"s2\"}'
+else
+  touch $TEST_ROOT/overload-tried
+  printf '{\"type\":\"result\",\"is_error\":true,\"result\":\"API Error: 529 {\\\"type\\\":\\\"overloaded_error\\\"}\"}'
+  exit 1
+fi"
+run_supervised
+[[ "$(response_field result)" == "recovered from overload" ]] || \
+  fail "an overload reported only in stdout was not retried"
+[[ "$(response_field attempts)" == "2" ]] || \
+  fail "an overload took the wrong number of attempts to recover"
+assert_file_contains "$TEST_ROOT/heartbeat.txt" "network" \
+  "an overload is a transient fault, not a usage limit"
+
+# Whatever the role did say has to survive into the response. When the detail
+# is in stdout, retaining the empty stderr log instead loses the only evidence
+# of why the dispatch failed.
+stub_cli "printf '{\"type\":\"result\",\"is_error\":true,\"result\":\"API Error: 400 invalid request shape\"}'
+exit 1"
+run_supervised
+[[ "$(response_field failure_reason)" == "fatal" ]] || \
+  fail "an unrecognized stdout error was misclassified"
+assert_contains "$(response_field result)" "invalid request shape" \
+  "the retained failure detail comes from whichever stream carried it"
 
 # A hung agent must be killed rather than blocking a headless run forever, and
 # killing it must take its subprocesses with it.
