@@ -539,6 +539,7 @@ run_supervised
   fail "a dispatched role must not advertise a resumable session"
 assert_file_contains "$TEST_ROOT/heartbeat.txt" "usage_limit" "heartbeat records why an attempt failed"
 assert_file_contains "$TEST_ROOT/heartbeat.txt" "finished" "heartbeat records completion"
+
 # A claude overload is announced in the CLI's own stdout JSON rather than on
 # stderr, so classification has to read both streams. It is also a short
 # transient fault, not a usage limit: pausing half an hour for it wastes the
@@ -929,6 +930,56 @@ assert_contains "$("$DRIVER_PM" status)" "develop" "a crashed dispatch still nee
 resumed_run="$(run_driver 8)"
 assert_contains "$resumed_run" "develop 002 -> result" "an interrupted run resumes without recovery state"
 assert_contains "$resumed_run" "complete -> section done" "a resumed run still reaches completion"
+
+# dispatch_role publishes over its own output path, so an assignment that grants
+# the developer that path destroys the work it asks for: the role writes the
+# file, the dispatch overwrites it, and review rejects the work as absent. The
+# driver must refuse the assignment instead of spending a dispatch on it.
+reset_driver_section
+run_driver 1 > /dev/null
+GUARD_CYCLE="$DRIVER_SECTION/cycles/001"
+[[ -f "$GUARD_CYCLE/assignment.md" ]] || fail "the guard fixture was not scoped"
+GUARD_OUTPUT="${GUARD_CYCLE#$DRIVER_REPO/}/result.md"
+{
+  printf '## Assignment\n\n'
+  printf 'The developer may write only:\n\n'
+  printf -- '- `%s`\n' "$GUARD_OUTPUT"
+  printf -- '- `src/widget/thing.py`\n'
+} > "$GUARD_CYCLE/assignment.md"
+expect_failure "an assignment may not own the dispatch output path" \
+  env PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick
+assert_file_contains "$TEST_ROOT/expected-failure.log" \
+  "grants write access to the dispatch output path" "the rejection explains itself"
+assert_file_contains "$TEST_ROOT/expected-failure.log" "$GUARD_OUTPUT" \
+  "the rejection names the offending path"
+[[ ! -f "$GUARD_CYCLE/result.md" ]] || \
+  fail "a rejected assignment still spent a developer dispatch"
+[[ ! -d "$GUARD_CYCLE/.claim-develop" ]] || \
+  fail "a rejected assignment still claimed the develop step"
+
+# An unqualified mention is caught the same way, since that is how the grant is
+# usually phrased in prose.
+printf '## Assignment\n\nThe developer may write only `heartbeat.txt` and\n`result.md`.\n' \
+  > "$GUARD_CYCLE/assignment.md"
+expect_failure "an inline write grant on the output name is rejected" \
+  env PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick
+assert_file_contains "$TEST_ROOT/expected-failure.log" \
+  "grants write access to the dispatch output path" "an inline grant is rejected too"
+
+# Only write grants are inspected. Another cycle's result is ordinary read-only
+# evidence, and prose after a grant's list is outside the grant.
+{
+  printf '## Assignment\n\n'
+  printf 'Reuse the evidence in `%s`.\n\n' \
+    "${DRIVER_SECTION#$DRIVER_REPO/}/cycles/003/result.md"
+  printf 'Writable paths:\n\n- `src/widget/thing.py`\n\n'
+  printf 'Report what cycle 003 recorded in its result.md before reviewing.\n'
+} > "$GUARD_CYCLE/assignment.md"
+guard_allowed_tick="$(PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
+  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick)"
+assert_contains "$guard_allowed_tick" "develop 001 -> result" \
+  "a read-only reference to another cycle's result stays legal"
+[[ -f "$GUARD_CYCLE/result.md" ]] || fail "the permitted assignment was not dispatched"
 
 install_driver_stub "$REPO_ROOT/tests/fixtures/stub_failing.zsh"
 reset_driver_section

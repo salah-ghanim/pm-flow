@@ -273,6 +273,68 @@ PY
   mv "$staged" "$output_md"
 }
 
+# dispatch_role publishes over its own output path, so an assignment that hands
+# that path to the role destroys the very work it asked for: the role writes the
+# file, the dispatch overwrites it with the response, and review then rejects
+# the work as absent. Reject such an assignment before spending a dispatch on
+# it. Only write grants are inspected; naming another cycle's artifact as
+# read-only evidence stays legal.
+assert_output_not_writable() {
+  local assignment="$1"
+  local output_md="$2"
+  local relative report
+  [[ -f "$assignment" ]] || return 0
+  relative="$(repo_relative_path "$output_md")"
+  # Checked explicitly rather than left to ERR_EXIT: this must stop the tick.
+  if ! report="$(python3 - "$assignment" "$relative" "${output_md:t}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+assignment, relative, basename = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# Language that hands a path to the role, either inline or above a list.
+grant = re.compile(r"writab|may\s+(?:only\s+)?write|write\s+only|may\s+be\s+written", re.I)
+# The dispatch output, as a full repo-relative path or as an unqualified name.
+# The lookbehind keeps `cycles/003/result.md` from matching this cycle's file.
+target = re.compile(
+    r"%s|(?<![\w/.-])%s" % (re.escape(relative), re.escape(basename)), re.I
+)
+listed = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+
+lines = Path(assignment).read_text().splitlines()
+granting = False
+offenders = []
+for index, line in enumerate(lines):
+    # A grant covers the rest of its paragraph, plus any list it introduces.
+    if line.startswith("#"):
+        granting = False
+    elif not line.strip():
+        following = next((later for later in lines[index + 1:] if later.strip()), "")
+        if not listed.match(following):
+            granting = False
+    if grant.search(line):
+        granting = True
+    if granting and target.search(line):
+        offenders.append((index + 1, line.strip()))
+
+if offenders:
+    detail = "\n".join(f"  line {number}: {text}" for number, text in offenders)
+    print(
+        f"the assignment grants write access to the dispatch output path "
+        f"{relative}:\n{detail}\n"
+        f"The harness overwrites that path with the role response, so anything "
+        f"written there is lost. Re-scope the assignment: the role reports "
+        f"through its response, and durable evidence belongs in a separate "
+        f"artifact next to it."
+    )
+    raise SystemExit(1)
+PY
+  )"; then
+    fail "$report"
+  fi
+}
+
 record_cycle_decision() {
   local cycle_dir="$1"
   local source_md="$2"
@@ -359,6 +421,7 @@ do_develop() {
   newest="$(latest_cycle "$section_dir")"
   cycle_dir="$(cycle_dir_for "$section_dir" "$newest")"
   cycle_number="$(basename "$cycle_dir")"
+  assert_output_not_writable "$cycle_dir/assignment.md" "$cycle_dir/result.md"
   claim_step "$cycle_dir/.claim-develop"
   heartbeat="$cycle_dir/heartbeat.txt"
 
@@ -677,8 +740,13 @@ cmd_tick() {
 
   printf 'section=%s\n' "$(basename "$section_dir")"
   printf 'action=%s\n' "$action"
-  printf 'result=%s' "$(perform_action "$section_dir" "$action")"
-  printf '\n'
+  # Capture before printing: a command substitution inside printf's arguments
+  # discards the action's exit status, so a rejected action would report a
+  # successful tick. cmd_run already propagates through its pipeline.
+  local outcome action_status=0
+  outcome="$(perform_action "$section_dir" "$action")" || action_status=$?
+  printf 'result=%s\n' "$outcome"
+  return "$action_status"
 }
 
 cmd_run() {

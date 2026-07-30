@@ -104,6 +104,13 @@ sections/<key>/
     └── heartbeat.txt        progress the developer reports as it works
 ```
 
+`result.md` belongs to the harness: each dispatch publishes the role's response
+over it. An assignment must therefore never grant a role write access to it,
+because the dispatch would overwrite whatever the role put there and the review
+would then reject the work as missing. The driver refuses such an assignment
+before spending a dispatch on it. Durable evidence a role is asked to retain
+belongs in a separate artifact beside `result.md`, named by the assignment.
+
 ## When a section keeps failing
 
 Repeated failure is treated as a signal about the approach, not about effort.
