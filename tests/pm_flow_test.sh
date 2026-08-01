@@ -957,6 +957,23 @@ assert_file_contains "$TEST_ROOT/expected-failure.log" "$GUARD_OUTPUT" \
 [[ ! -d "$GUARD_CYCLE/.claim-develop" ]] || \
   fail "a rejected assignment still claimed the develop step"
 
+# A prohibition is not a grant. Telling a role that the harness owns result.md
+# names both writability and the path, and must not be read as handing it over.
+{
+  printf '## Assignment\n\n'
+  printf 'Writable paths:\n\n- `src/widget/thing.py`\n\n'
+  printf '`result.md` is the harness dispatch output and is not writable;\n'
+  printf 'durable evidence goes in the named artifact.\n\n'
+  printf '# Rejection conditions\n\n'
+  printf 'Reject if any file outside the writable paths changes; if `result.md`\n'
+  printf 'is treated as a durable artifact.\n'
+} > "$GUARD_CYCLE/assignment.md"
+guard_prohibition_tick="$(PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
+  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick)"
+assert_contains "$guard_prohibition_tick" "develop 001 -> result" \
+  "a prohibition naming the output path is not a grant"
+rm -f "$GUARD_CYCLE/result.md"
+
 # An unqualified mention is caught the same way, since that is how the grant is
 # usually phrased in prose.
 printf '## Assignment\n\nThe developer may write only `heartbeat.txt` and\n`result.md`.\n' \

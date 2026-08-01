@@ -293,30 +293,64 @@ from pathlib import Path
 
 assignment, relative, basename = sys.argv[1], sys.argv[2], sys.argv[3]
 
-# Language that hands a path to the role, either inline or above a list.
+# Language that hands a path to a role.
 grant = re.compile(r"writab|may\s+(?:only\s+)?write|write\s+only|may\s+be\s+written", re.I)
+# A prohibition mentions writability too. "result.md is not writable" is the
+# opposite of a grant, and an assignment that says so must not be rejected for
+# saying it, so a negation just before the phrase disarms it.
+negated = re.compile(r"(?:not|never|cannot|can't|no|nor|non-)\W+\w*\s*$", re.I)
 # The dispatch output, as a full repo-relative path or as an unqualified name.
 # The lookbehind keeps `cycles/003/result.md` from matching this cycle's file.
 target = re.compile(
     r"%s|(?<![\w/.-])%s" % (re.escape(relative), re.escape(basename)), re.I
 )
+# A grant reaches only to the end of its own clause, so a rejection-conditions
+# paragraph that mentions writable paths in one clause and result.md in another
+# is not a grant. A trailing colon instead opens the list the grant introduces.
+# A terminator is punctuation followed by space, so the dots inside
+# `heartbeat.txt` and `result.md` do not end the clause that grants them.
+clause_end = re.compile(r"[.;](?=\s|$)|\n\s*\n|\n(?=#)")
 listed = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 
-lines = Path(assignment).read_text().splitlines()
-granting = False
+text = Path(assignment).read_text()
+lines = text.splitlines()
+
+
+def line_of(offset):
+    return text.count("\n", 0, offset) + 1
+
+
+def list_block_end(offset):
+    """End of the bullet list a colon-terminated grant introduces."""
+    index = line_of(offset)  # 1-based line holding the colon
+    end = offset
+    for line in lines[index:]:
+        if not line.strip() or listed.match(line):
+            end += len(line) + 1
+            continue
+        break
+    return end
+
+
 offenders = []
-for index, line in enumerate(lines):
-    # A grant covers the rest of its paragraph, plus any list it introduces.
-    if line.startswith("#"):
-        granting = False
-    elif not line.strip():
-        following = next((later for later in lines[index + 1:] if later.strip()), "")
-        if not listed.match(following):
-            granting = False
-    if grant.search(line):
-        granting = True
-    if granting and target.search(line):
-        offenders.append((index + 1, line.strip()))
+for match in grant.finditer(text):
+    if negated.search(text[max(0, match.start() - 40):match.start()]):
+        continue
+    span = text[match.end():]
+    stop = clause_end.search(span)
+    reach = match.end() + (stop.start() if stop else len(span))
+    # A colon-terminated grant carries into the list it introduces.
+    if text[match.end():reach].rstrip().endswith(":") or (
+        stop and stop.group().startswith(":")
+    ):
+        reach = max(reach, list_block_end(reach))
+    line_start = text.rfind("\n", 0, match.start()) + 1
+    if text[line_start:].split("\n", 1)[0].rstrip().endswith(":"):
+        reach = max(reach, list_block_end(line_start))
+    hit = target.search(text, match.end(), reach)
+    if hit:
+        number = line_of(hit.start())
+        offenders.append((number, lines[number - 1].strip()))
 
 if offenders:
     detail = "\n".join(f"  line {number}: {text}" for number, text in offenders)
