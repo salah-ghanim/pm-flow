@@ -88,6 +88,26 @@ What does not count:
 - observations without a decision or a validation outcome
 - side quests outside the section brief
 
+## Version control
+
+Work that is not committed does not exist. Every role runs as its own process
+with a fresh context, so an uncommitted tree is lost the moment a process is
+killed, a worktree is cleaned, or the next agent starts.
+
+- The section manager commits after every accepted result. An applied `GO` or
+  `GO_WITH_CHANGES` is the commit point; a `NO_GO` is not.
+- A commit covers that section's owned paths together with its `state.md` and
+  `handoff.md`, so the work and the record of the work move as one.
+- Commit only your own owned paths. Sections run concurrently, and a commit that
+  reaches across boundaries picks up another section's half-finished work.
+- The message names the section key and what the cycle established, negative
+  results included.
+- The product officer commits at the same cadence for product state: after
+  decomposition, after any boundary or dependency change, and after every
+  adjudication or abandonment decision.
+- Follow the branch and push policy the repository already states. Do not invent
+  a branching scheme for the flow.
+
 ## Decisions
 
 Each role answers with one token on its decision line, optionally followed by a

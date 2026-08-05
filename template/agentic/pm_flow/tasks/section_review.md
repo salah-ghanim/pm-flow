@@ -18,6 +18,11 @@ Do not soften a rejection to keep things moving. A wrong result that is accepted
 becomes the next section's problem, and this project escalates repeated failure
 to a consultant rather than expecting you to absorb it.
 
+If your decision is GO or GO_WITH_CHANGES, commit before you respond: this
+section's owned paths plus its `state.md` and `handoff.md`, in one commit whose
+message names the section and what this cycle established. Nothing outside your
+owned paths. Do not commit on NO_GO.
+
 ## Respond with these sections only, each as a Markdown heading
 
 1. Assessment

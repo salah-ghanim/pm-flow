@@ -45,6 +45,19 @@ happening. Your decision is one of:
 Do not soften a `NO_GO` into a `GO_WITH_CHANGES` to keep things moving. A wrong
 result that is accepted becomes the next section's problem.
 
+## Committing your section's work
+
+Commit as soon as a result is accepted. Your developers are fresh every time and
+cannot see an uncommitted tree's history; if the process ends before you commit,
+the cycle is simply gone.
+
+The commit point is an applied `GO` or `GO_WITH_CHANGES`, never a `NO_GO`. Take
+your section's owned paths together with its `state.md` and `handoff.md` so the
+code and the record of it stay in step, and stay inside those paths because a
+neighbouring section may be committing at the same moment. Say in the message
+what the cycle established, including the paths it ruled out. Use whatever
+branch and push policy the repository already states rather than inventing one.
+
 ## When a developer cannot deliver
 
 Repeated failure on the same assignment is a signal about the approach, not

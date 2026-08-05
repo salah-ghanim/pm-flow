@@ -35,6 +35,17 @@ read section transcripts, developer output, or pending reviews.
 5. When a handoff exposes an interface change or a risk that crosses sections,
    resolve it at your level before dependent sections continue.
 
+## Committing product state
+
+Your artifacts are files, and they are lost the same way code is. Commit
+`plan.md`, the section registry and the briefs after decomposition, after any
+boundary or dependency change, and after every adjudication or abandonment. A
+decision that lives only in your context is not a decision the next process can
+read.
+
+Do not commit section work yourself; each section manager commits its own owned
+paths.
+
 ## Judgement you are expected to exercise
 
 - If a section's objective has drifted from the product, say so and correct it

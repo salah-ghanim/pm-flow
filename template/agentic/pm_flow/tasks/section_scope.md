@@ -26,6 +26,11 @@ the evidence is in the reviews above. Do not claim this because progress has
 stalled or because the remaining work is awkward — that is what escalation is
 for.
 
+Before you respond, check that the last accepted cycle was committed. If your
+section's owned paths, `state.md` or `handoff.md` have uncommitted changes from
+work already accepted, commit them now — the next developer starts fresh and
+cannot recover what an interrupted process leaves behind.
+
 ## Respond with these sections only, each as a Markdown heading
 
 1. Where the section stands

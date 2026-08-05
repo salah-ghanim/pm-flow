@@ -39,6 +39,10 @@ for the flow's rules. These are the few that hold for every role:
   Checkpoint to `state.md` and `handoff.md`, then launch a fresh agent.
 - Do not count workflow or documentation work as progress unless it directly
   unlocks the same task cycle.
+- Commit whenever a section makes real progress. The section manager commits its
+  own owned paths plus `state.md` and `handoff.md` after every accepted result;
+  the product officer commits plan, registry and brief changes. Uncommitted work
+  does not survive the next fresh process.
 
 Command reference lives in `agentic/pm_flow/README.md`. Roles bind to a CLI,
 a model, and a difficulty in `agentic/pm_flow/config.json`.
