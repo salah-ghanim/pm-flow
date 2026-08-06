@@ -749,7 +749,13 @@ lines = sys.stdin.read().splitlines()
 inside = False
 values = []
 for line in lines:
-    heading = re.match(r"^#{0,6}\s*Decision\s*:?\s*$", line, re.IGNORECASE)
+    # The response contract lists the sections as a numbered list, so a role
+    # may reasonably number the headings it writes. Accept a leading
+    # enumerator rather than discarding an otherwise valid, already-paid-for
+    # response over "# 5. Decision".
+    heading = re.match(
+        r"^#{0,6}\s*(?:\d+[.)]\s*)?Decision\s*:?\s*$", line, re.IGNORECASE
+    )
     if heading:
         if inside:
             raise SystemExit("response contains more than one Decision section")
