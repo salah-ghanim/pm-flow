@@ -292,6 +292,9 @@ network = [
     r"econnreset", r"etimedout", r"enotfound", r"econnrefused", r"eai_again",
     r"network error", r"fetch failed", r"socket hang up", r"connection reset",
     r"\b50[2349]\b", r"overloaded", r"timed? ?out",
+    # A connection that dies mid-stream is transport-level by definition, and
+    # the work is already paid for by the time it happens.
+    r"connection closed", r"closed mid-response", r"premature close",
 ]
 for pattern in usage:
     if re.search(pattern, text):
