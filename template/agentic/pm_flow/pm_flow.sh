@@ -34,6 +34,7 @@ Usage:
   pm_flow.sh [--project <name>] init-section <section-name> [--file <markdown-file>]
   pm_flow.sh [--project <name>] list-sections
   pm_flow.sh [--project <name>] section-run <section-name>
+  pm_flow.sh [--project <name>] section-dependencies <section-name> [--file <markdown-file>]
   pm_flow.sh [--project <name>] section-handoff <section-name> <status> <summary> [--file <markdown-file>]
   pm_flow.sh [--project <name>] consult-panel <section-name> [--file <markdown-file>]
 
@@ -1082,6 +1083,66 @@ print("\n".join(handoffs))
 ' "$PROJECT_ROOT" "$SECTIONS_DIR" "$section_key"
 }
 
+# A dependency edit that introduces a cycle deadlocks every section on it, and
+# nothing else in the flow would notice: `waiting-dependencies` is a legal
+# resting state, so the run would simply report that nothing is actionable.
+assert_no_dependency_cycle() {
+  local section_key="$1"
+  local handoffs="$2"
+  local report
+  if ! report="$(python3 - "$SECTIONS_DIR" "$section_key" "$handoffs" <<'PY'
+from pathlib import Path
+import sys
+
+sections_dir = Path(sys.argv[1])
+changed_key = sys.argv[2]
+proposed = [line.strip() for line in sys.argv[3].splitlines() if line.strip()]
+
+
+def keys_from(lines):
+    found = []
+    for line in lines:
+        parts = line.strip().split("/")
+        if len(parts) >= 2:
+            found.append(parts[-2])
+    return found
+
+
+graph = {}
+for section_dir in sorted(p for p in sections_dir.iterdir()
+                          if p.is_dir() and not p.name.startswith(".")):
+    listing = section_dir / "dependency_handoffs.txt"
+    lines = listing.read_text().splitlines() if listing.is_file() else []
+    graph[section_dir.name] = keys_from(lines)
+graph[changed_key] = keys_from(proposed)
+
+state = {}
+trail = []
+
+
+def walk(node):
+    state[node] = 1
+    trail.append(node)
+    for neighbour in graph.get(node, []):
+        if state.get(neighbour) == 1:
+            cycle = trail[trail.index(neighbour):] + [neighbour]
+            print("dependency cycle: " + " -> ".join(cycle))
+            raise SystemExit(1)
+        if state.get(neighbour, 0) == 0:
+            walk(neighbour)
+    trail.pop()
+    state[node] = 2
+
+
+for node in graph:
+    if state.get(node, 0) == 0:
+        walk(node)
+PY
+  )"; then
+    fail "$report"
+  fi
+}
+
 assert_no_owned_path_overlap() {
   local section_key="$1"
   local owned_paths="$2"
@@ -1414,6 +1475,51 @@ cmd_list_sections() {
   /bin/cat "$SECTIONS_INDEX_FILE"
 }
 
+# The dependency graph, changed through validation rather than by hand.
+#
+# Hand-editing `dependency_handoffs.txt` is how a graph acquires a cycle, a
+# reference to a section that does not exist, or a self-dependency, and none of
+# those are visible afterwards: the sections involved simply sit in
+# `waiting-dependencies` forever and the run reports that nothing is actionable.
+# The product officer owns the graph, so it gets a command instead of a file.
+cmd_section_dependencies() {
+  local section_input="${1:-}"
+  [[ -n "$section_input" ]] || fail "section-dependencies requires a section name"
+  local body_mode="stdin"
+  local body_path=""
+  if [[ "${2:-}" == "--file" ]]; then
+    body_mode="file"
+    body_path="${3:-}"
+  elif [[ -n "${2:-}" ]]; then
+    fail "unknown section-dependencies argument: ${2:-}"
+  fi
+
+  local section_dir section_key body handoffs staged
+  section_dir="$(resolve_section_dir "$section_input")"
+  section_key="$(basename "$section_dir")"
+  body="$(read_body_arg "$body_mode" "$body_path")"
+  # The same shape a brief uses, so one format states dependencies everywhere.
+  assert_matches "$body" '(?im)^#{1,6}\s+Dependencies\s*$' "Dependencies heading"
+
+  acquire_section_create_lock
+  # Every named section must exist and must not be this one; that check already
+  # lives in the brief path and is reused here rather than restated.
+  handoffs="$(extract_dependency_handoffs "$body" "$section_key")"
+  assert_no_dependency_cycle "$section_key" "$handoffs"
+  if [[ -f "$section_dir/owned_paths.txt" ]]; then
+    assert_no_owned_path_overlap "$section_key" "$(/bin/cat "$section_dir/owned_paths.txt")"
+  fi
+  staged="$section_dir/.dependency_handoffs.$$.tmp"
+  printf '%s\n' "$handoffs" > "$staged"
+  mv "$staged" "$section_dir/dependency_handoffs.txt"
+  refresh_sections_index
+  release_section_create_lock
+
+  printf 'recorded=section-dependencies\n'
+  printf 'section=%s\n' "$section_key"
+  printf 'dependencies=%s\n' "${handoffs//$'\n'/,}"
+}
+
 cmd_section_run() {
   local run_dir
   run_dir="$(resolve_section_run "${1:-}")" || fail "section run pointer is empty"
@@ -1572,6 +1678,10 @@ main() {
     section-run)
       shift || true
       cmd_section_run "$@"
+      ;;
+    section-dependencies)
+      shift || true
+      cmd_section_dependencies "$@"
       ;;
     section-handoff)
       shift || true

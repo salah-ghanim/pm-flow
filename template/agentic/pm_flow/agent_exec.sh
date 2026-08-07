@@ -176,7 +176,24 @@ DEFAULT_SCOPED_BASH = [
     "git push:*", "git pull:*", "git restore --staged:*",
     "python3 -m pytest:*", ".venv/bin/python -m pytest:*", "pytest:*",
     "ls:*", "cat:*", "head:*", "tail:*", "wc:*", "grep:*", "rg:*",
+    # Changing the dependency graph has to go through the validated command, so
+    # the managing roles are given it and nothing else from this script. `tick`
+    # and `run` are deliberately not reachable: a dispatched role must not be
+    # able to dispatch the flow.
+    "./agentic/pm_flow/pm_flow.sh section-dependencies:*",
+    "agentic/pm_flow/pm_flow.sh section-dependencies:*",
+    "./agentic/pm_flow/pm_flow.sh list-sections:*",
+    "agentic/pm_flow/pm_flow.sh list-sections:*",
+    "./agentic/pm_flow/pm_flow.sh status:*",
+    "agentic/pm_flow/pm_flow.sh status:*",
 ]
+
+# The audit trail. A role that can rewrite the record of what it decided cannot
+# be checked against it, so the officer is denied the cycle artifacts outright.
+# The section manager is not: its persona says its cycle records are its own,
+# and it authors part of them.
+DEFAULT_AUDIT_DENY_ROLES = ["cpo"]
+DEFAULT_AUDIT_DENY_PATHS = ["**/cycles/**"]
 
 # Everything the managing roles may write, as absolute paths. The project's own
 # pm-flow workspace is always included: that is where state.md, handoff.md and
@@ -198,6 +215,18 @@ if scoped_bash is None:
     scoped_bash = DEFAULT_SCOPED_BASH
 if not isinstance(scoped_bash, list):
     raise SystemExit("config.access.scoped_bash must be a list of command prefixes")
+
+audit_deny_roles = access_config.get("audit_deny_roles")
+if audit_deny_roles is None:
+    audit_deny_roles = DEFAULT_AUDIT_DENY_ROLES
+audit_deny_paths = access_config.get("audit_deny_paths")
+if audit_deny_paths is None:
+    audit_deny_paths = DEFAULT_AUDIT_DENY_PATHS
+scoped_deny = []
+if role in set(audit_deny_roles):
+    for root in scoped_roots:
+        for pattern in audit_deny_paths:
+            scoped_deny.append(str(root).rstrip("/") + "/" + str(pattern).lstrip("/"))
 
 print(cli)
 print(binding.get("model", ""))
@@ -221,6 +250,7 @@ print(positive_int(supervision, "max_attempt_seconds", 10800))
 print(json.dumps({
     "roots": scoped_roots,
     "bash": [str(entry) for entry in scoped_bash],
+    "deny": scoped_deny,
     "isolate_settings": bool(access_config.get("scoped_isolate_settings", True)),
 }))
 PY
@@ -356,8 +386,16 @@ for root in policy.get("roots", []):
 for prefix in policy.get("bash", []):
     allow.append(f"Bash({prefix})")
 
+# Deny wins over allow, so this carves the audit trail back out of the roots
+# granted above.
+deny = []
+for entry in policy.get("deny", []):
+    pattern = "//" + str(entry).lstrip("/")
+    for tool in ("Edit", "Write", "NotebookEdit"):
+        deny.append(f"{tool}({pattern})")
+
 Path(settings_path).write_text(json.dumps({
-    "permissions": {"defaultMode": "default", "allow": allow},
+    "permissions": {"defaultMode": "default", "allow": allow, "deny": deny},
 }, indent=2) + "\n")
 PY
 }
