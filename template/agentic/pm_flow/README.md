@@ -41,8 +41,31 @@ Check the bindings with:
 ./agentic/pm_flow/pm_flow.sh config
 ```
 
-Only `developer` and `10x_developer` can write to the repository. Reviewing and
-planning roles are dispatched read-only, so a review cannot quietly edit code.
+## Access
+
+Roles are dispatched in one of three tiers, set by `access` in `config.json`:
+
+| Tier | Roles by default | May write |
+|---|---|---|
+| `write` | `developer`, `10x_developer` | the whole repository |
+| `scoped` | `pm`, `cpo` | their own project workspace under `agentic/pm_flow/<project>/`, plus git and the acceptance check |
+| `read` | everything else | nothing |
+
+The `scoped` tier exists because the managing roles are asked to keep `state.md`
+current, write a handoff, and commit their own cycle — and a role dispatched
+read-only cannot do any of it. It is still not allowed to write source, so a
+review cannot quietly edit the code it is judging.
+
+On the `claude` backend the tier is enforced: the dispatch is given a generated
+settings file whose allow-list names the writable roots and the permitted shell
+prefixes, under the default permission mode, so anything unnamed is denied
+outright. `codex` and `copilot` cannot narrow write access below their working
+root while keeping repo-relative paths meaningful, so on those backends `scoped`
+is a prompt-level boundary only. Bind the managing roles to a backend that can
+enforce the tier if that difference matters to you.
+
+Add extra writable roots with `access.scoped_write_paths` and extra shell
+prefixes with `access.scoped_bash`.
 
 ## Personas
 
@@ -84,6 +107,23 @@ section is `done`; its manager then receives the accepted dependency handoffs in
 the next scope context. A section whose lifecycle is `blocked` is also
 non-actionable until it is deliberately reopened.
 
+Among the sections that *are* actionable, the driver takes the one the most
+other sections are waiting on, then the one dispatched longest ago, then the
+first by key. Lexical order would let whichever section happens to sort first
+take every dispatch.
+
+A section whose dispatch fails fatally is quarantined rather than ending the
+run: `quarantine.txt` records what failed, `status` shows it, and the remaining
+sections carry on. `run` exits non-zero only when nothing can move — every live
+section quarantined, or a dependent left waiting on a section that was
+cancelled.
+
+Every dispatch records what it cost to `runs/cost_ledger.tsv`. `status` and each
+tick line show the running total, and `budget.max_usd` and
+`budget.max_usd_per_section` stop a run before it spends past them. Costs are
+reported by the `claude` backend; other backends record the dispatch with an
+unknown cost rather than zero.
+
 The driver is level-triggered: it stores no record of what it was doing. Every
 tick observes the files on disk, derives the single next action, performs it,
 and exits. Resuming an interrupted run is therefore not a special case; it is
@@ -96,13 +136,21 @@ sections/<key>/
 ├── brief.md                 the boundary and acceptance criteria
 ├── state.md                 durable detail the manager keeps
 ├── handoff.md               the bounded report upward
+├── quarantine.txt           written only if a dispatch failed fatally
 └── cycles/001/
-    ├── assignment.md        scoped by the manager
+    ├── scope.md             the manager's whole scope response
+    ├── assignment.md        the part of it the developer is given
     ├── result.md            produced by the developer
+    ├── dev_status.txt       DELIVERED, PARTIAL, or BLOCKED
     ├── review.md            judged by the manager
-    ├── decision.txt         GO, GO_WITH_CHANGES, or NO_GO
+    ├── decision.txt         GO, GO_WITH_CHANGES, NO_GO, or UNPARSED
     └── heartbeat.txt        progress the developer reports as it works
 ```
+
+A verdict the driver cannot read is recorded as `UNPARSED`, counts as a failure,
+and is re-asked with the parser's own complaint fed back. It used to leave no
+`decision.txt` at all, so the next tick read the cycle as though it had passed
+and a formatting miss was cheaper than an honest rejection.
 
 `result.md` belongs to the harness: each dispatch publishes the role's response
 over it. An assignment must therefore never grant a role write access to it,
@@ -111,11 +159,32 @@ would then reject the work as missing. The driver refuses such an assignment
 before spending a dispatch on it. Durable evidence a role is asked to retain
 belongs in a separate artifact beside `result.md`, named by the assignment.
 
+## When a section cannot close
+
+Three different things get confused with each other, and each has its own exit.
+
+**It is hard.** Repeated rejection escalates to the consultant panel; see below.
+
+**It is unreachable.** An acceptance criterion needs credentials, a live
+external system, market hours, weeks of elapsed wall clock, or a human
+signature. No assignment the manager can write will ever satisfy it, and
+scoping another cycle at it only spends more. The manager answers
+`BLOCKED_EXTERNAL`, naming the dependency and what would unblock it; the section
+goes `blocked` and reopens deliberately once the dependency lands.
+
+**It is going nowhere.** `GO_WITH_CHANGES` resets no counter and costs nothing,
+so a section can accept cycle after cycle while converging on nothing and never
+arm the escalation ladder. After `escalation.cycles_before_convergence_review`
+accepted cycles with no `COMPLETE` and no `NO_GO`, the product officer is asked
+one question — is the remaining distance shrinking — reading only the brief and
+the last two reviews. It answers `CONTINUE`, `RESCOPE`, `BLOCKED_EXTERNAL`, or
+`ABANDON`.
+
 ## When a section keeps failing
 
 Repeated failure is treated as a signal about the approach, not about effort.
 After `escalation.failures_before_consultant` consecutive rejections the section
-goes to the consultant panel with the full history of what was attempted and
+goes to the consultant panel with the recent history of what was attempted and
 what was observed. Each seat answers independently, and the product officer then
 decides:
 
@@ -144,10 +213,18 @@ Every dispatch is supervised, because an unattended run cannot ask for help:
 - a network fault retries with backoff, as does a model overload, which is
   transient rather than a usage limit and is classified from whichever stream
   the CLI reported it on
-- a real error is not retried at all, since retrying spends quota to get the
-  same answer
-- an agent that stops reporting progress for `supervision.heartbeat_stall_seconds`
-  is terminated as its whole process group and retried
+- a *named* permanent condition — a failed login, an unknown model, a bad
+  argument, a policy refusal — is not retried at all, since retrying spends
+  quota to get the same answer
+- anything unrecognised is retried exactly once. Permanence is an allow-list,
+  not the fall-through: one unenumerated way of spelling a transport error used
+  to end an unattended run outright
+- an agent that stops reporting progress is terminated as its whole process
+  group and retried. Every dispatch is watched, not only the ones carrying a
+  heartbeat file: a dispatch that reports progress is judged against
+  `supervision.heartbeat_stall_seconds`, one that does not against the far
+  longer `supervision.silent_stall_seconds`, and both against a hard
+  `supervision.max_attempt_seconds` ceiling on a single attempt
 
 Tune these under `supervision` in `config.json`.
 

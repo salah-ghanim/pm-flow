@@ -113,15 +113,43 @@ killed, a worktree is cleaned, or the next agent starts.
 Each role answers with one token on its decision line, optionally followed by a
 short justification:
 
-- section scoping: `ASSIGN` or `COMPLETE`
+- section scoping: `ASSIGN`, `COMPLETE`, or `BLOCKED_EXTERNAL`
 - developer: `DELIVERED`, `PARTIAL`, or `BLOCKED`
 - review: `GO`, `GO_WITH_CHANGES`, or `NO_GO`
+- convergence review: `CONTINUE`, `RESCOPE`, `BLOCKED_EXTERNAL`, or `ABANDON`
 - consultant: `ALTERNATIVE`, `RETRY_INFORMED`, or `ABANDON`
 - adjudication: `ADOPT`, `ADOPT_PARALLEL`, `SYNTHESIZE`, or `ABANDON`
 - rescue: `DELIVERED` or `BLOCKED`
 
 A review must not soften a rejection to keep things moving. Repeated failure is
 handled by escalation, not by lowering the bar.
+
+`BLOCKED_EXTERNAL` is for an acceptance criterion that no assignment the role
+can write will ever satisfy, because it needs credentials, a live external
+system, market hours, weeks of elapsed wall clock, or a human signature. It must
+name the dependency and what would unblock it. It is not for difficulty.
+
+A verdict the driver cannot read is recorded as `UNPARSED` and counts as a
+failure, so a formatting miss is never cheaper than an honest rejection.
+
+## Access
+
+Roles are dispatched in one of three tiers:
+
+- `write` — the building roles; the repository is theirs to change
+- `scoped` — the managing roles; they may write their own project or section
+  workspace, run git, and run the acceptance check, but not write source
+- `read` — everyone else
+
+Tiers are enforced by the backend where the backend can express them, and stated
+in the role prompt in every case.
+
+## Money
+
+Every dispatch records what it cost. The run is governed on the sum through
+`budget.max_usd` and `budget.max_usd_per_section`, not only on a tick count,
+because a tick's cost varies by more than an order of magnitude and rises with
+cycle depth.
 
 ## Failure and escalation
 
