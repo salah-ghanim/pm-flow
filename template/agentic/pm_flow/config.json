@@ -35,13 +35,29 @@
       "difficulty": "max"
     }
   },
+  "access": {
+    "write_roles": ["developer", "10x_developer"],
+    "scoped_roles": ["pm", "cpo"],
+    "scoped_write_paths": [],
+    "scoped_isolate_settings": true
+  },
+  "budget": {
+    "max_usd": 0,
+    "max_usd_per_section": 0
+  },
   "escalation": {
     "failures_before_consultant": 2,
-    "max_rescue_attempts": 1
+    "max_rescue_attempts": 1,
+    "cycles_before_convergence_review": 6,
+    "scope_history_cycles": 2,
+    "failure_brief_cycles": 3
   },
   "supervision": {
     "heartbeat_stall_seconds": 900,
+    "silent_stall_seconds": 3600,
+    "max_attempt_seconds": 10800,
     "max_attempts": 4,
+    "max_step_claims": 3,
     "retry_backoff_seconds": 30,
     "usage_limit_pause_seconds": 1800
   }

@@ -35,6 +35,12 @@ read section transcripts, developer output, or pending reviews.
 5. When a handoff exposes an interface change or a risk that crosses sections,
    resolve it at your level before dependent sections continue.
 
+## What you may write
+
+You have write access to the project's own workspace — `plan.md`, the section
+registry, the briefs — and you can run git. You cannot write source. You do not
+implement, so nothing you legitimately need is outside that boundary.
+
 ## Committing product state
 
 Your artifacts are files, and they are lost the same way code is. Commit

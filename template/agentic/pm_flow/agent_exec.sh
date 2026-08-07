@@ -91,7 +91,13 @@ fi
 
 # Resolve the role binding once, up front, so a misconfigured role fails before
 # any model is called.
-role_binding="$(python3 - "$CONFIG_FILE" "$ROLE" "$SEAT" "$PROJECT_CONFIG_FILE" <<'PY'
+AGENT_PROJECT_DIR=""
+if [[ -n "$agent_project_key" && -d "$SCRIPT_DIR/$agent_project_key" ]]; then
+  AGENT_PROJECT_DIR="$SCRIPT_DIR/$agent_project_key"
+fi
+
+role_binding="$(python3 - "$CONFIG_FILE" "$ROLE" "$SEAT" "$PROJECT_CONFIG_FILE" \
+    "$PROJECT_ROOT" "$AGENT_PROJECT_DIR" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -100,6 +106,8 @@ config = json.loads(Path(sys.argv[1]).read_text())
 role = sys.argv[2]
 seat = int(sys.argv[3])
 project_config = sys.argv[4]
+project_root = sys.argv[5]
+project_dir = sys.argv[6]
 if config.get("version") != 1:
     raise SystemExit(f"unsupported config version: {config.get('version')!r}")
 roles = config.get("roles")
@@ -138,12 +146,63 @@ def positive_int(section, key, default):
         raise SystemExit(f"supervision.{key} must be a positive integer, got {value!r}")
     return value
 
+access_config = config.get("access", {})
+if not isinstance(access_config, dict):
+    raise SystemExit("config.access must be an object")
+
+# Three access tiers, not two.
+#
+#   write   the building roles; the whole repository is theirs to change
+#   scoped  the managing roles; they must be able to write their own state,
+#           handoff and cycle records, commit them, and run the acceptance
+#           check, but must not be able to quietly rewrite source
+#   read    everyone else; a review can never edit anything
+#
+# Before this tier existed the managing roles got no permission flag at all,
+# so every write they were instructed to make was denied and their state files
+# sat at template text.
+write_roles = set(access_config.get("write_roles") or ["developer", "10x_developer"])
+scoped_roles = set(access_config.get("scoped_roles") or ["pm", "cpo"])
+if role in write_roles:
+    access = "write"
+elif role in scoped_roles:
+    access = "scoped"
+else:
+    access = "read"
+
+DEFAULT_SCOPED_BASH = [
+    "git status:*", "git add:*", "git commit:*", "git diff:*", "git log:*",
+    "git show:*", "git rev-parse:*", "git ls-files:*", "git branch:*",
+    "git push:*", "git pull:*", "git restore --staged:*",
+    "python3 -m pytest:*", ".venv/bin/python -m pytest:*", "pytest:*",
+    "ls:*", "cat:*", "head:*", "tail:*", "wc:*", "grep:*", "rg:*",
+]
+
+# Everything the managing roles may write, as absolute paths. The project's own
+# pm-flow workspace is always included: that is where state.md, handoff.md and
+# the cycle records live.
+scoped_roots = []
+if project_dir:
+    scoped_roots.append(project_dir)
+for entry in access_config.get("scoped_write_paths") or []:
+    if not isinstance(entry, str) or not entry.strip():
+        continue
+    candidate = entry.strip()
+    if candidate.startswith("/"):
+        scoped_roots.append(candidate)
+    else:
+        scoped_roots.append(str(Path(project_root) / candidate))
+
+scoped_bash = access_config.get("scoped_bash")
+if scoped_bash is None:
+    scoped_bash = DEFAULT_SCOPED_BASH
+if not isinstance(scoped_bash, list):
+    raise SystemExit("config.access.scoped_bash must be a list of command prefixes")
+
 print(cli)
 print(binding.get("model", ""))
 print(difficulty)
-# Only the two building roles may write. Reviewing and planning roles stay
-# read-only so a review can never quietly edit the repository.
-print("write" if role in {"developer", "10x_developer"} else "read")
+print(access)
 print(positive_int(supervision, "max_attempts", 4))
 print(positive_int(supervision, "retry_backoff_seconds", 30))
 print(positive_int(supervision, "usage_limit_pause_seconds", 1800))
@@ -152,6 +211,18 @@ if project_config:
     project_domain = json.loads(Path(project_config).read_text()).get("domain") or ""
 print(project_domain or config.get("domain") or "generic")
 print(positive_int(supervision, "heartbeat_stall_seconds", 900))
+# A dispatch with no heartbeat writes nothing until it is finished, so it needs
+# a far longer silence budget than one that was asked to report as it works.
+print(positive_int(supervision, "silent_stall_seconds", 3600))
+# A hard ceiling on one attempt, so a process that keeps producing output while
+# making no progress still ends.
+print(positive_int(supervision, "max_attempt_seconds", 10800))
+# Single line, always last: the scoped-access policy as JSON.
+print(json.dumps({
+    "roots": scoped_roots,
+    "bash": [str(entry) for entry in scoped_bash],
+    "isolate_settings": bool(access_config.get("scoped_isolate_settings", True)),
+}))
 PY
 )" || fail "could not resolve role '$ROLE' from $CONFIG_FILE"
 
@@ -164,16 +235,23 @@ RETRY_BACKOFF="$(printf '%s\n' "$role_binding" | sed -n '6p')"
 USAGE_PAUSE="$(printf '%s\n' "$role_binding" | sed -n '7p')"
 AGENT_DOMAIN="$(printf '%s\n' "$role_binding" | sed -n '8p')"
 STALL_SECONDS="$(printf '%s\n' "$role_binding" | sed -n '9p')"
+SILENT_STALL_SECONDS="$(printf '%s\n' "$role_binding" | sed -n '10p')"
+MAX_ATTEMPT_SECONDS="$(printf '%s\n' "$role_binding" | sed -n '11p')"
+SCOPED_POLICY="$(printf '%s\n' "$role_binding" | sed -n '12p')"
 
 file_mtime() {
   stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0\n'
 }
 
-# Run one attempt in the background and watch it for silence. A role that was
-# asked to report progress and then stopped reporting is treated as hung: it is
-# killed and retried rather than left to block the run forever. Roles with no
-# heartbeat are not policed this way, because a slow but healthy review writes
-# nothing until it is finished.
+# Run one attempt in the background and watch it for silence. A role that stops
+# making observable progress is treated as hung: it is killed and retried rather
+# than left to block the run forever.
+#
+# Every dispatch is policed, not only the ones carrying a heartbeat file. A
+# dispatch with no heartbeat used to get a bare `wait` with no timeout at all,
+# so a wedged review blocked the run indefinitely. Such a dispatch does write
+# nothing until it finishes, so it is judged against the much longer
+# `silent_stall_seconds` budget and against a hard ceiling on the whole attempt.
 STALLED="0"
 
 # Start the CLI as its own process-group leader so a stalled attempt can be
@@ -190,17 +268,19 @@ terminate_group() {
 
 run_attempt() {
   STALLED="0"
-  local child last_activity heartbeat_seen output_seen now_epoch
+  local child last_activity heartbeat_seen output_seen log_seen now_epoch
+  local started_at stall_budget
   if [[ "$AGENT_CLI" == "codex" ]]; then
     ( cd "$PROJECT_ROOT" && exec python3 -c "$PGROUP_SHIM" "${AGENT_ARGV[@]}" ) > "$ATTEMPT_LOG" 2>&1 &
   else
     ( cd "$PROJECT_ROOT" && exec python3 -c "$PGROUP_SHIM" "${AGENT_ARGV[@]}" ) > "$RAW_OUTPUT" 2> "$ATTEMPT_LOG" &
   fi
   child=$!
-
-  if [[ -z "$HEARTBEAT_FILE" ]]; then
-    wait "$child"
-    return $?
+  started_at="$(date +%s)"
+  if [[ -n "$HEARTBEAT_FILE" ]]; then
+    stall_budget="$STALL_SECONDS"
+  else
+    stall_budget="$SILENT_STALL_SECONDS"
   fi
 
   # Poll every second. A few cheap syscalls per second is nothing next to a
@@ -210,12 +290,30 @@ run_attempt() {
     sleep 1
     kill -0 "$child" 2>/dev/null || break
     now_epoch="$(date +%s)"
-    heartbeat_seen="$(file_mtime "$HEARTBEAT_FILE")"
+    # The attempt log is the only stream that receives incremental output on
+    # every backend, so it counts as activity. Leaving it out made the sole
+    # liveness signal a file the role was merely asked to append to.
     output_seen="$(file_mtime "$RAW_OUTPUT")"
-    last_activity=$(( heartbeat_seen > output_seen ? heartbeat_seen : output_seen ))
-    if (( now_epoch - last_activity >= STALL_SECONDS )); then
-      printf '%s stalled with no progress for %ss; terminating\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$STALL_SECONDS" >> "$HEARTBEAT_FILE"
+    log_seen="$(file_mtime "$ATTEMPT_LOG")"
+    heartbeat_seen=0
+    [[ -z "$HEARTBEAT_FILE" ]] || heartbeat_seen="$(file_mtime "$HEARTBEAT_FILE")"
+    last_activity=$(( output_seen > log_seen ? output_seen : log_seen ))
+    last_activity=$(( heartbeat_seen > last_activity ? heartbeat_seen : last_activity ))
+    last_activity=$(( last_activity > 0 ? last_activity : started_at ))
+    if (( now_epoch - last_activity >= stall_budget )); then
+      if [[ -n "$HEARTBEAT_FILE" ]]; then
+        printf '%s stalled with no progress for %ss; terminating\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$stall_budget" >> "$HEARTBEAT_FILE"
+      fi
+      printf 'pm-flow: %s stalled with no progress for %ss; terminating\n' \
+        "$LABEL" "$stall_budget" >> "$ATTEMPT_LOG"
+      terminate_group "$child"
+      STALLED="1"
+      break
+    fi
+    if (( now_epoch - started_at >= MAX_ATTEMPT_SECONDS )); then
+      printf 'pm-flow: %s exceeded the %ss attempt ceiling; terminating\n' \
+        "$LABEL" "$MAX_ATTEMPT_SECONDS" >> "$ATTEMPT_LOG"
       terminate_group "$child"
       STALLED="1"
       break
@@ -234,14 +332,57 @@ codex_effort() {
   esac
 }
 
+# Render the scoped tier as a claude settings file. The tier is expressed as an
+# allow-list under the default permission mode: a headless run cannot prompt, so
+# anything the list does not name is denied outright. `acceptEdits` is
+# deliberately not used here, because it would accept every edit including the
+# ones this tier exists to refuse.
+write_scoped_settings() {
+  local settings_path="$1"
+  python3 - "$settings_path" "$SCOPED_POLICY" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+settings_path, policy_json = sys.argv[1:]
+policy = json.loads(policy_json)
+
+allow = []
+for root in policy.get("roots", []):
+    # A leading `//` is how a claude permission rule spells an absolute path.
+    pattern = "//" + str(root).lstrip("/").rstrip("/") + "/**"
+    for tool in ("Edit", "Write", "NotebookEdit"):
+        allow.append(f"{tool}({pattern})")
+for prefix in policy.get("bash", []):
+    allow.append(f"Bash({prefix})")
+
+Path(settings_path).write_text(json.dumps({
+    "permissions": {"defaultMode": "default", "allow": allow},
+}, indent=2) + "\n")
+PY
+}
+
 build_command() {
+  local settings_path
   case "$AGENT_CLI" in
     claude)
       AGENT_ARGV=(claude -p --output-format json --effort "$AGENT_DIFFICULTY" --add-dir "$PROJECT_ROOT")
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(--model "$AGENT_MODEL")
-      if [[ "$AGENT_ACCESS" == "write" ]]; then
-        AGENT_ARGV+=(--permission-mode acceptEdits)
-      fi
+      case "$AGENT_ACCESS" in
+        write)
+          AGENT_ARGV+=(--permission-mode acceptEdits)
+          ;;
+        scoped)
+          settings_path="$WORK_DIR/scoped_settings.json"
+          write_scoped_settings "$settings_path"
+          AGENT_ARGV+=(--settings "$settings_path")
+          # Ambient user or project settings could grant back exactly what this
+          # tier withholds, so the policy is the only one loaded.
+          if [[ "$(printf '%s' "$SCOPED_POLICY" | python3 -c 'import json,sys; print("1" if json.load(sys.stdin).get("isolate_settings") else "0")')" == "1" ]]; then
+            AGENT_ARGV+=(--setting-sources "")
+          fi
+          ;;
+      esac
       AGENT_ARGV+=(-- "$(/bin/cat "$PROMPT_FILE")")
       ;;
     codex)
@@ -249,11 +390,14 @@ build_command() {
                   -c "model_reasoning_effort=$(codex_effort "$AGENT_DIFFICULTY")"
                   -o "$RAW_OUTPUT")
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(-m "$AGENT_MODEL")
-      if [[ "$AGENT_ACCESS" == "write" ]]; then
-        AGENT_ARGV+=(--sandbox workspace-write)
-      else
-        AGENT_ARGV+=(--sandbox read-only)
-      fi
+      case "$AGENT_ACCESS" in
+        # codex makes the working root writable and offers no way to narrow
+        # below it while keeping repo-relative paths meaningful, so the scoped
+        # tier is only a prompt-level boundary on this backend. Bind the
+        # managing roles to a backend that can express the tier if that matters.
+        write|scoped) AGENT_ARGV+=(--sandbox workspace-write) ;;
+        *)            AGENT_ARGV+=(--sandbox read-only) ;;
+      esac
       AGENT_ARGV+=("$(/bin/cat "$PROMPT_FILE")")
       ;;
     copilot)
@@ -263,16 +407,21 @@ build_command() {
                   --effort "$AGENT_DIFFICULTY" --add-dir "$PROJECT_ROOT"
                   --no-custom-instructions --no-ask-user --silent --stream off)
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(--model "$AGENT_MODEL")
-      if [[ "$AGENT_ACCESS" == "write" ]]; then
-        AGENT_ARGV+=(--allow-all-tools)
-      fi
+      case "$AGENT_ACCESS" in
+        # Same limitation as codex: the boundary is stated in the prompt only.
+        write|scoped) AGENT_ARGV+=(--allow-all-tools) ;;
+      esac
       ;;
   esac
 }
 
-# Classify a failed attempt from the CLI's own output. Usage limits mean wait;
-# transient network faults mean retry; anything else is a real failure and
-# retrying it just burns quota.
+# Classify a failed attempt from the CLI's own output.
+#
+# `permanent` is an allow-list, not the fall-through. The fall-through used to
+# be "fatal", which meant one unrecognised transport string ended an unattended
+# run outright. An unenumerated fault is far more often a new way of spelling a
+# transport error than a genuinely permanent one, so the unknown case is retried
+# once and only a named permanent condition refuses retry outright.
 classify_failure() {
   python3 - "$@" <<'PY'
 import re
@@ -296,6 +445,18 @@ network = [
     # the work is already paid for by the time it happens.
     r"connection closed", r"closed mid-response", r"premature close",
 ]
+# Conditions where the same call will get the same answer. Retrying any of
+# these spends quota to learn nothing.
+permanent = [
+    r"invalid api key", r"authentication.{0,20}fail", r"unauthorized",
+    r"\b401\b", r"\b403\b", r"not logged in", r"please run .{0,20}login",
+    r"credentials?.{0,20}(?:not found|missing|expired|invalid)",
+    r"unknown model", r"invalid model", r"model .{0,40}(?:not found|does not exist)",
+    r"unrecognized (?:option|argument|flag)", r"unknown (?:option|argument|flag)",
+    r"invalid (?:option|argument|flag)", r"no such (?:option|file or directory)",
+    r"usage: ", r"command not found",
+    r"refus(?:e|ed|al)", r"violat", r"content policy", r"safety policy",
+]
 for pattern in usage:
     if re.search(pattern, text):
         print("usage_limit"); break
@@ -304,7 +465,11 @@ else:
         if re.search(pattern, text):
             print("network"); break
     else:
-        print("fatal")
+        for pattern in permanent:
+            if re.search(pattern, text):
+                print("permanent"); break
+        else:
+            print("unknown")
 PY
 }
 
@@ -322,6 +487,16 @@ from pathlib import Path
 
 out_path, result_path, is_error, reason, role, cli, model, difficulty, attempts = sys.argv[1:]
 text = Path(result_path).read_text(errors="replace").strip() if Path(result_path).is_file() else ""
+# Backends other than claude do not report what the call cost. The field is
+# still written so every response envelope has the same shape and the driver's
+# budget accounting can tell "nothing was spent" from "the cost is unknown".
+cost = None
+if cli == "claude":
+    try:
+        reported = json.loads(text).get("total_cost_usd")
+        cost = float(reported) if reported is not None else None
+    except (ValueError, AttributeError, TypeError):
+        cost = None
 payload = {
     "type": "result",
     "is_error": is_error == "1",
@@ -332,6 +507,7 @@ payload = {
     "model": model,
     "difficulty": difficulty,
     "attempts": int(attempts),
+    "total_cost_usd": cost,
     # Every role runs as a fresh process, so nothing is resumable. Continuity
     # lives in the durable state and handoff files, not in a conversation.
     "session_id": "",
@@ -363,6 +539,10 @@ if [[ "$DRY_RUN" == "1" ]]; then
   printf 'argv='
   printf '%q ' "${AGENT_ARGV[@]}"
   printf '\n'
+  if [[ "$AGENT_ACCESS" == "scoped" && -f "$WORK_DIR/scoped_settings.json" ]]; then
+    printf 'scoped_policy=\n'
+    /bin/cat "$WORK_DIR/scoped_settings.json"
+  fi
   exit 0
 fi
 
@@ -421,11 +601,27 @@ while (( attempt <= MAX_ATTEMPTS )); do
         "$AGENT_CLI" "$reason" "$local_backoff" >&2
       sleep "$local_backoff"
       ;;
+    unknown)
+      # Not recognised either way. Buy exactly one more attempt: most such
+      # faults are transport errors nobody has enumerated yet, and a second
+      # identical failure is evidence that it is not one.
+      if (( attempt >= 2 )); then
+        printf 'pm-flow: %s failed twice with an unrecognised error; giving up\n' "$AGENT_CLI" >&2
+        /usr/bin/tail -n 20 "$ATTEMPT_LOG" >&2 || true
+        write_response "$failure_output" "1" "unknown" "$attempt"
+        exit 3
+      fi
+      local_backoff=$(( RETRY_BACKOFF * attempt ))
+      printf 'pm-flow: %s failed with an unrecognised error; retrying once in %ss\n' \
+        "$AGENT_CLI" "$local_backoff" >&2
+      sleep "$local_backoff"
+      ;;
     *)
-      # A real error. Retrying spends quota to get the same answer.
-      printf 'pm-flow: %s failed and the error is not transient\n' "$AGENT_CLI" >&2
+      # A named permanent condition. Retrying spends quota to get the same
+      # answer.
+      printf 'pm-flow: %s failed and the error is permanent\n' "$AGENT_CLI" >&2
       /usr/bin/tail -n 20 "$ATTEMPT_LOG" >&2 || true
-      write_response "$failure_output" "1" "fatal" "$attempt"
+      write_response "$failure_output" "1" "permanent" "$attempt"
       exit 3
       ;;
   esac
@@ -455,6 +651,13 @@ try:
 except json.JSONDecodeError:
     payload = {"is_error": True, "result": raw.strip(), "failure_reason": "unparsable_response"}
 payload.setdefault("failure_reason", "none")
+# claude already reports total_cost_usd; keep it and normalise its type so the
+# driver's budget accounting never has to guess.
+try:
+    reported = payload.get("total_cost_usd")
+    payload["total_cost_usd"] = float(reported) if reported is not None else None
+except (ValueError, TypeError):
+    payload["total_cost_usd"] = None
 payload.update({
     "role": role,
     "pm_backend": cli,
