@@ -228,6 +228,17 @@ Every dispatch is supervised, because an unattended run cannot ask for help:
 
 Tune these under `supervision` in `config.json`.
 
+## Checking the flow itself
+
+```bash
+./agentic/pm_flow/tests/run.zsh
+```
+
+Nothing in the suite calls a model. The dispatcher is stubbed with canned
+responses and canned failures, so every transition, every recovery path, and the
+verdict parser's whole near-miss table run for free against a synthetic project
+in a temporary directory. Run it after changing the driver.
+
 ## Sections by hand
 
 The product officer normally creates sections, but you can add one directly:
