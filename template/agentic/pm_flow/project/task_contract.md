@@ -155,10 +155,10 @@ failure, so a formatting miss is never cheaper than an honest rejection.
 
 Roles are dispatched in one of three tiers:
 
-- `write` — the building roles; the repository is theirs to change
-- `scoped` — the managing roles; they may write their own project or section
+- `write` - the building roles; the repository is theirs to change
+- `scoped` - the managing roles; they may write their own project or section
   workspace, run git, and run the acceptance check, but not write source
-- `read` — everyone else
+- `read` - everyone else
 
 Tiers are enforced by the backend where the backend can express them, and stated
 in the role prompt in every case.
