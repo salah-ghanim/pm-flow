@@ -298,7 +298,7 @@ absent "F12 cycle 001 is no longer carried" "$(cat "$prompt")" "cycles/001/resul
 has    "F12 state.md is still in the context" "$(cat "$prompt")" "state.md"
 
 printf '\n===== F17: a handoff over budget gets feedback, then gives up cleanly =====\n'
-LONG="$(python3 -c "print('## Outcome\n\n' + ('word ' * 600) + '\n\n## Decisions\n\n- x\n\n## Interfaces\n\n- x\n\n## Risks\n\n- x\n\n## Next action\n\n- x')")"
+LONG="$(python3 -c "print('## Outcome\n\n' + ('word ' * 600) + '\n\n## Decisions\n\n- x\n\n## Interfaces\n\n- x\n\n## Risks\n\n- x\n\n## What is unproven\n\n- x\n\n## Next action\n\n- x')")"
 PM_FLOW_STUB='## Decision
 
 COMPLETE' PM_FLOW_SECTION=beta "$FLOWSH" tick >/dev/null

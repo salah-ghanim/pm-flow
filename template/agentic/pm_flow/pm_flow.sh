@@ -1156,6 +1156,10 @@ validate_handoff() {
   assert_matches "$handoff" '(?im)^#{1,6}\s+Decisions\s*$' "handoff Decisions heading"
   assert_matches "$handoff" '(?im)^#{1,6}\s+Interfaces\s*$' "handoff Interfaces heading"
   assert_matches "$handoff" '(?im)^#{1,6}\s+Risks\s*$' "handoff Risks heading"
+  # The heading that would have surfaced a client proven only against a fake at
+  # cycle 003 instead of never. A handoff without it reports outcomes with no
+  # stated distance left to run.
+  assert_matches "$handoff" '(?im)^#{1,6}\s+What is unproven\s*$' "handoff What is unproven heading"
   assert_matches "$handoff" '(?im)^#{1,6}\s+Next action\s*$' "handoff Next action heading"
 }
 
@@ -1182,7 +1186,8 @@ if byte_count > 8192:
         f"It is {byte_count} bytes; the cap is 8192. Cut roughly "
         f"{byte_count - 8192} bytes."
     )
-for heading in ("Outcome", "Decisions", "Interfaces", "Risks", "Next action"):
+for heading in ("Outcome", "Decisions", "Interfaces", "Risks",
+                "What is unproven", "Next action"):
     if not re.search(rf"^#{{1,6}}\s+{re.escape(heading)}\s*$", text,
                      re.MULTILINE | re.IGNORECASE):
         problems.append(f"The `## {heading}` heading is missing or misspelled.")
@@ -1387,6 +1392,7 @@ cmd_init_section() {
     printf '## Decisions\n\n- None yet.\n\n'
     printf '## Interfaces\n\n- None identified yet.\n\n'
     printf '## Risks\n\n- No implementation evidence exists yet.\n\n'
+    printf '## What is unproven\n\n- Everything in the brief; nothing has been attempted yet.\n\n'
     printf '## Next action\n\n- Awaiting the first scoped assignment.\n'
   } > "$SECTION_DIR/handoff.md"
 

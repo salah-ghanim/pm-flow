@@ -645,6 +645,8 @@ record_blocked_external() {
     printf '## Interfaces\n\n- Nothing new. Dependent sections must assume this capability is unavailable.\n\n'
     printf '## Risks\n\n- The dependency may never arrive, in which case the section must be rescoped\n'
     printf '  or abandoned as a product decision.\n\n'
+    printf '## What is unproven\n\n- Every acceptance criterion behind the blocked dependency. Nothing here has\n'
+    printf '  been demonstrated against the real system.\n\n'
     printf '## Next action\n\n- Resolve the external dependency, then reopen this section with an\n'
     printf '  `active` handoff.\n'
   } > "$handoff"
@@ -1022,6 +1024,8 @@ do_abandon() {
     printf '## Decisions\n\n- The product officer accepted abandonment; see the adjudication.\n\n'
     printf '## Interfaces\n\n- Nothing from this section can be depended on.\n\n'
     printf '## Risks\n\n- Any section expecting this capability must be rescoped.\n\n'
+    printf '## What is unproven\n\n- Everything this section was to deliver. No capability here was\n'
+    printf '  demonstrated.\n\n'
     printf '## Next action\n\n- Reconcile the product plan without this section.\n'
   } > "$escalation_dir/abandon_handoff.md"
   cmd_section_handoff "$(basename "$section_dir")" cancelled "$summary" \
