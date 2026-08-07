@@ -1467,8 +1467,8 @@ blocks = re.split(r"^##\s+Section:\s*(.+?)\s*$", text, flags=re.MULTILINE)
 if len(blocks) < 3:
     raise SystemExit("the decomposition contained no '## Section: <name>' blocks")
 
-required = ["Objective", "Scope", "Owned paths", "Dependencies", "Acceptance",
-            "Rejection conditions"]
+required = ["Objective", "Scope", "Priority", "Owned paths", "Dependencies",
+            "Acceptance", "Rejection conditions"]
 names = []
 for index in range(1, len(blocks), 2):
     raw_name = blocks[index].strip().strip("`")
@@ -1525,6 +1525,9 @@ do_decompose() {
     fi
     if ! extract_owned_paths "$(/bin/cat "$brief_dir/briefs/$brief_file")" >/dev/null 2>&1; then
       problems+="section '$name': Owned paths has no usable bullet"$'\n'
+    fi
+    if ! extract_section_priority "$(/bin/cat "$brief_dir/briefs/$brief_file")" >/dev/null 2>&1; then
+      problems+="section '$name': Priority must be must-have or nice-to-have plus what the product loses"$'\n'
     fi
   done
   [[ -z "$problems" ]] || fail "the decomposition is not usable; nothing was created:

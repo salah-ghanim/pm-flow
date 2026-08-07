@@ -46,6 +46,10 @@ Emit one block per section, in dependency order, using exactly this shape:
 - In: what belongs here.
 - Out: what explicitly does not.
 
+### Priority
+
+- must-have: what the product cannot do at all without this section.
+
 ### Owned paths
 
 - src/example/**
@@ -63,9 +67,17 @@ Emit one block per section, in dependency order, using exactly this shape:
 - What would make this section's work unacceptable.
 ```
 
-Every block needs all six headings. `Owned paths` takes at least one
+Every block needs all seven headings. `Owned paths` takes at least one
 repo-relative bullet and may use globs. Each `Dependencies` bullet is the exact
 name of a section listed above this one, or `None.` when there are none.
+
+`Priority` takes exactly one bullet, beginning with `must-have` or
+`nice-to-have`, then a colon and one line naming what the product loses without
+this section. Be honest: `must-have` means the product does not meet its
+completion criteria without this work. Everything else is `nice-to-have`, and a
+`nice-to-have` is a section you are agreeing can be cut later without
+renegotiating the mission. A decomposition where every section is `must-have`
+has not made a priority call.
 
 Emit nothing before the first section block and nothing after the last one. No
 preamble, no summary, no closing commentary.

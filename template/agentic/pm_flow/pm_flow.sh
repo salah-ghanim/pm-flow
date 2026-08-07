@@ -500,13 +500,15 @@ with lock_path.open("a+") as lock:
     for section_dir in sorted(p for p in sections_dir.iterdir() if p.is_dir() and not p.name.startswith(".")):
         name = first_line(section_dir / "name.txt", section_dir.name)
         status = first_line(section_dir / "status.txt", "unknown")
+        # Sections created before priorities existed read as must-have.
+        priority = first_line(section_dir / "priority.txt", "must-have")
         summary = first_line(section_dir / "summary.txt", "No bounded handoff yet.")
         updated = first_line(section_dir / "updated_at.txt", "unknown")
         run_path = first_line(section_dir / "run_path.txt", "none")
         handoff_path = section_dir / "handoff.md"
         handoff_rel = os.path.relpath(handoff_path, index_path.parent)
         rows.append(
-            f"| {cell(name)} | {cell(status)} | {cell(summary)} | "
+            f"| {cell(name)} | {cell(priority)} | {cell(status)} | {cell(summary)} | "
             f"[handoff]({cell(handoff_rel)}) | `{cell(run_path)}` | {cell(updated)} |"
         )
 
@@ -517,14 +519,16 @@ with lock_path.open("a+") as lock:
         "Per-section files are authoritative; run `pm_flow.sh list-sections` to refresh this index.",
         "The root coordinator should read this file and the linked handoffs, not section transcripts.",
         "",
-        "| Section | Status | Summary | PM handoff | Run | Updated (UTC) |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Section | Priority | Status | Summary | PM handoff | Run | Updated (UTC) |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
-    lines.extend(rows or ["| _none_ | — | Create a section with `init-section`. | — | — | — |"])
+    lines.extend(rows or ["| _none_ | - | - | Create a section with `init-section`. | - | - | - |"])
     lines.extend([
         "",
         "Allowed statuses: `planned`, `active`, `blocked`, `done`, `cancelled`.",
-        "A handoff is capped at 500 words and 8192 bytes and carries only outcomes, decisions, interfaces, risks, and the next action.",
+        "Priority is `must-have` or `nice-to-have`; a section created before priorities existed reads as `must-have`.",
+        "A handoff is capped at 500 words and 8192 bytes and carries only outcomes, decisions, interfaces, risks, what is unproven, and the next action.",
+        "A handoff is a claim. Check the artifact it names before acting on it.",
         "",
     ])
 
@@ -926,10 +930,66 @@ validate_section_brief() {
   local brief="$1"
   assert_matches "$brief" '(?im)^#{1,6}\s+Objective\s*$' "section Objective heading"
   assert_matches "$brief" '(?im)^#{1,6}\s+Scope\s*$' "section Scope heading"
+  assert_matches "$brief" '(?im)^#{1,6}\s+Priority\s*$' "section Priority heading"
   assert_matches "$brief" '(?im)^#{1,6}\s+Owned paths\s*$' "section Owned paths heading"
   assert_matches "$brief" '(?im)^#{1,6}\s+Dependencies\s*$' "section Dependencies heading"
   assert_matches "$brief" '(?im)^#{1,6}\s+Acceptance\s*$' "section Acceptance heading"
   assert_matches "$brief" '(?im)^#{1,6}\s+Rejection conditions\s*$' "section Rejection conditions heading"
+}
+
+# A section states what the product loses without it, at the moment it is cut.
+# Two lines out: the token, then the loss. The token is what `status`, the
+# registry and the portfolio review read; the loss is what makes a cut arguable
+# instead of arbitrary.
+extract_section_priority() {
+  local brief="$1"
+  printf '%s\n' "$brief" | python3 -c '
+import re
+import sys
+
+inside = False
+value = ""
+for line in sys.stdin.read().splitlines():
+    heading = re.match(r"^#{1,6}\s+(.+?)\s*$", line)
+    if heading:
+        if inside:
+            break
+        inside = heading.group(1).strip().lower() == "priority"
+        continue
+    if not inside:
+        continue
+    candidate = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s*", "", line).strip().strip("`*_ ")
+    if candidate:
+        value = candidate
+        break
+
+if not value:
+    raise SystemExit("Priority must contain one bullet naming must-have or nice-to-have")
+
+match = re.match(r"^(must[\s-]?have|nice[\s-]?to[\s-]?have)\b[\s:,.-]*(.*)$", value, re.I)
+if not match:
+    raise SystemExit(
+        f"Priority must begin with must-have or nice-to-have, got: {value}"
+    )
+token = "must-have" if match.group(1).lower().startswith("must") else "nice-to-have"
+loss = match.group(2).strip().strip("`*_ ")
+if not loss:
+    raise SystemExit(
+        "Priority must state in one line what the product loses without this "
+        f"section, after the {token} token"
+    )
+print(token)
+print(loss)
+'
+}
+
+# Sections created before priorities existed read as must-have, so nothing is
+# ever cut for lack of a label it was never asked for.
+section_priority() {
+  local section_dir="$1"
+  local value
+  value="$(first_line_or "$section_dir/priority.txt" "")"
+  printf '%s\n' "${value:-must-have}"
 }
 
 extract_owned_paths() {
@@ -1279,12 +1339,15 @@ cmd_init_section() {
     fail "unknown init-section argument: ${2:-}"
   fi
 
-  local section_brief owned_paths dependency_handoffs
+  local section_brief owned_paths dependency_handoffs priority
   section_brief="$(read_body_arg "$body_mode" "$body_path")"
   [[ -n "$section_brief" ]] || fail "section brief must not be empty"
   [[ -f "$CONTRACT_FILE" ]] || fail "missing task contract: $CONTRACT_FILE"
   validate_section_brief "$section_brief"
   owned_paths="$(extract_owned_paths "$section_brief")"
+  # The parser prints what is wrong with it on stderr.
+  priority="$(extract_section_priority "$section_brief")" || \
+    fail "section brief has an unusable Priority heading"
 
   SECTION_NAME="$section_name"
   SECTION_KEY="$(slugify "$section_name")"
@@ -1302,6 +1365,7 @@ cmd_init_section() {
   SECTION_DIR="$staged_section_dir"
 
   printf '%s\n' "$SECTION_NAME" > "$SECTION_DIR/name.txt"
+  printf '%s\n' "$priority" > "$SECTION_DIR/priority.txt"
   printf '%s\n' "$owned_paths" > "$SECTION_DIR/owned_paths.txt"
   printf '%s\n' "$dependency_handoffs" > "$SECTION_DIR/dependency_handoffs.txt"
   printf 'planned\n' > "$SECTION_DIR/status.txt"

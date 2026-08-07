@@ -80,7 +80,7 @@ exists(){ if [[ -f "$2" ]]; then ok "$1"; else bad "$1" "missing $2"; fi }
 next_action_for() { "$FLOWSH" next 2>/dev/null | awk -v k="$1" '$2 == k {print $3; exit}' }
 
 brief() {
-  printf '## Objective\n\n- %s\n\n## Scope\n\n- one thing\n\n## Owned paths\n\n- `%s`\n\n## Dependencies\n\n- None.\n\n## Acceptance\n\n- `.venv/bin/python -m pytest -q` exits 0\n\n## Rejection conditions\n\n- nothing runs\n' "$1" "$2"
+  printf '## Objective\n\n- %s\n\n## Scope\n\n- one thing\n\n## Priority\n\n- must-have: the product cannot ship without it\n\n## Owned paths\n\n- `%s`\n\n## Dependencies\n\n- None.\n\n## Acceptance\n\n- `.venv/bin/python -m pytest -q` exits 0\n\n## Rejection conditions\n\n- nothing runs\n' "$1" "$2"
 }
 
 SCOPE_OK='## Assignment
@@ -117,6 +117,10 @@ PM_FLOW_STUB='## Section: client
 
 - one
 
+## Priority
+
+- must-have: no client, no product
+
 ## Owned paths
 
 - `pkg1/`
@@ -142,6 +146,10 @@ PM_FLOW_STUB='## Section: client
 ## Scope
 
 - one
+
+## Priority
+
+- nice-to-have: the product still works on one venue without it
 
 ## Owned paths
 
@@ -179,6 +187,10 @@ out="$(PM_FLOW_STUB='## Section: good
 
 - one
 
+## Priority
+
+- must-have: nothing ships without it
+
 ## Owned paths
 
 - `pkg1/`
@@ -204,6 +216,10 @@ out="$(PM_FLOW_STUB='## Section: good
 ## Scope
 
 - one
+
+## Priority
+
+- must-have: nothing ships without it
 
 ## Owned paths
 

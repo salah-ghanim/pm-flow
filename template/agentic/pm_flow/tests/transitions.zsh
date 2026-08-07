@@ -87,7 +87,7 @@ has()  { if [[ "$2" == *"$3"* ]]; then ok "$1"; else bad "$1" "$2"; fi }
 absent() { if [[ "$2" != *"$3"* ]]; then ok "$1"; else bad "$1" "$2"; fi }
 
 brief() {
-  printf '## Objective\n\n- %s\n\n## Scope\n\n- one thing\n\n## Owned paths\n\n- `%s`\n\n## Dependencies\n\n%s\n\n## Acceptance\n\n- `.venv/bin/python -m pytest -q` exits 0\n\n## Rejection conditions\n\n- nothing runs\n' \
+  printf '## Objective\n\n- %s\n\n## Scope\n\n- one thing\n\n## Priority\n\n- must-have: the product cannot ship without it\n\n## Owned paths\n\n- `%s`\n\n## Dependencies\n\n%s\n\n## Acceptance\n\n- `.venv/bin/python -m pytest -q` exits 0\n\n## Rejection conditions\n\n- nothing runs\n' \
     "$1" "$2" "$3"
 }
 
