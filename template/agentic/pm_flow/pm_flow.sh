@@ -18,6 +18,7 @@ SECTION_NAME=""
 SECTION_DIR=""
 RUN_RECORD_LOCK=""
 SECTION_CREATE_LOCK=""
+DRIVER_LOCK=""
 
 usage() {
   cat <<'EOF'
@@ -25,6 +26,8 @@ Usage:
   pm_flow.sh [--project <name>] validate
   pm_flow.sh [--project <name>] config
   pm_flow.sh [--project <name>] status
+  pm_flow.sh [--project <name>] next
+  pm_flow.sh [--project <name>] cost
   pm_flow.sh [--project <name>] [--section <name>] tick
   pm_flow.sh [--project <name>] [--section <name>] run [--max-ticks <n>]
   pm_flow.sh [--project <name>] role-prompt <role>
@@ -718,6 +721,31 @@ release_section_create_lock() {
   release_lock SECTION_CREATE_LOCK
 }
 
+# One driver at a time per project. Without this, two `run` invocations observe
+# the same actionable section and dispatch it twice: the claim directories are
+# per step, so both pay for the same call.
+release_driver_lock() {
+  release_lock DRIVER_LOCK
+}
+
+acquire_driver_lock() {
+  mkdir -p "$PROJECT_DIR"
+  zmodload zsh/system 2>/dev/null || fail "the zsh/system module is required for safe locking"
+  local lock_file="$PROJECT_DIR/.driver.lock"
+  [[ -e "$lock_file" ]] || : >> "$lock_file"
+  # Refused immediately rather than queued: the other driver holds this for the
+  # length of its whole run, so waiting behind it buys nothing and hides the
+  # fact that two drivers were started.
+  if ! zsystem flock -t 0 -f DRIVER_LOCK "$lock_file" 2>/dev/null; then
+    fail "another pm_flow driver is already running for project '$PROJECT_KEY'"
+  fi
+  # Deliberately no EXIT trap. In zsh a trap installed inside a function is
+  # local to that function and fires when the *function* returns, so trapping
+  # here would release the lock immediately and the mutex would guard nothing.
+  # The lock is held by an open descriptor and the kernel drops it when the
+  # process dies, which is exactly the lifetime a run-level mutex wants.
+}
+
 acquire_section_create_lock() {
   mkdir -p "$SECTIONS_DIR"
   acquire_lock "$SECTIONS_DIR/.create.lock" SECTION_CREATE_LOCK
@@ -737,49 +765,161 @@ assert_matches() {
   printf '%s\n' "$haystack" | python3 -c 'import re, sys; sys.exit(0 if re.search(sys.argv[1], sys.stdin.read(), re.MULTILINE) else 1)' "$pattern" || fail "content missing valid $label"
 }
 
-extract_markdown_decision() {
+# Parse a verdict section out of a role's markdown response.
+#
+# The response has already been paid for by the time this runs, so the parser is
+# deliberately forgiving about presentation and strict only about the verdict
+# token. It accepts atx headings, bare heading lines, numbered headings, bold
+# headings, a verdict on the heading line itself, and value lines that arrive
+# blockquoted, bulleted, numbered or emphasised. More than one section with the
+# heading is no longer an error: the last one that carries a legal token wins,
+# because a role that restates its verdict at the end means the last statement.
+#
+# Prints two lines: the verdict token, then the whole value line it came from.
+markdown_verdict_parse() {
   local response="$1"
   local allowed_csv="$2"
+  local heading="${3:-Decision}"
   printf '%s\n' "$response" | python3 -c '
 import re
 import sys
 
 allowed = set(sys.argv[1].split(","))
+heading_name = sys.argv[2]
 lines = sys.stdin.read().splitlines()
-inside = False
-values = []
-for line in lines:
-    # The response contract lists the sections as a numbered list, so a role
-    # may reasonably number the headings it writes. Accept a leading
-    # enumerator rather than discarding an otherwise valid, already-paid-for
-    # response over "# 5. Decision".
-    heading = re.match(
-        r"^#{0,6}\s*(?:\d+[.)]\s*)?Decision\s*:?\s*$", line, re.IGNORECASE
-    )
-    if heading:
-        if inside:
-            raise SystemExit("response contains more than one Decision section")
-        inside = True
+
+heading_re = re.compile(
+    r"^[\s>]*"
+    r"(?:#{1,6}\s*)?"
+    r"(?:\d+[.)]\s*)?"
+    r"(?:\*{1,3}|_{1,3})?\s*"
+    + re.escape(heading_name)
+    + r"\s*(?:\*{1,3}|_{1,3})?"
+    r"\s*(?:[:\-]+[ \t]*(?P<inline>.*?))?\s*$",
+    re.IGNORECASE,
+)
+next_heading_re = re.compile(r"^[\s>]*#{1,6}\s+\S")
+
+
+def clean(value):
+    value = re.sub(r"^[\s>]*", "", value)
+    value = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", value)
+    return value.strip().strip("*_` \t")
+
+
+sections = []
+index = 0
+while index < len(lines):
+    match = heading_re.match(lines[index])
+    if not match:
+        index += 1
         continue
-    if inside and re.match(r"^#{1,6}\s+", line):
+    values = []
+    inline = clean(match.group("inline") or "")
+    if inline:
+        values.append(inline)
+    index += 1
+    while index < len(lines):
+        line = lines[index]
+        if next_heading_re.match(line) or heading_re.match(line):
+            break
+        candidate = clean(line)
+        if candidate:
+            values.append(candidate)
+        index += 1
+    sections.append(values)
+
+if not sections:
+    raise SystemExit(f"response has no {heading_name} section")
+
+token_re = re.compile(r"^([A-Z][A-Z_]*)\b")
+last_seen = None
+for values in reversed(sections):
+    if not values:
+        continue
+    last_seen = values[0]
+    token = token_re.match(values[0])
+    verdict = token.group(1) if token else values[0]
+    if verdict in allowed:
+        print(verdict)
+        print(values[0])
         break
-    if inside and line.strip():
-        value = re.sub(r"^\s*[-*]\s+", "", line).strip()
-        value = value.strip("*_` ")
-        values.append(value)
-if not inside or not values:
-    raise SystemExit("response Decision section is empty")
-# The decision line must lead with the verdict token. A trailing justification
-# on the same line is accepted so a well-formed review is not discarded after
-# the PM call has already been spent.
-token = re.match(r"^([A-Z][A-Z_]*)\b", values[0])
-decision = token.group(1) if token else values[0]
-if decision not in allowed:
+else:
+    if last_seen is None:
+        raise SystemExit(f"response {heading_name} section is empty")
     raise SystemExit(
-        f"response Decision must begin with one of {sorted(allowed)}, got {values[0]!r}"
+        f"response {heading_name} must begin with one of {sorted(allowed)}, "
+        f"got {last_seen!r}"
     )
-print(decision)
-' "$allowed_csv" || fail "content missing valid decision"
+' "$allowed_csv" "$heading"
+}
+
+extract_markdown_decision() {
+  local parsed
+  parsed="$(markdown_verdict_parse "$1" "$2" "${3:-Decision}")" || fail "content missing valid decision"
+  printf '%s\n' "${parsed%%$'\n'*}"
+}
+
+# The verdict line in full, justification included. Some transitions need the
+# text after the token, for instance the name of the external dependency a
+# BLOCKED_EXTERNAL scope is required to state.
+extract_markdown_decision_line() {
+  local parsed
+  parsed="$(markdown_verdict_parse "$1" "$2" "${3:-Decision}")" || return 1
+  printf '%s\n' "${parsed#*$'\n'}"
+}
+
+# Pull the assignment out of a scope response. The whole response used to become
+# assignment.md, editorial and all, so the developer read the manager's
+# reasoning about the section as though it were part of the task.
+extract_assignment_sections() {
+  local response="$1"
+  printf '%s\n' "$response" | python3 -c '
+import re
+import sys
+
+WANTED = ["assignment", "acceptance", "rejection conditions"]
+TITLES = {"assignment": "Assignment", "acceptance": "Acceptance",
+          "rejection conditions": "Rejection conditions"}
+
+atx_re = re.compile(r"^\s*#{1,6}\s*(?:\d+[.)]\s*)?\**\s*(.+?)\s*\**\s*:?\s*$")
+bold_re = re.compile(r"^\s*(?:\d+[.)]\s*)?\*\*(.+?)\*\*\s*:?\s*$")
+
+
+def heading_name(line):
+    for pattern in (atx_re, bold_re):
+        match = pattern.match(line)
+        if match:
+            return match.group(1).strip().lower()
+    return None
+
+
+blocks = {}
+current = None
+buffer = []
+for line in sys.stdin.read().splitlines():
+    name = heading_name(line)
+    if name is not None:
+        if current is not None:
+            blocks.setdefault(current, buffer)
+        current = name if name in WANTED else None
+        buffer = []
+        continue
+    if current is not None:
+        buffer.append(line)
+if current is not None:
+    blocks.setdefault(current, buffer)
+
+out = []
+for name in WANTED:
+    body = "\n".join(blocks.get(name, [])).strip()
+    if not body:
+        continue
+    out.extend(["## " + TITLES[name], "", body, ""])
+if not out:
+    raise SystemExit("no assignment sections found")
+print("\n".join(out).rstrip())
+'
 }
 
 validate_section_brief() {
@@ -959,6 +1099,98 @@ validate_handoff() {
   assert_matches "$handoff" '(?im)^#{1,6}\s+Next action\s*$' "handoff Next action heading"
 }
 
+# The same checks as validate_handoff, reported instead of enforced. A handoff
+# that misses the budget used to be re-requested with the identical prompt and
+# no feedback, so the second attempt missed it the same way and bricked the
+# cycle. The caller feeds this text back to the role.
+handoff_budget_report() {
+  local handoff="$1"
+  printf '%s\n' "$handoff" | python3 -c '
+import re
+import sys
+
+text = sys.stdin.read()
+words = len(text.split())
+byte_count = len(text.encode("utf-8", errors="replace"))
+problems = []
+if words > 500:
+    problems.append(
+        f"It is {words} words; the cap is 500. Cut roughly {words - 500} words."
+    )
+if byte_count > 8192:
+    problems.append(
+        f"It is {byte_count} bytes; the cap is 8192. Cut roughly "
+        f"{byte_count - 8192} bytes."
+    )
+for heading in ("Outcome", "Decisions", "Interfaces", "Risks", "Next action"):
+    if not re.search(rf"^#{{1,6}}\s+{re.escape(heading)}\s*$", text,
+                     re.MULTILINE | re.IGNORECASE):
+        problems.append(f"The `## {heading}` heading is missing or misspelled.")
+if problems:
+    print("\n".join(f"- {problem}" for problem in problems))
+'
+}
+
+# Brief-authoring checks that catch a cycle-wasting brief before any dispatch.
+# These warn rather than reject: a section that creates a new file legitimately
+# names a path that does not exist yet, and refusing it would be worse than
+# saying so.
+warn_brief_authoring() {
+  local brief="$1"
+  local section_key="$2"
+  local warnings
+  warnings="$(printf '%s\n' "$brief" | python3 -c '
+import re
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+warnings = []
+lines = sys.stdin.read().splitlines()
+
+section = None
+owned, acceptance = [], []
+for line in lines:
+    heading = re.match(r"^#{1,6}\s+(.+?)\s*$", line)
+    if heading:
+        section = heading.group(1).strip().lower()
+        continue
+    bullet = re.match(r"^\s*[-*]\s+(.+?)\s*$", line)
+    if not bullet:
+        continue
+    if section == "owned paths":
+        owned.append(bullet.group(1).strip())
+    elif section == "acceptance":
+        acceptance.append(bullet.group(1).strip())
+
+for entry in owned:
+    ticked = re.search(r"`([^`]+)`", entry)
+    candidate = (ticked.group(1) if ticked else entry).strip()
+    if re.search(r"[*?\[{]", candidate):
+        continue
+    if not (project_root / candidate).exists():
+        warnings.append(f"owned path does not exist in the working tree: {candidate}")
+
+bare = re.compile(r"(?:^|[\s`(])(pytest|python|python3|node|npm|go|cargo)\s", re.I)
+for entry in acceptance:
+    for command in re.findall(r"`([^`]+)`", entry):
+        if bare.search(" " + command) and not re.search(
+            r"(?:\.venv/|/bin/|venv/|\./)", command
+        ):
+            warnings.append(
+                f"acceptance command is not pinned to an interpreter path: {command}"
+            )
+
+print("\n".join(warnings))
+' "$PROJECT_ROOT")"
+  [[ -n "$warnings" ]] || return 0
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    printf 'WARNING: section %s brief: %s\n' "$section_key" "$line" >&2
+  done <<< "$warnings"
+}
+
 write_completion_marker() {
   local decision="$1"
   local pending_dir="$2"
@@ -1056,6 +1288,7 @@ cmd_init_section() {
 
   SECTION_NAME="$section_name"
   SECTION_KEY="$(slugify "$section_name")"
+  warn_brief_authoring "$section_brief" "$SECTION_KEY"
   local final_section_dir="$SECTIONS_DIR/$SECTION_KEY"
   local staged_section_dir="$SECTIONS_DIR/.creating-${SECTION_KEY}-$(lower_uuid | cut -c1-8)"
   mkdir -p "$SECTIONS_DIR"
@@ -1241,6 +1474,14 @@ main() {
     status)
       shift || true
       cmd_status "$@"
+      ;;
+    next)
+      shift || true
+      cmd_next "$@"
+      ;;
+    cost)
+      shift || true
+      cmd_cost "$@"
       ;;
     role-prompt)
       shift || true
