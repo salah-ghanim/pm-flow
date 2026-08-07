@@ -5,12 +5,21 @@ Work is cut into sections, each section is driven by its own manager, and every
 piece of engineering goes to a fresh agent with no inherited conversation.
 
 ```text
-product officer          cuts the product into sections, adjudicates failures
+product officer          cuts the product into sections, reviews the portfolio,
+│                        cuts what the product does not need
 └── section manager      scopes assignments, reviews results
     ├── developer        one bounded assignment, then discarded
     ├── consultants      an independent panel, when a section keeps failing
     └── rescue engineer  the last attempt, on the path the officer chose
 ```
+
+The product officer's ground truth is the mission and the committed evidence,
+never the reports from below it. It reads the plan, its own portfolio log, the
+section registry and bounded handoffs, and it treats every handoff as a claim to
+check rather than a fact to accept. It never reads transcripts, developer
+results, reviews or assignments, and it never browses evidence in bulk: it
+probes, asking bounded questions whose answers are one or two lines, one per
+completion criterion.
 
 ## Roles, not vendors
 
@@ -120,9 +129,64 @@ cancelled.
 
 Every dispatch records what it cost to `runs/cost_ledger.tsv`. `status` and each
 tick line show the running total, and `budget.max_usd` and
-`budget.max_usd_per_section` stop a run before it spends past them. Costs are
-reported by the `claude` backend; other backends record the dispatch with an
-unknown cost rather than zero.
+`budget.max_usd_per_section` stop a run before it spends past them. Both default
+to `0`, which means unlimited rather than nothing. Costs are reported by the
+`claude` backend; other backends record the dispatch with an unknown cost rather
+than zero.
+
+## The portfolio review
+
+Project-level work preempts section work, because there is always a section
+willing to scope one more cycle. Whichever of these fires first convenes the
+product officer for a review of the whole product, whether or not anything has
+failed:
+
+| `governance` key | Default | Fires when |
+|---|---|---|
+| `portfolio_review_dispatches` | 12 | that many dispatches since the last review |
+| `portfolio_review_usd` | 20 | that much project spend since the last review |
+| `portfolio_review_idle_cycles` | 8 | that many cycles since the last review with no section reaching `done` |
+| `portfolio_log_full_entries` | 4 | how many past reviews stay in the log in full |
+
+Set a key to `0` to switch that trigger off.
+
+The review asks what the product still *lacks*, never how the sections are
+doing. It settles every completion criterion in the plan with its own probe, it
+checks the plan's own structure for an unstarted dependency, an unreachable
+section, must-have inflation and linear-chain risk, and it answers per section
+with `CONTINUE`, `RESCOPE`, `CUT` or `BLOCK`, plus `ON_TRACK` or `OFF_TRACK` for
+the product. `CUT` cancels the section through the normal handoff path, `BLOCK`
+marks it blocked, and `RESCOPE` reaches that section's next scope call with the
+officer's reason in context.
+
+Each review appends to `project_state/portfolio_log.md`: the date, the spend,
+every criterion's `MET` or `NOT MET`, every verdict, and the stated shortest path
+to the next unmet criterion. The officer is a fresh process each time, so that
+file is its only memory, and it is what makes a section that has been nearly done
+for four reviews visible as the pattern it is. Older entries compact to one line
+each so the log cannot grow without bound.
+
+Sections carry a priority, set at decomposition and owned by the officer:
+`must-have` or `nice-to-have` plus one line naming what the product loses without
+it. A section created before priorities existed reads as `must-have`. A
+`nice-to-have` consuming the project's spend while a `must-have` criterion sits
+untouched is what `CUT` is for.
+
+The officer may make the product smaller, visibly, and may never make the
+evidence weaker, quietly. It edits `plan.md`, the log and any `priority.txt`
+freely; it reduces a section's scope only as a dated `## Reduced scope,
+authorized <date>` heading appended to that brief, leaving the original
+Acceptance bullets in the diff; and it changes the dependency graph only through
+the validated command:
+
+```bash
+./agentic/pm_flow/pm_flow.sh section-dependencies <section> --file deps.md
+```
+
+which takes a `## Dependencies` block and refuses a missing section, a
+self-dependency, a cycle, or an ownership overlap. On the `claude` backend the
+officer is additionally denied write access to every cycle artifact, because a
+role that can rewrite the record of what it decided cannot be checked against it.
 
 The driver is level-triggered: it stores no record of what it was doing. Every
 tick observes the files on disk, derives the single next action, performs it,
@@ -135,7 +199,8 @@ A section's state *is* its files:
 sections/<key>/
 ├── brief.md                 the boundary and acceptance criteria
 ├── state.md                 durable detail the manager keeps
-├── handoff.md               the bounded report upward
+├── priority.txt             must-have or nice-to-have, and what is lost
+├── handoff.md               the bounded report upward, unproven claims included
 ├── quarantine.txt           written only if a dispatch failed fatally
 └── cycles/001/
     ├── scope.md             the manager's whole scope response
@@ -151,6 +216,15 @@ A verdict the driver cannot read is recorded as `UNPARSED`, counts as a failure,
 and is re-asked with the parser's own complaint fed back. It used to leave no
 `decision.txt` at all, so the next tick read the cycle as though it had passed
 and a formatting miss was cheaper than an honest rejection.
+
+A handoff carries `Outcome`, `Decisions`, `Interfaces`, `Risks`,
+`What is unproven` and `Next action`, in 500 words and 8192 bytes.
+`What is unproven` is the one that costs something to write: every capability
+the section claims that has not been demonstrated against the real thing, and
+the observation that would settle it. A section whose client had never contacted
+its venue reported that clearly, in bold, from its third cycle onward, and
+nothing was ever convened to read it. The portfolio review now is, and it is
+required to answer that list section by section.
 
 `result.md` belongs to the harness: each dispatch publishes the role's response
 over it. An assignment must therefore never grant a role write access to it,
@@ -248,10 +322,12 @@ The product officer normally creates sections, but you can add one directly:
 ./agentic/pm_flow/pm_flow.sh list-sections
 ```
 
-A brief needs the exact headings `Objective`, `Scope`, `Owned paths`,
-`Dependencies`, `Acceptance`, and `Rejection conditions`. Owned paths must be
-repo-relative and cannot overlap a section that is still live, because sections
-may run concurrently. Each dependency is an existing section key or a
+A brief needs the exact headings `Objective`, `Scope`, `Priority`,
+`Owned paths`, `Dependencies`, `Acceptance`, and `Rejection conditions`.
+`Priority` is one bullet: `must-have` or `nice-to-have`, then one line naming
+what the product loses without this section. Owned paths must be repo-relative
+and cannot overlap a section that is still live, because sections may run
+concurrently. Each dependency is an existing section key or a
 repo-relative path to its `handoff.md`; the dependency section must be `done`
 before the dependent section becomes actionable.
 

@@ -41,17 +41,20 @@ section_cycles_dir() {
   printf '%s\n' "$1/cycles"
 }
 
-latest_cycle() {
-  local cycles_dir
-  cycles_dir="$(section_cycles_dir "$1")"
-  [[ -d "$cycles_dir" ]] || { printf '0\n'; return; }
+latest_numbered_dir() {
+  local parent="$1"
+  [[ -d "$parent" ]] || { printf '0\n'; return; }
   local newest=0 entry name
-  for entry in "$cycles_dir"/*(/N); do
+  for entry in "$parent"/*(/N); do
     name="$(basename "$entry")"
     [[ "$name" == <-> ]] || continue
     (( name > newest )) && newest="$name"
   done
   printf '%s\n' "$newest"
+}
+
+latest_cycle() {
+  latest_numbered_dir "$(section_cycles_dir "$1")"
 }
 
 cycle_dir_for() {
@@ -350,18 +353,23 @@ cmd_cost() {
   python3 "$SCRIPT_DIR/cost.py" report "$PROJECT_DIR" "$(cost_ledger_file)"
 }
 
-budget_limit() {
-  python3 - "$AGENT_CONFIG_FILE" "$1" <<'PY'
+config_number() {
+  python3 - "$AGENT_CONFIG_FILE" "$1" "$2" "$3" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-config = json.loads(Path(sys.argv[1]).read_text())
-value = config.get("budget", {}).get(sys.argv[2], 0)
+config_path, section, key, default = sys.argv[1:]
+config = json.loads(Path(config_path).read_text())
+value = config.get(section, {}).get(key, float(default))
 if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
-    raise SystemExit(f"budget.{sys.argv[2]} must be a non-negative number, got {value!r}")
+    raise SystemExit(f"{section}.{key} must be a non-negative number, got {value!r}")
 print(f"{float(value):.4f}")
 PY
+}
+
+budget_limit() {
+  config_number budget "$1" 0
 }
 
 # Checked before every dispatch. A limit of 0 means unlimited.
@@ -379,6 +387,140 @@ assert_within_budget() {
   if [[ "$(python3 -c 'import sys; print("1" if float(sys.argv[1]) > 0 and float(sys.argv[2]) >= float(sys.argv[1]) else "0")' "$limit" "$spent")" == "1" ]]; then
     fail "section $section_key budget exhausted: \$$spent spent against budget.max_usd_per_section \$$limit"
   fi
+}
+
+# --- governance -------------------------------------------------------------
+#
+# The product officer used to have three dispatch points and two of them were
+# conditional on failure, so a project could run 46 dispatches and $67 without a
+# single whole-product review ever being convened. Nothing was broken: nobody was
+# ever summoned to look. This is the cadence that summons it whether or not
+# anything has gone wrong.
+#
+# Every counter here is derived from files on disk, like the rest of the driver.
+# What is stored is only the baseline the last review was taken at.
+
+portfolio_dir() {
+  printf '%s/portfolio\n' "$STATE_DIR"
+}
+
+# Zero disables the trigger.
+portfolio_dispatch_threshold() {
+  config_positive_int governance portfolio_review_dispatches 12 0
+}
+
+portfolio_idle_cycle_threshold() {
+  config_positive_int governance portfolio_review_idle_cycles 8 0
+}
+
+portfolio_usd_threshold() {
+  config_number governance portfolio_review_usd 20
+}
+
+# One row per dispatch. A tick count is not persisted anywhere and would not
+# survive a fresh process; the ledger row is the durable unit, and a tick buys
+# exactly one dispatch except at a parallel rescue.
+dispatch_count() {
+  local ledger count
+  ledger="$(cost_ledger_file)"
+  [[ -f "$ledger" ]] || { printf '0\n'; return; }
+  count="$(/usr/bin/wc -l < "$ledger" | tr -d '[:space:]')"
+  printf '%s\n' "${count:-0}"
+}
+
+# Arithmetic here uses the assignment form rather than `(( total += n ))`:
+# `(( ))` reports the value of the expression as its exit status, so adding zero
+# to zero looks like a failed command and `set -e` ends the run.
+project_cycle_count() {
+  local section_dir total=0
+  [[ -d "$SECTIONS_DIR" ]] || { printf '0\n'; return; }
+  for section_dir in "$SECTIONS_DIR"/*(/N); do
+    [[ "$(basename "$section_dir")" != .* ]] || continue
+    total=$(( total + $(latest_cycle "$section_dir") ))
+  done
+  printf '%s\n' "$total"
+}
+
+sections_with_status() {
+  local wanted="$1"
+  local section_dir total=0 lifecycle
+  [[ -d "$SECTIONS_DIR" ]] || { printf '0\n'; return; }
+  for section_dir in "$SECTIONS_DIR"/*(/N); do
+    [[ "$(basename "$section_dir")" != .* ]] || continue
+    lifecycle="$(first_line_or "$section_dir/status.txt" planned)"
+    [[ "$lifecycle" == "$wanted" ]] || continue
+    total=$(( total + 1 ))
+  done
+  printf '%s\n' "$total"
+}
+
+live_section_count() {
+  local section_dir total=0 lifecycle
+  [[ -d "$SECTIONS_DIR" ]] || { printf '0\n'; return; }
+  for section_dir in "$SECTIONS_DIR"/*(/N); do
+    [[ "$(basename "$section_dir")" != .* ]] || continue
+    lifecycle="$(first_line_or "$section_dir/status.txt" planned)"
+    case "$lifecycle" in done|cancelled) continue ;; esac
+    total=$(( total + 1 ))
+  done
+  printf '%s\n' "$total"
+}
+
+portfolio_baseline() {
+  first_line_or "$(portfolio_dir)/baseline_$1.txt" "${2:-0}"
+}
+
+record_portfolio_baseline() {
+  local dir
+  dir="$(portfolio_dir)"
+  mkdir -p "$dir"
+  printf '%s\n' "$(dispatch_count)"      > "$dir/baseline_dispatches.txt"
+  printf '%s\n' "$(spent_usd)"           > "$dir/baseline_usd.txt"
+  printf '%s\n' "$(project_cycle_count)" > "$dir/baseline_cycles.txt"
+  printf '%s\n' "$(sections_with_status done)" > "$dir/baseline_done.txt"
+  printf '%s\n' "$(now_iso_utc)"         > "$dir/last_review_at.txt"
+}
+
+portfolio_usd_since() {
+  python3 -c 'import sys; print("%.4f" % (float(sys.argv[1]) - float(sys.argv[2])))' \
+    "$(spent_usd)" "$(portfolio_baseline usd 0)"
+}
+
+# What triggered a review, or nothing. Whichever fires first wins; the reason is
+# recorded with the review so the officer knows why it was convened.
+portfolio_review_due() {
+  # A project with nothing live left to steer does not need steering.
+  (( $(live_section_count) > 0 )) || return 0
+
+  local threshold since delta
+  threshold="$(portfolio_dispatch_threshold)"
+  if (( threshold > 0 )); then
+    since=$(( $(dispatch_count) - $(portfolio_baseline dispatches 0) ))
+    if (( since >= threshold )); then
+      printf '%d dispatch(es) since the last portfolio review (threshold %d)\n' \
+        "$since" "$threshold"
+      return 0
+    fi
+  fi
+
+  delta="$(portfolio_usd_since)"
+  threshold="$(portfolio_usd_threshold)"
+  if [[ "$(python3 -c 'import sys; print("1" if float(sys.argv[1]) > 0 and float(sys.argv[2]) >= float(sys.argv[1]) else "0")' "$threshold" "$delta")" == "1" ]]; then
+    printf '$%s spent since the last portfolio review (threshold $%s)\n' "$delta" "$threshold"
+    return 0
+  fi
+
+  threshold="$(portfolio_idle_cycle_threshold)"
+  if (( threshold > 0 )) && \
+     (( $(sections_with_status done) == $(portfolio_baseline done 0) )); then
+    since=$(( $(project_cycle_count) - $(portfolio_baseline cycles 0) ))
+    if (( since >= threshold )); then
+      printf '%d cycle(s) since the last portfolio review with no section reaching done (threshold %d)\n' \
+        "$since" "$threshold"
+      return 0
+    fi
+  fi
+  return 0
 }
 
 # Dispatch one role and capture its text. Output is written through a temporary
@@ -662,7 +804,8 @@ do_scope() {
   claim_step "$cycle_dir/.claim-scope"
 
   context="$(context_bullet_list "$section_dir/brief.md" "$section_dir/state.md" "$CONTRACT_FILE" \
-      "$section_dir/convergence/latest.md" "$cycle_dir/rescope_reason.txt" "$cycle_dir/verdict_feedback.md")
+      "$section_dir/convergence/latest.md" "$section_dir/portfolio_rescope.txt" \
+      "$cycle_dir/rescope_reason.txt" "$cycle_dir/verdict_feedback.md")
 $(section_dependency_context "$section_dir")
 $(cycle_history_files "$section_dir" "${cycle_number#0}" "$(scope_history_window)")"
   prompt="$cycle_dir/scope_prompt.md"
@@ -672,6 +815,9 @@ $(cycle_history_files "$section_dir" "${cycle_number#0}" "$(scope_history_window
     "CONTEXT_FILES=$context" > "$prompt"
 
   dispatch_role pm "$prompt" "$cycle_dir/scope.md" "" "scope $section_key $cycle_number"
+  # The product officer's rescope reason has now been delivered to the manager
+  # that had to act on it, so it stops riding along in every later scope.
+  rm -f "$section_dir/portfolio_rescope.txt"
   local decision blocker assignment
   decision="$(record_cycle_decision "$cycle_dir" "$cycle_dir/scope.md" "ASSIGN,COMPLETE,BLOCKED_EXTERNAL")"
   case "$decision" in
@@ -1300,14 +1446,26 @@ cmd_tick() {
       idle)                 printf 'idle=%s\n' "$(basename "$section_dir")"; return 0 ;;
     esac
   else
+    # Project-level work comes first. A portfolio review that only ran when no
+    # section was actionable would never run at all: there is always a section
+    # willing to scope another cycle.
+    local project_action
+    project_action="$(project_next_action)"
+    case "$project_action" in
+      decompose|portfolio-review)
+        printf 'section=%s\n' "(project)"
+        printf 'action=%s\n' "$project_action"
+        if [[ "$project_action" == "decompose" ]]; then
+          printf 'result=%s\n' "$(do_decompose)"
+        else
+          printf 'result=%s\n' "$(run_portfolio_review)"
+        fi
+        printf 'spent_usd=%s\n' "$(spent_usd)"
+        return 0
+        ;;
+    esac
     section_dir="$(first_line_of "$(actionable_sections)")"
     if [[ -z "$section_dir" ]]; then
-      if [[ "$(project_next_action)" == "decompose" ]]; then
-        printf 'section=%s\n' "(project)"
-        printf 'action=decompose\n'
-        printf 'result=%s\n' "$(do_decompose)"
-        return 0
-      fi
       printf 'idle=project\n'
       return 0
     fi
@@ -1349,7 +1507,7 @@ cmd_run() {
   done
 
   acquire_driver_lock
-  local tick=0 section_dir action quarantined deadlocked
+  local tick=0 section_dir action quarantined deadlocked project_action
   while (( tick < max_ticks )); do
     if [[ -n "${SECTION_OVERRIDE:-}" ]]; then
       section_dir="$(resolve_section_dir "$SECTION_OVERRIDE")"
@@ -1358,15 +1516,27 @@ cmd_run() {
         idle|waiting-dependencies|quarantined) section_dir="" ;;
       esac
     else
+      # Project-level work preempts section work. There is always a section
+      # willing to scope one more cycle, so a review that waited for an idle
+      # queue would never be convened.
+      project_action="$(project_next_action)"
+      case "$project_action" in
+        decompose)
+          (( tick += 1 ))
+          printf '[tick %d] (project): decompose\n' "$tick"
+          do_decompose | sed 's/^/          /'
+          continue
+          ;;
+        portfolio-review)
+          (( tick += 1 ))
+          printf '[tick %d] (project): portfolio review ($%s spent)\n' "$tick" "$(spent_usd)"
+          run_portfolio_review | sed 's/^/          /'
+          continue
+          ;;
+      esac
       section_dir="$(first_line_of "$(actionable_sections)")"
     fi
     if [[ -z "$section_dir" ]]; then
-      if [[ -z "${SECTION_OVERRIDE:-}" && "$(project_next_action)" == "decompose" ]]; then
-        (( tick += 1 ))
-        printf '[tick %d] (project): decompose\n' "$tick"
-        do_decompose | sed 's/^/          /'
-        continue
-      fi
       break
     fi
     (( tick += 1 ))
@@ -1406,34 +1576,41 @@ cmd_run() {
 # The dispatch queue in the order the driver would work it, without dispatching
 # anything. This is the cheap way to see what a run would do.
 cmd_next() {
-  local section_dir position=0
+  local section_dir position=0 project_action
+  project_action="$(project_next_action)"
+  case "$project_action" in
+    decompose|portfolio-review)
+      position=1
+      printf '%d %-24s %s\n' "$position" "(project)" "$project_action"
+      ;;
+  esac
   for section_dir in ${(f)"$(actionable_sections)"}; do
     [[ -n "$section_dir" ]] || continue
     (( position += 1 ))
     printf '%d %-24s %s\n' "$position" "$(basename "$section_dir")" \
       "$(section_next_action "$section_dir")"
   done
-  if (( position == 0 )); then
-    if [[ "$(project_next_action)" == "decompose" ]]; then
-      printf '1 %-24s %s\n' "(project)" "decompose"
-      return 0
-    fi
-    printf 'nothing actionable\n'
-  fi
+  (( position > 0 )) || printf 'nothing actionable\n'
 }
 
 cmd_status() {
-  local section_dir lifecycle action deadlocked
-  printf '%-24s %-10s %-22s %s\n' "SECTION" "STATUS" "NEXT ACTION" "SPENT USD"
+  local section_dir lifecycle action deadlocked due reviews
+  printf '%-24s %-13s %-10s %-22s %s\n' "SECTION" "PRIORITY" "STATUS" "NEXT ACTION" "SPENT USD"
   [[ -d "$SECTIONS_DIR" ]] || return 0
   for section_dir in "$SECTIONS_DIR"/*(/N); do
     [[ "$(basename "$section_dir")" != .* ]] || continue
     lifecycle="$(first_line_or "$section_dir/status.txt" unknown)"
     action="$(section_next_action "$section_dir")"
-    printf '%-24s %-10s %-22s %s\n' "$(basename "$section_dir")" "$lifecycle" "$action" \
+    printf '%-24s %-13s %-10s %-22s %s\n' "$(basename "$section_dir")" \
+      "$(section_priority "$section_dir")" "$lifecycle" "$action" \
       "$(spent_usd "$(basename "$section_dir")")"
   done
   printf '\ntotal spent: $%s\n' "$(spent_usd)"
+  reviews="$(latest_numbered_dir "$(portfolio_dir)")"
+  due="$(portfolio_review_due)"
+  printf 'portfolio reviews: %s (last at %s)\n' "$reviews" \
+    "$(first_line_or "$(portfolio_dir)/last_review_at.txt" never)"
+  [[ -z "$due" ]] || printf 'portfolio review due: %s\n' "$due"
   deadlocked="$(deadlocked_sections)"
   [[ -z "$deadlocked" ]] || printf 'deadlocked:\n%s\n' "$(printf '%s\n' "$deadlocked" | sed 's/^/  /')"
 }
@@ -1441,18 +1618,508 @@ cmd_status() {
 # --- project level ---------------------------------------------------------
 
 # The product officer cuts the product into sections once, before any section
-# work exists. This is derived like everything else: no sections on disk means
-# the project has not been decomposed yet.
+# work exists, and reviews the whole portfolio on a cadence after that. This is
+# derived like everything else: no sections on disk means the project has not
+# been decomposed yet.
 project_next_action() {
-  local section_dir
+  local section_dir decomposed=0
   if [[ -d "$SECTIONS_DIR" ]]; then
     for section_dir in "$SECTIONS_DIR"/*(/N); do
       [[ "$(basename "$section_dir")" != .* ]] || continue
-      printf 'idle\n'
-      return
+      decomposed=1
+      break
     done
   fi
-  printf 'decompose\n'
+  if (( decomposed == 0 )); then
+    printf 'decompose\n'
+    return
+  fi
+  if [[ -n "$(portfolio_review_due)" ]]; then
+    printf 'portfolio-review\n'
+    return
+  fi
+  printf 'idle\n'
+}
+
+# One bounded row per section: what it is for, what it costs, and whether it is
+# waiting on something that has never been dispatched. This is the only bulk
+# reading the officer is given, and it is deliberately a table rather than a
+# document.
+portfolio_facts() {
+  local section_dir key lifecycle cycles waiting dependency dependency_dir
+  printf '# Section facts, as the driver observes them\n\n'
+  printf 'Derived from files on disk, not from anybody reporting. Treat every claim\n'
+  printf 'in a handoff as unverified until a probe of your own says otherwise.\n\n'
+  printf '| section | priority | status | cycles | spent | waiting on |\n'
+  printf '| --- | --- | --- | --- | --- | --- |\n'
+  [[ -d "$SECTIONS_DIR" ]] || return 0
+  for section_dir in "$SECTIONS_DIR"/*(/N); do
+    key="$(basename "$section_dir")"
+    [[ "$key" != .* ]] || continue
+    lifecycle="$(first_line_or "$section_dir/status.txt" planned)"
+    cycles="$(latest_cycle "$section_dir")"
+    waiting=""
+    if [[ -f "$section_dir/dependency_handoffs.txt" ]]; then
+      while IFS= read -r dependency; do
+        [[ -n "$dependency" ]] || continue
+        dependency_dir="$(dirname "$PROJECT_ROOT/$dependency")"
+        waiting+="$(basename "$dependency_dir") (cycles $(latest_cycle "$dependency_dir"), $(first_line_or "$dependency_dir/status.txt" unknown)) "
+      done < "$section_dir/dependency_handoffs.txt"
+    fi
+    printf '| %s | %s | %s | %s | %s | %s |\n' \
+      "$key" "$(section_priority "$section_dir")" "$lifecycle" "$cycles" \
+      "$(spent_usd "$key")" "${waiting:-nothing}"
+  done
+  printf '\n'
+}
+
+# Parse the officer's verdicts. Writes two TSVs and refuses the review rather
+# than acting on half of it: a portfolio review that cannot be read is cheaper
+# to re-ask than a CUT applied to the wrong section.
+portfolio_parse_review() {
+  local review_md="$1"
+  local live_keys="$2"
+  local verdicts_out="$3"
+  local plan_out="$4"
+  python3 - "$review_md" "$live_keys" "$verdicts_out" "$plan_out" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+review_md, live_csv, verdicts_out, plan_out = sys.argv[1:5]
+text = Path(review_md).read_text()
+live = [key for key in live_csv.split(",") if key]
+
+WANTED = {"verdicts", "plan structure", "shortest path"}
+
+# A heading is an atx line or a bold-only line. A bare numbered line counts too,
+# but only when it names one of the sections being looked for, so a numbered
+# verdict line never reads as a section boundary.
+atx_re = re.compile(r"^\s*#{1,6}\s+(?:\d+[.)]\s*)?\**\s*(.+?)\s*\**\s*:?\s*$")
+bold_re = re.compile(r"^\s*(?:\d+[.)]\s*)?\*\*(.+?)\*\*\s*:?\s*$")
+numbered_re = re.compile(r"^\s*\d+[.)]\s*\**(.+?)\**\s*:?\s*$")
+
+
+def heading_name(line):
+    for pattern in (atx_re, bold_re):
+        match = pattern.match(line)
+        if match:
+            return match.group(1).strip().lower()
+    match = numbered_re.match(line)
+    if match and match.group(1).strip().lower() in WANTED:
+        return match.group(1).strip().lower()
+    return None
+
+
+blocks, current, buffer = {}, None, []
+for line in text.splitlines():
+    name = heading_name(line)
+    if name is not None:
+        if current:
+            blocks.setdefault(current, []).extend(buffer)
+        current = name if name in WANTED else None
+        buffer = []
+        continue
+    if current:
+        buffer.append(line)
+if current:
+    blocks.setdefault(current, []).extend(buffer)
+
+problems = []
+
+verdict_re = re.compile(
+    r"^\s*(?:[-*+]|\d+[.)])?\s*`?(?P<key>[A-Za-z0-9][A-Za-z0-9_-]*)`?\s*[:|-]\s*"
+    r"(?P<verdict>CONTINUE|RESCOPE|CUT|BLOCK)\b[\s:,.-]*(?P<reason>.*?)\s*$"
+)
+verdicts, unknown = {}, []
+for line in blocks.get("verdicts", []):
+    match = verdict_re.match(line)
+    if not match:
+        continue
+    key = match.group("key")
+    verdict = match.group("verdict")
+    reason = match.group("reason").strip().strip("`*_ ")
+    if key not in live:
+        unknown.append(key)
+        continue
+    if verdict != "CONTINUE" and not reason:
+        problems.append(
+            f"the {verdict} on {key} states no reason; it is what gets recorded "
+            f"against the section, so it is required"
+        )
+        continue
+    verdicts[key] = (verdict, reason)
+
+if not verdicts and not problems:
+    problems.append(
+        "the Verdicts section has no readable line; use `- <section-key>: "
+        "CONTINUE|RESCOPE|CUT|BLOCK <reason>`"
+    )
+if unknown:
+    problems.append(
+        "these are not section keys in this project: " + ", ".join(sorted(set(unknown)))
+    )
+
+CHECKS = {
+    "unstarted dependency": "UNSTARTED_DEPENDENCY",
+    "unreachable section": "UNREACHABLE_SECTION",
+    "must-have inflation": "MUST_HAVE_INFLATION",
+    "linear-chain risk": "LINEAR_CHAIN_RISK",
+}
+check_re = re.compile(
+    r"^\s*(?:[-*+]|\d+[.)])?\s*\**(?P<label>[A-Za-z][A-Za-z -]*?)\**\s*[:|-]\s*"
+    r"(?P<verdict>FOUND|CLEAR)\b[\s:,.-]*(?P<detail>.*?)\s*$",
+    re.I,
+)
+checks = {}
+for line in blocks.get("plan structure", []):
+    match = check_re.match(line)
+    if not match:
+        continue
+    label = " ".join(match.group("label").split()).lower()
+    if label not in CHECKS:
+        continue
+    verdict = match.group("verdict").upper()
+    detail = match.group("detail").strip().strip("`*_ ")
+    if verdict == "FOUND" and not detail:
+        problems.append(f"the {label} check reports FOUND but names nothing")
+        continue
+    checks[CHECKS[label]] = (verdict, detail)
+
+missing = [name for label, name in CHECKS.items() if name not in checks]
+if missing:
+    problems.append(
+        "the Plan structure section is missing a FOUND or CLEAR line for: "
+        + ", ".join(missing)
+    )
+
+if not "".join(blocks.get("shortest path", [])).strip():
+    problems.append("the Shortest path section is empty")
+
+if problems:
+    raise SystemExit("\n".join(f"- {problem}" for problem in problems))
+
+# A section the officer did not judge continues. Silence is not a cut.
+rows = []
+for key in live:
+    verdict, reason = verdicts.get(key, ("CONTINUE", "not judged in this review"))
+    rows.append(f"{key}\t{verdict}\t{reason}")
+Path(verdicts_out).write_text("\n".join(rows) + "\n")
+Path(plan_out).write_text(
+    "\n".join(f"{name}\t{value[0]}\t{value[1]}" for name, value in checks.items()) + "\n"
+)
+PY
+}
+
+portfolio_log_entries() {
+  config_positive_int governance portfolio_log_full_entries 4 1
+}
+
+# The officer is a fresh process every time, so without this it re-derives its
+# whole view on each review and cannot see slow failure: a section that has been
+# nearly done for four reviews, or a shortest path that has not changed in
+# three. Older entries are compacted to their summary line so the log stays
+# readable in a context that is meant to stay small.
+portfolio_log_append() {
+  local review_md="$1"
+  local log_md="$2"
+  local index="$3"
+  local spend="$4"
+  local keep="$5"
+  python3 - "$review_md" "$log_md" "$index" "$spend" "$keep" <<'PY'
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+review_md, log_md, index, spend, keep = sys.argv[1:6]
+keep = int(keep)
+text = Path(review_md).read_text()
+
+WANTED = {"completion criteria", "verdicts", "shortest path"}
+atx_re = re.compile(r"^\s*#{1,6}\s+(?:\d+[.)]\s*)?\**\s*(.+?)\s*\**\s*:?\s*$")
+bold_re = re.compile(r"^\s*(?:\d+[.)]\s*)?\*\*(.+?)\*\*\s*:?\s*$")
+numbered_re = re.compile(r"^\s*\d+[.)]\s*\**(.+?)\**\s*:?\s*$")
+
+
+def heading_name(line):
+    for pattern in (atx_re, bold_re):
+        match = pattern.match(line)
+        if match:
+            return match.group(1).strip().lower()
+    match = numbered_re.match(line)
+    if match and match.group(1).strip().lower() in WANTED:
+        return match.group(1).strip().lower()
+    return None
+
+
+blocks, current, buffer = {}, None, []
+for line in text.splitlines():
+    name = heading_name(line)
+    if name is not None:
+        if current:
+            blocks.setdefault(current, []).extend(buffer)
+        current = name if name in WANTED else None
+        buffer = []
+        continue
+    if current:
+        buffer.append(line)
+if current:
+    blocks.setdefault(current, []).extend(buffer)
+
+
+def lines_of(name):
+    return [line.rstrip() for line in blocks.get(name, []) if line.strip()]
+
+
+criteria = lines_of("completion criteria")
+verdicts = lines_of("verdicts")
+path_lines = lines_of("shortest path")
+met = sum(1 for line in criteria if re.search(r"\bMET\b", line)
+          and not re.search(r"\bNOT\s+MET\b", line, re.I))
+tally = {}
+for line in verdicts:
+    found = re.search(r"\b(CONTINUE|RESCOPE|CUT|BLOCK)\b", line)
+    if found:
+        tally[found.group(1)] = tally.get(found.group(1), 0) + 1
+shortest = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s*", "", path_lines[0]).strip() if path_lines else "not stated"
+if len(shortest) > 160:
+    shortest = shortest[:157] + "..."
+
+stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+summary = (
+    f"- Summary: {met} of {len(criteria)} criteria met; verdicts "
+    + (", ".join(f"{name} {count}" for name, count in sorted(tally.items())) or "none")
+    + f"; shortest path: {shortest}"
+)
+
+entry = [f"## Review {int(index):03d} - {stamp} - ${spend} spent", "", summary, ""]
+for title, body in (
+    ("Completion criteria", criteria),
+    ("Verdicts", verdicts),
+    ("Shortest path", path_lines),
+):
+    entry.extend([f"### {title}", ""])
+    entry.extend(body or ["- not stated"])
+    entry.append("")
+
+HEADER = [
+    "# Portfolio review log",
+    "",
+    "Newest first. Read this before anything else: one review cannot see a",
+    "section that has been nearly done for four of them, or a shortest path that",
+    "has not moved in three. Older entries are compacted to their summary line.",
+    "",
+]
+
+existing = []
+if Path(log_md).is_file():
+    body = Path(log_md).read_text()
+    parts = re.split(r"(?m)^(?=##\s+Review\s)", body)
+    existing = [part.rstrip() for part in parts[1:] if part.strip()]
+
+
+def compact(block):
+    head = block.splitlines()[0]
+    for line in block.splitlines():
+        if line.startswith("- Summary:"):
+            return f"{head}\n\n{line}"
+    return head
+
+
+kept = [entry_text for entry_text in existing[: max(keep - 1, 0)]]
+older = [compact(entry_text) for entry_text in existing[max(keep - 1, 0):]]
+Path(log_md).write_text(
+    "\n".join(HEADER + ["\n".join(entry).rstrip(), ""] + [b + "\n" for b in kept + older])
+)
+PY
+}
+
+# The officer's verdict, published over the section through the same path a
+# manager's handoff takes: the same validation, the same locking, the same index
+# refresh. A CUT that did not go through here would leave a cancelled section
+# with a live handoff still claiming otherwise.
+publish_governance_handoff() {
+  local section_dir="$1"
+  local section_status="$2"
+  local headline="$3"
+  local reason="$4"
+  local unproven="$5"
+  local next_action="$6"
+  local section_key summary handoff
+  section_key="$(basename "$section_dir")"
+  summary="$headline: $reason"
+  summary="${summary//$'\n'/ }"
+  (( ${#summary} <= 200 )) || summary="${summary[1,197]}..."
+  handoff="$section_dir/.governance_handoff.md"
+  {
+    printf '## Outcome\n\n- %s\n\n' "$summary"
+    printf '## Decisions\n\n- The product officer decided this in a portfolio review, against the\n'
+    printf '  mission and the evidence it probed, not against this section reporting.\n\n'
+    printf '## Interfaces\n\n- Nothing new. Any section expecting this capability must be reconciled\n'
+    printf '  without it.\n\n'
+    printf '## Risks\n\n- %s\n\n' "$reason"
+    printf '## What is unproven\n\n- %s\n\n' "$unproven"
+    printf '## Next action\n\n- %s\n' "$next_action"
+  } > "$handoff"
+  cmd_section_handoff "$section_key" "$section_status" "$summary" --file "$handoff" >/dev/null
+  rm -f "$handoff"
+}
+
+apply_portfolio_verdict() {
+  local key="$1"
+  local verdict="$2"
+  local reason="$3"
+  local section_dir="$SECTIONS_DIR/$key"
+  if [[ ! -d "$section_dir" ]]; then
+    printf '  %s -> %s ignored: no such section\n' "$key" "$verdict"
+    return 0
+  fi
+  case "$verdict" in
+    CONTINUE)
+      printf '  %s -> CONTINUE\n' "$key"
+      ;;
+    RESCOPE)
+      {
+        printf '# Rescoped by a portfolio review\n\n'
+        printf 'The product officer reviewed the whole product on %s and rescoped\n' "$(now_iso_utc)"
+        printf 'this section. What has to change:\n\n- %s\n\n' "$reason"
+        printf 'Scope the next cycle against this, not against the previous cycle.\n'
+      } > "$section_dir/portfolio_rescope.txt"
+      printf '  %s -> RESCOPE (%s)\n' "$key" "$reason"
+      ;;
+    CUT)
+      publish_governance_handoff "$section_dir" cancelled "Cut by a portfolio review" \
+        "$reason" \
+        "Everything this section was to deliver; it was cut before proving any of it." \
+        "Reconcile the product plan without this section."
+      printf '  %s -> CUT (%s)\n' "$key" "$reason"
+      ;;
+    BLOCK)
+      publish_governance_handoff "$section_dir" blocked "Blocked by a portfolio review" \
+        "$reason" \
+        "Every acceptance criterion behind the blocker named above." \
+        "Resolve the blocker, then reopen this section with an active handoff."
+      printf '  %s -> BLOCK (%s)\n' "$key" "$reason"
+      ;;
+    *)
+      printf '  %s -> %s ignored: not a portfolio verdict\n' "$key" "$verdict"
+      ;;
+  esac
+}
+
+live_section_keys() {
+  local section_dir key lifecycle listing=""
+  [[ -d "$SECTIONS_DIR" ]] || return 0
+  for section_dir in "$SECTIONS_DIR"/*(/N); do
+    key="$(basename "$section_dir")"
+    [[ "$key" != .* ]] || continue
+    lifecycle="$(first_line_or "$section_dir/status.txt" planned)"
+    case "$lifecycle" in done|cancelled) continue ;; esac
+    listing+="$key,"
+  done
+  printf '%s\n' "${listing%,}"
+}
+
+do_portfolio_review() {
+  local dir review_dir index prompt context decision due keys
+  dir="$(portfolio_dir)"
+  mkdir -p "$dir"
+  due="$(portfolio_review_due)"
+  index="$(latest_numbered_dir "$dir")"
+  # A review whose verdicts could not be read is re-asked in its own directory
+  # rather than opening another, exactly as an UNPARSED cycle is.
+  if (( index == 0 )) || [[ -f "$dir/$(printf '%03d' "$index")/verdicts.tsv" ]]; then
+    index=$(( index + 1 ))
+  fi
+  review_dir="$dir/$(printf '%03d' "$index")"
+  mkdir -p "$review_dir"
+  claim_step "$review_dir/.claim-portfolio-review"
+  printf '%s\n' "${due:-convened by hand}" > "$review_dir/trigger.txt"
+  portfolio_facts > "$review_dir/facts.md"
+
+  local handoffs="" section_dir key lifecycle
+  for section_dir in "$SECTIONS_DIR"/*(/N); do
+    key="$(basename "$section_dir")"
+    [[ "$key" != .* ]] || continue
+    lifecycle="$(first_line_or "$section_dir/status.txt" planned)"
+    case "$lifecycle" in done|cancelled) continue ;; esac
+    handoffs+="$(context_bullet_list "$section_dir/handoff.md")"$'\n'
+  done
+
+  context="$(context_bullet_list "$STATE_DIR/plan.md" "$STATE_DIR/portfolio_log.md" \
+      "$CONTRACT_FILE" "$SECTIONS_INDEX_FILE" "$review_dir/facts.md" \
+      "$review_dir/verdict_feedback.md")
+${handoffs%$'\n'}"
+
+  prompt="$review_dir/prompt.md"
+  compose_role_task cpo "$(task_file portfolio_review)" \
+    "DISPATCHES_SINCE=$(( $(dispatch_count) - $(portfolio_baseline dispatches 0) ))" \
+    "CYCLES_SINCE=$(( $(project_cycle_count) - $(portfolio_baseline cycles 0) ))" \
+    "SPEND_SINCE=\$$(portfolio_usd_since)" \
+    "DONE_SECTIONS=$(sections_with_status done)" \
+    "CONTEXT_FILES=$context" > "$prompt"
+
+  dispatch_role cpo "$prompt" "$review_dir/review.md" "" "portfolio review $index"
+
+  decision="$(record_cycle_decision "$review_dir" "$review_dir/review.md" "ON_TRACK,OFF_TRACK")"
+  if [[ "$decision" == "UNPARSED" ]]; then
+    printf 'portfolio review %03d -> UNPARSED; it will be re-asked\n' "$index"
+    return 0
+  fi
+
+  keys="$(live_section_keys)"
+  if ! portfolio_parse_review "$review_dir/review.md" "$keys" \
+      "$review_dir/.verdicts.staging" "$review_dir/.plan_structure.staging" \
+      2> "$review_dir/.parse_error.txt"; then
+    {
+      printf 'The portfolio review at %s could not be acted on.\n\n' \
+        "$(repo_relative_path "$review_dir/review.md")"
+      /bin/cat "$review_dir/.parse_error.txt"
+      printf '\nAnswer again. Keep everything you already wrote and fix only these.\n'
+    } > "$review_dir/verdict_feedback.md"
+    rm -f "$review_dir/.parse_error.txt" "$review_dir/.verdicts.staging" \
+      "$review_dir/.plan_structure.staging"
+    printf 'portfolio review %03d -> verdicts unreadable; it will be re-asked\n' "$index"
+    return 0
+  fi
+  rm -f "$review_dir/.parse_error.txt" "$review_dir/verdict_feedback.md"
+  mv "$review_dir/.plan_structure.staging" "$review_dir/plan_structure.tsv"
+  mv "$review_dir/.verdicts.staging" "$review_dir/verdicts.tsv"
+
+  portfolio_log_append "$review_dir/review.md" "$STATE_DIR/portfolio_log.md" \
+    "$index" "$(spent_usd)" "$(portfolio_log_entries)"
+  /bin/cp "$review_dir/review.md" "$dir/latest.md"
+
+  printf 'portfolio review %03d -> %s (%s)\n' "$index" "$decision" "${due:-convened by hand}"
+  local verdict reason
+  while IFS=$'\t' read -r key verdict reason; do
+    [[ -n "$key" ]] || continue
+    apply_portfolio_verdict "$key" "$verdict" "$reason"
+  done < "$review_dir/verdicts.tsv"
+  while IFS=$'\t' read -r key verdict reason; do
+    [[ "$verdict" == "FOUND" ]] || continue
+    printf '  plan structure: %s - %s\n' "$key" "$reason"
+  done < "$review_dir/plan_structure.tsv"
+
+  record_portfolio_baseline
+  refresh_sections_index
+}
+
+# A governance dispatch that dies must not wedge the run. The baseline advances
+# so the next tick returns to section work, and the failure is left on disk.
+run_portfolio_review() {
+  assert_within_budget
+  # Not named `status`: zsh ties that name to `$?` and makes it read-only, so
+  # `local status=0` fails and takes the whole review with it.
+  local review_status=0
+  ( do_portfolio_review ) || review_status=$?
+  if (( review_status != 0 )); then
+    printf '%s\n' "$(now_iso_utc)" > "$(portfolio_dir)/last_failure.txt"
+    record_portfolio_baseline
+    printf 'portfolio review failed; the baseline advanced and the run continues\n'
+  fi
+  return 0
 }
 
 split_section_blocks() {

@@ -13,6 +13,8 @@ ROLE_NAMES=(cpo pm developer consultant 10x_developer)
 DOMAIN_NAMES=(generic saas prop-trading crypto-trading infrastructure migration)
 TASK_NAMES=(
   consultant_panel_adjudication
+  convergence_review
+  portfolio_review
   section_scope
   section_review
   section_handoff

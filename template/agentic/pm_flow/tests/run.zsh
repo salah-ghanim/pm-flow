@@ -10,7 +10,7 @@ WORK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-tests.XXXXXX")"
 trap 'rm -rf -- "$WORK_ROOT"' EXIT HUP INT TERM
 
 overall=0
-for suite in verdict_parser transitions recovery; do
+for suite in verdict_parser transitions recovery governance; do
   printf '\n########## %s ##########\n' "$suite"
   case "$suite" in
     verdict_parser) zsh "$TESTS_DIR/$suite.zsh" || overall=1 ;;

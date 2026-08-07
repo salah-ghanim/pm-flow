@@ -45,6 +45,11 @@
     "max_usd": 0,
     "max_usd_per_section": 0
   },
+  "governance": {
+    "portfolio_review_dispatches": 12,
+    "portfolio_review_usd": 20,
+    "portfolio_review_idle_cycles": 8
+  },
   "escalation": {
     "failures_before_consultant": 2,
     "max_rescue_attempts": 1,

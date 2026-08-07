@@ -247,7 +247,7 @@ eq  "F2 the lifecycle becomes blocked" "$(cat "$FLOW/demo/sections/gamma/status.
 has "F2 the summary names the dependency" \
     "$(cat "$FLOW/demo/sections/gamma/summary.txt")" "paper gateway"
 eq  "F2 a blocked section is not actionable" \
-    "$("$FLOWSH" status | awk '$1 == "gamma" {print $3}')" "idle"
+    "$("$FLOWSH" status | awk '$1 == "gamma" {print $4}')" "idle"
 
 printf '\n===== F2: a bare BLOCKED_EXTERNAL token is refused =====\n'
 result="$(PM_FLOW_STUB='## Where the section stands
@@ -265,7 +265,7 @@ STUB_EXIT=1 PM_FLOW_STUB=x PM_FLOW_SECTION=zeta "$FLOWSH" tick >/dev/null 2>&1 |
 if [[ -f "$FLOW/demo/sections/zeta/quarantine.txt" ]]; then
   ok "F4 quarantine.txt is written"; else bad "F4 quarantine.txt is written" missing; fi
 eq     "F4 status surfaces the quarantine" \
-       "$("$FLOWSH" status | awk '$1 == "zeta" {print $3}')" "quarantined"
+       "$("$FLOWSH" status | awk '$1 == "zeta" {print $4}')" "quarantined"
 absent "F4 a quarantined section leaves the queue" "$("$FLOWSH" next)" "zeta"
 has    "F4 the healthy sections stay in the queue" "$("$FLOWSH" next)" "alpha"
 has    "F7 a failed dispatch still records its cost" \
