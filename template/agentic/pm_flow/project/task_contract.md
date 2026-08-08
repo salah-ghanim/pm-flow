@@ -119,6 +119,25 @@ killed, a worktree is cleaned, or the next agent starts.
 - Follow the branch and push policy the repository already states. Do not invent
   a branching scheme for the flow.
 
+## How to write
+
+Every file a role writes is read by another role starting from nothing. Long
+prose is not thoroughness; it is cost charged to that reader, and it hides the
+few lines that matter.
+
+- State the finding, then its evidence. Not the search that produced it.
+- Explain reasoning only where the reader must reproduce it: the command to run,
+  the steps to a number, why a non-obvious choice was made over the obvious one.
+- Do not narrate the period. "At review 004 X, and then Y" is history and
+  belongs in the log. Say what is true now.
+- No preamble, no recap, no summary of what you are about to say.
+- One claim per bullet. If a paragraph has three claims, it is three bullets.
+- Emphasis is a signal, so spend it. A page of bold reads as a page of nothing.
+- Cut any sentence the reader cannot act on.
+
+A superseded position is deleted, not kept "for the record". Git history is the
+record.
+
 ## Decisions
 
 Each role answers with one token on its decision line, optionally followed by a

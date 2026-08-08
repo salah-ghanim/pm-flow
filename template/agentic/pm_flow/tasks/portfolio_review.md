@@ -145,6 +145,18 @@ weaker, quietly.
 
 - `plan.md`, `portfolio_log.md` and any `priority.txt` are yours to edit
   directly.
+- **The plan carries the current position. The log carries the history.** Write
+  this review's narrative, findings and reasoning to `portfolio_log.md`. In
+  `plan.md`, edit the state to what is true now: replace the previous position
+  rather than prepending to it, and delete what a later probe has settled.
+  Nothing in the plan should begin "at review 004" - if it still matters, it is
+  current and says so without a date; if it does not, it belongs in the log.
+- Write both to the standard in the task contract under "How to write". State
+  the finding and its evidence; do not narrate the review. Never leave a
+  superseded position in place "for the record" - git history and the log are
+  the record.
+- The same applies to a `brief.md` you amend. State the change, do not restate
+  the section.
 - Changing the dependency graph goes through
   `pm_flow.sh section-dependencies <key> --file <markdown>`, never a hand edit
   of `dependency_handoffs.txt`. The command validates that every named section
