@@ -55,6 +55,16 @@ A criterion is never met because a manager said so. If a criterion names no
 observable you can probe, that is a finding about the plan; say so and fix the
 plan.
 
+Run each probe as one plain command. Your tier allows commands by prefix, so a
+compound line - anything with `cd ... &&`, a `for` loop, or a leading `timeout` -
+matches no rule and is refused. Use `git -C <dir>` instead of changing
+directory, and run the loop's iterations as separate commands.
+
+If a command is refused, that is a fact about that exact command and nothing
+else. Do not generalize from one refusal to a capability you did not test, and
+never record an untested inference as a finding. Your own report is held to the
+standard you hold every section to: state what you ran and what it printed.
+
 ## Then check the plan itself
 
 You are accountable both for everyone working on the plan and for the plan being

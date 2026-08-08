@@ -175,7 +175,17 @@ DEFAULT_SCOPED_BASH = [
     "git show:*", "git rev-parse:*", "git ls-files:*", "git branch:*",
     "git push:*", "git pull:*", "git restore --staged:*",
     "python3 -m pytest:*", ".venv/bin/python -m pytest:*", "pytest:*",
+    # A reviewer that cannot run the acceptance check has to take the developer
+    # at its word, so every spelling of the test runner it will reach for has to
+    # be here. Bare `python` was missing and cost a real review its evidence.
+    "python -m pytest:*",
     "ls:*", "cat:*", "head:*", "tail:*", "wc:*", "grep:*", "rg:*",
+    # Probing the world the criteria describe: a listening port is a fact about
+    # whether an external dependency is actually satisfied.
+    "nc:*", "lsof:*",
+    # `git -C <dir>` is how a role reaches the repo without a `cd`, and a `cd`
+    # makes the command compound, which no prefix rule can match.
+    "git -C:*",
     # Changing the dependency graph has to go through the validated command, so
     # the managing roles are given it and nothing else from this script. `tick`
     # and `run` are deliberately not reachable: a dispatched role must not be
