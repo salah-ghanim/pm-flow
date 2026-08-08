@@ -37,6 +37,9 @@ Usage:
   pm_flow.sh [--project <name>] section-dependencies <section-name> [--file <markdown-file>]
   pm_flow.sh [--project <name>] section-handoff <section-name> <status> <summary> [--file <markdown-file>]
   pm_flow.sh [--project <name>] consult-panel <section-name> [--file <markdown-file>]
+  pm_flow.sh [--project <name>] portfolio-review
+  pm_flow.sh [--project <name>] section-analysis <section-name> [--file <markdown-file>]
+  pm_flow.sh [--project <name>] proposals <name> [--file <markdown-file>]
 
   How it runs:
   `run` repeats `tick` until nothing is actionable. Each tick observes the files
@@ -47,6 +50,15 @@ Usage:
   A section that fails `failures_before_consultant` reviews in a row goes to a
   panel of independent consultants; the product officer then adopts one path,
   several in parallel, a synthesis, or abandons the section.
+
+  On demand:
+  `portfolio-review` convenes the product officer now, bypassing the governance
+  thresholds, and counts as a review.
+  `section-analysis` asks one section's manager where it stands, without opening
+  or advancing a cycle.
+  `proposals` convenes the consultant panel on a question rather than on a
+  failure, then has the product officer adjudicate it.
+  All three dispatch immediately and refuse while a driver holds the project.
 EOF
 }
 
@@ -247,6 +259,85 @@ PY
 
 # Run every consultant seat against the same brief, at the same time, with no
 # seat able to see another's answer. Independence is the whole point of a panel.
+#
+# Two things convene a panel - a section that keeps failing, and a question
+# asked by hand - and they differ only in what the seats are told to read. The
+# dispatch itself is shared, so a fix to seat tolerance or seat parallelism
+# reaches both. Results are reported through these three globals because a
+# function that also prints its answer cannot print warnings.
+PANEL_SEATS=0
+PANEL_PROPOSALS=0
+PANEL_SEAT_FAILURE=0
+
+run_panel_seats() {
+  local panel_dir="$1"
+  local persona_file="$2"
+  PANEL_SEATS="$(role_seat_count consultant)"
+  [[ "$PANEL_SEATS" -ge 1 ]] || fail "the consultant role has no seats"
+  PANEL_PROPOSALS=0
+  PANEL_SEAT_FAILURE=0
+
+  local seat pids=()
+  for seat in {1..$PANEL_SEATS}; do
+    (
+      "$SCRIPT_DIR/agent_exec.sh" consultant \
+        --seat "$seat" \
+        --prompt-file "$persona_file" \
+        --output "$panel_dir/proposal_${seat}.json" \
+        --heartbeat "$panel_dir/heartbeat_seat_${seat}.txt" \
+        --label "consultant seat $seat" \
+        > "$panel_dir/seat_${seat}.log" 2>&1
+    ) &
+    pids+=($!)
+  done
+  for seat in {1..$PANEL_SEATS}; do
+    wait "${pids[$seat]}" || PANEL_SEAT_FAILURE=1
+  done
+
+  # A seat that errors, times out, or returns something unreadable must not take
+  # the panel down with it. That tolerance is the reason to run a panel at all.
+  for seat in {1..$PANEL_SEATS}; do
+    [[ -f "$panel_dir/proposal_${seat}.json" ]] || continue
+    if python3 - "$panel_dir/proposal_${seat}.json" "$panel_dir/proposal_${seat}.md" <<'PY' 2>>"$panel_dir/seat_errors.log"
+import json
+import sys
+from pathlib import Path
+
+try:
+    payload = json.loads(Path(sys.argv[1]).read_text())
+except json.JSONDecodeError as error:
+    raise SystemExit(f"seat response is not valid JSON: {error}")
+if payload.get("is_error"):
+    raise SystemExit(f"seat reported an error: {payload.get('failure_reason', 'unknown')}")
+text = (payload.get("result") or "").strip()
+if not text:
+    raise SystemExit("seat returned an empty proposal")
+Path(sys.argv[2]).write_text(text + "\n")
+PY
+    then
+      PANEL_PROPOSALS=$(( PANEL_PROPOSALS + 1 ))
+    else
+      printf 'WARNING: consultant seat %d did not produce a usable proposal\n' "$seat" >&2
+    fi
+  done
+
+  [[ "$PANEL_PROPOSALS" -ge 1 ]] || fail "no consultant seat produced a usable proposal; see $panel_dir"
+  if [[ "$PANEL_PROPOSALS" -lt "$PANEL_SEATS" ]]; then
+    printf 'WARNING: only %d of %d consultant seats answered; adjudicating on what arrived\n' \
+      "$PANEL_PROPOSALS" "$PANEL_SEATS" >&2
+  fi
+}
+
+panel_proposal_bullets() {
+  local panel_dir="$1"
+  local seat listing=""
+  for seat in {1..$PANEL_SEATS}; do
+    [[ -f "$panel_dir/proposal_${seat}.md" ]] || continue
+    listing+="- Proposal ${seat}: $(repo_relative_path "$panel_dir/proposal_${seat}.md")"$'\n'
+  done
+  printf '%s' "$listing"
+}
+
 cmd_consult_panel() {
   local section_input="${1:-}"
   [[ -n "$section_input" ]] || fail "consult-panel requires a section name"
@@ -263,10 +354,6 @@ cmd_consult_panel() {
   section_dir="$(resolve_section_dir "$section_input")"
   failure_brief="$(read_body_arg "$body_mode" "$body_path")"
   [[ -n "$failure_brief" ]] || fail "the failure brief must not be empty"
-
-  local seat_count
-  seat_count="$(role_seat_count consultant)"
-  [[ "$seat_count" -ge 1 ]] || fail "the consultant role has no seats"
 
   local panel_dir="$section_dir/panels/$(now_compact_utc)-$(lower_uuid | cut -c1-8)"
   mkdir -p "$panel_dir"
@@ -287,76 +374,24 @@ cmd_consult_panel() {
     printf 'A short justification may follow the token on the same line.\n'
   } > "$consultant_persona"
 
-  local seat pids=() seat_status=0
-  for seat in {1..$seat_count}; do
-    (
-      "$SCRIPT_DIR/agent_exec.sh" consultant \
-        --seat "$seat" \
-        --prompt-file "$consultant_persona" \
-        --output "$panel_dir/proposal_${seat}.json" \
-        --heartbeat "$panel_dir/heartbeat_seat_${seat}.txt" \
-        --label "consultant seat $seat" \
-        > "$panel_dir/seat_${seat}.log" 2>&1
-    ) &
-    pids+=($!)
-  done
-  for seat in {1..$seat_count}; do
-    wait "${pids[$seat]}" || seat_status=1
-  done
+  run_panel_seats "$panel_dir" "$consultant_persona"
 
-  # A seat that errors, times out, or returns something unreadable must not take
-  # the panel down with it. That tolerance is the reason to run a panel at all.
-  local delivered=0
-  for seat in {1..$seat_count}; do
-    [[ -f "$panel_dir/proposal_${seat}.json" ]] || continue
-    if python3 - "$panel_dir/proposal_${seat}.json" "$panel_dir/proposal_${seat}.md" <<'PY' 2>>"$panel_dir/seat_errors.log"
-import json
-import sys
-from pathlib import Path
-
-try:
-    payload = json.loads(Path(sys.argv[1]).read_text())
-except json.JSONDecodeError as error:
-    raise SystemExit(f"seat response is not valid JSON: {error}")
-if payload.get("is_error"):
-    raise SystemExit(f"seat reported an error: {payload.get('failure_reason', 'unknown')}")
-text = (payload.get("result") or "").strip()
-if not text:
-    raise SystemExit("seat returned an empty proposal")
-Path(sys.argv[2]).write_text(text + "\n")
-PY
-    then
-      delivered=$(( delivered + 1 ))
-    else
-      printf 'WARNING: consultant seat %d did not produce a usable proposal\n' "$seat" >&2
-    fi
-  done
-
-  [[ "$delivered" -ge 1 ]] || fail "no consultant seat produced a usable proposal; see $panel_dir"
-  if [[ "$delivered" -lt "$seat_count" ]]; then
-    printf 'WARNING: only %d of %d consultant seats answered; adjudicating on what arrived\n' \
-      "$delivered" "$seat_count" >&2
-  fi
-
-  local panel_files=""
-  for seat in {1..$seat_count}; do
-    [[ -f "$panel_dir/proposal_${seat}.md" ]] || continue
-    panel_files+="- Proposal ${seat}: $(repo_relative_path "$panel_dir/proposal_${seat}.md")"$'\n'
-  done
+  local panel_files
+  panel_files="$(panel_proposal_bullets "$panel_dir")"
   panel_files+="- Failure brief: $(repo_relative_path "$panel_dir/failure_brief.md")"$'\n'
   panel_files+="- Section brief: $(repo_relative_path "$section_dir/brief.md")"
 
   compose_role_task cpo \
     "$SCRIPT_DIR/tasks/consultant_panel_adjudication.md" \
-    "SECTION_KEY=$(basename "$section_dir")" \
+    "PANEL_SUBJECT=Section \`$(basename "$section_dir")\` has failed repeatedly and was referred to a panel of independent consultants." \
     "PANEL_FILES=$panel_files" \
     > "$panel_dir/adjudication_prompt.md"
 
   printf 'panel_dir=%s\n' "$panel_dir"
-  printf 'seats=%s\n' "$seat_count"
-  printf 'proposals=%s\n' "$delivered"
+  printf 'seats=%s\n' "$PANEL_SEATS"
+  printf 'proposals=%s\n' "$PANEL_PROPOSALS"
   printf 'adjudication_prompt=%s\n' "$panel_dir/adjudication_prompt.md"
-  [[ "$seat_status" == "0" ]] || printf 'note=at least one seat failed; see the seat logs\n'
+  [[ "$PANEL_SEAT_FAILURE" == "0" ]] || printf 'note=at least one seat failed; see the seat logs\n'
 }
 
 cmd_role_prompt() {
@@ -1666,6 +1701,18 @@ main() {
     consult-panel)
       shift || true
       cmd_consult_panel "$@"
+      ;;
+    portfolio-review)
+      shift || true
+      cmd_portfolio_review "$@"
+      ;;
+    section-analysis)
+      shift || true
+      cmd_section_analysis "$@"
+      ;;
+    proposals)
+      shift || true
+      cmd_proposals "$@"
       ;;
     init-section)
       shift || true

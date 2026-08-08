@@ -2217,3 +2217,183 @@ ${problems%$'\n'}"
   done
   printf 'decompose -> %d section(s): %s\n' "$created" "${names//$'\n'/, }"
 }
+
+# --- on demand --------------------------------------------------------------
+#
+# The loop above is the only thing that decides when high-level work happens: a
+# portfolio review waits for a governance threshold, a manager only speaks at a
+# scope or a review, and a panel only convenes after repeated failure. The owner
+# has no way in. These three commands are that way in.
+#
+# Each takes the driver lock rather than queueing behind it. A hand-run command
+# that waited would dispatch into the middle of somebody else's tick, against
+# state that changed while it waited.
+
+# The same review the thresholds convene: same prompt, same verdict parsing, and
+# the verdicts take effect the same way. It advances the governance baseline on
+# success, so asking for one does not leave the loop about to ask for another.
+cmd_portfolio_review() {
+  (( $# == 0 )) || fail "portfolio-review takes no arguments"
+  [[ "$(project_next_action)" != "decompose" ]] || \
+    fail "this project has no sections yet; decompose it before reviewing the portfolio"
+  acquire_driver_lock
+  run_portfolio_review
+  printf 'spent_usd=%s\n' "$(spent_usd)"
+}
+
+# One section's manager, asked where the section stands, outside a cycle.
+#
+# The scope call is the only place a manager currently speaks about its own
+# section, and it can only answer by opening a cycle. This asks the same role
+# the same kind of question and opens nothing: no cycle directory, no
+# assignment, no verdict, and nothing downstream reads the answer.
+cmd_section_analysis() {
+  local section_input="${1:-}"
+  [[ -n "$section_input" ]] || fail "section-analysis requires a section name"
+  local body_mode="" body_path=""
+  if [[ "${2:-}" == "--file" ]]; then
+    body_mode="file"
+    body_path="${3:-}"
+  elif [[ -n "${2:-}" ]]; then
+    fail "unknown section-analysis argument: ${2:-}"
+  fi
+
+  local section_dir section_key
+  section_dir="$(resolve_section_dir "$section_input")"
+  section_key="$(basename "$section_dir")"
+
+  local question=""
+  if [[ -n "$body_mode" ]]; then
+    question="$(read_body_arg "$body_mode" "$body_path")"
+    [[ -n "$question" ]] || fail "the focusing question must not be empty"
+  fi
+
+  acquire_driver_lock
+  assert_within_budget "$section_key"
+
+  local analysis_dir cycles_before
+  analysis_dir="$section_dir/analysis/$(now_compact_utc)"
+  mkdir -p "$analysis_dir"
+  cycles_before="$(latest_cycle "$section_dir")"
+  [[ -z "$question" ]] || printf '%s\n' "$question" > "$analysis_dir/question.md"
+
+  local context prompt
+  context="$(context_bullet_list "$section_dir/brief.md" "$section_dir/state.md" \
+      "$section_dir/handoff.md" "$CONTRACT_FILE" "$analysis_dir/question.md" \
+      "$section_dir/convergence/latest.md")
+$(section_dependency_context "$section_dir")
+$(cycle_history_files "$section_dir" "$(( cycles_before + 1 ))" "$(scope_history_window)")"
+  prompt="$analysis_dir/prompt.md"
+  compose_role_task pm "$(task_file section_analysis)" \
+    "SECTION_KEY=$section_key" \
+    "CYCLE=$(printf '%03d' "$cycles_before")" \
+    "CONTEXT_FILES=$context" > "$prompt"
+
+  dispatch_role pm "$prompt" "$analysis_dir/analysis.md" "" \
+    "analysis $section_key" "$section_key"
+  /bin/cp "$analysis_dir/analysis.md" "$section_dir/analysis/latest.md"
+
+  # Nothing here writes a cycle, but the dispatched manager can write anywhere in
+  # the project workspace. A cycle that appeared during an assessment is the one
+  # failure this command cannot leave silent.
+  local cycles_after
+  cycles_after="$(latest_cycle "$section_dir")"
+  if [[ "$cycles_after" != "$cycles_before" ]]; then
+    printf 'WARNING: the analysis dispatch changed the cycle count from %s to %s; inspect %s\n' \
+      "$cycles_before" "$cycles_after" "$(repo_relative_path "$section_dir/cycles")" >&2
+  fi
+  if grep -qE '^[[:space:]]*(ASSIGN|COMPLETE|BLOCKED_EXTERNAL)\b' "$analysis_dir/analysis.md"; then
+    printf 'WARNING: the analysis answered with a scope verdict; no cycle was opened and nothing acts on it\n' >&2
+  fi
+
+  printf 'recorded=section-analysis\n'
+  printf 'section=%s\n' "$section_key"
+  printf 'analysis=%s\n' "$analysis_dir/analysis.md"
+  printf 'cycles=%s\n' "$cycles_after"
+  printf 'spent_usd=%s\n' "$(spent_usd)"
+}
+
+# The consultant panel, convened on a question instead of on a failure.
+#
+# The seats run through the same dispatcher as the failure panel, in parallel
+# and blind to each other, and the product officer adjudicates through the same
+# task. Only what the seats are told to read differs.
+cmd_proposals() {
+  local name_input="${1:-}"
+  [[ -n "$name_input" ]] || fail "proposals requires a name for the panel"
+  local body_mode="stdin" body_path=""
+  if [[ "${2:-}" == "--file" ]]; then
+    body_mode="file"
+    body_path="${3:-}"
+  elif [[ -n "${2:-}" ]]; then
+    fail "unknown proposals argument: ${2:-}"
+  fi
+
+  local name question
+  name="$(slugify "$name_input")"
+  question="$(read_body_arg "$body_mode" "$body_path")"
+  [[ -n "$question" ]] || fail "the question must not be empty"
+
+  acquire_driver_lock
+  assert_within_budget
+
+  local panel_dir
+  panel_dir="$PROJECT_DIR/panels/$name/$(now_compact_utc)"
+  mkdir -p "$panel_dir"
+  printf '%s\n' "$question" > "$panel_dir/question.md"
+
+  local consultant_persona="$panel_dir/consultant_prompt.md"
+  {
+    compose_role_prompt consultant
+    printf '\n---\n\n# The question\n\n'
+    printf 'Panel: %s\n\n' "$name"
+    printf 'Read `%s` for the question you are answering' \
+      "$(repo_relative_path "$panel_dir/question.md")"
+    if [[ -f "$STATE_DIR/plan.md" ]]; then
+      printf ', and `%s` for what the product is for' "$(repo_relative_path "$STATE_DIR/plan.md")"
+    fi
+    printf '.\n\n'
+    printf 'You are one seat of a panel answering that question at the same time as\n'
+    printf 'the others. You cannot see their answers and they cannot see yours, so\n'
+    printf 'answer the question you were asked rather than covering every position.\n\n'
+    printf 'Respond with these sections only, each as a Markdown heading:\n'
+    printf '1. What the question turns on\n2. Prior art considered\n3. Proposals\n'
+    printf '4. What would prove each one\n5. Recommendation\n\n'
+    printf 'Give at least two proposals, each naming what it costs and what it gives\n'
+    printf 'up. Recommendation must be exactly one line: the proposal you would take,\n'
+    printf 'and the one observation that would change your mind.\n'
+  } > "$consultant_persona"
+
+  run_panel_seats "$panel_dir" "$consultant_persona"
+
+  local panel_files
+  panel_files="$(panel_proposal_bullets "$panel_dir")"
+  panel_files+="- Question: $(repo_relative_path "$panel_dir/question.md")"
+  if [[ -f "$STATE_DIR/plan.md" ]]; then
+    panel_files+=$'\n'"- Plan: $(repo_relative_path "$STATE_DIR/plan.md")"
+  fi
+
+  compose_role_task cpo \
+    "$SCRIPT_DIR/tasks/consultant_panel_adjudication.md" \
+    "PANEL_SUBJECT=A panel of independent consultants was convened on a question, not on a failure. The question is the first thing to read; every proposal below answers it." \
+    "PANEL_FILES=$panel_files" \
+    > "$panel_dir/adjudication_prompt.md"
+
+  dispatch_role cpo "$panel_dir/adjudication_prompt.md" "$panel_dir/adjudication.md" "" \
+    "proposals $name"
+
+  local decision
+  decision="$(extract_markdown_decision "$(/bin/cat "$panel_dir/adjudication.md")" \
+    "ADOPT,ADOPT_PARALLEL,SYNTHESIZE,ABANDON" 2>/dev/null || printf 'UNPARSED\n')"
+  printf '%s\n' "$decision" > "$panel_dir/decision.txt"
+
+  printf 'recorded=proposals\n'
+  printf 'panel=%s\n' "$name"
+  printf 'panel_dir=%s\n' "$panel_dir"
+  printf 'seats=%s\n' "$PANEL_SEATS"
+  printf 'proposals=%s\n' "$PANEL_PROPOSALS"
+  printf 'adjudication=%s\n' "$panel_dir/adjudication.md"
+  printf 'decision=%s\n' "$decision"
+  printf 'spent_usd=%s\n' "$(spent_usd)"
+  [[ "$PANEL_SEAT_FAILURE" == "0" ]] || printf 'note=at least one seat failed; see the seat logs\n'
+}

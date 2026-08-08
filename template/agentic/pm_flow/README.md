@@ -202,6 +202,7 @@ sections/<key>/
 ├── priority.txt             must-have or nice-to-have, and what is lost
 ├── handoff.md               the bounded report upward, unproven claims included
 ├── quarantine.txt           written only if a dispatch failed fatally
+├── analysis/                assessments asked for by hand, outside any cycle
 └── cycles/001/
     ├── scope.md             the manager's whole scope response
     ├── assignment.md        the part of it the developer is given
@@ -279,6 +280,42 @@ You can convene a panel by hand:
 ./agentic/pm_flow/pm_flow.sh consult-panel <section> --file failure_notes.md
 ```
 
+## On demand
+
+Everything above happens on the flow's schedule: a review waits for a governance
+threshold, a manager only speaks at a scope or a review, a panel only convenes
+after repeated failure. These three commands ask for the same work now.
+
+```bash
+./agentic/pm_flow/pm_flow.sh portfolio-review
+./agentic/pm_flow/pm_flow.sh section-analysis <section> [--file question.md]
+./agentic/pm_flow/pm_flow.sh proposals <name> --file question.md
+```
+
+`portfolio-review` is the review above with the thresholds bypassed. It is a
+review in every other respect: the verdicts take effect, the entry is appended
+to `portfolio_log.md`, and the governance baseline advances, so asking for one
+does not leave the loop about to convene another.
+
+`section-analysis` asks one section's manager where the section stands against
+its own acceptance, criterion by criterion, what is blocking it, what it would
+do next and why, and what it cannot settle itself. It opens no cycle, writes no
+assignment and returns no verdict: the scope call is otherwise the only place a
+manager speaks, and it can only answer by opening a cycle. The answer lands in
+`sections/<key>/analysis/<timestamp>/analysis.md`, with `analysis/latest.md`
+pointing at the most recent.
+
+`proposals` convenes the consultant panel on a question rather than on a
+failure, then has the product officer adjudicate the answers. The question is
+free-form: "propose three ways to structure the data branch", "should this
+project add a futures sleeve". The seats run in parallel and blind to each other
+exactly as the failure panel does.
+Everything lands under `panels/<name>/<timestamp>/`: one proposal per seat, the
+adjudication, and `decision.txt` naming the path that was adopted.
+
+All three refuse rather than queue while a driver holds the project, dispatch
+immediately, and record what they cost in the ledger.
+
 ## Supervision
 
 Every dispatch is supervised, because an unattended run cannot ask for help:
@@ -347,6 +384,7 @@ agentic/pm_flow/
     ├── task_contract.md
     ├── project_state/   plan.md, sections.md, start.md, resume.md
     ├── sections/
+    ├── panels/          proposals asked for by hand, and their adjudication
     └── runs/
 ```
 
