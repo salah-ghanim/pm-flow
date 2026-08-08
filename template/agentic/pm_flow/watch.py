@@ -120,6 +120,38 @@ def in_flight(project: Path, last_ledger_ts: float):
     }
 
 
+STEP_ROLE = {
+    "scope": "pm", "review": "pm", "complete": "pm", "handoff": "pm",
+    "develop": "developer", "rescue": "10x_developer",
+    "review-rescue": "pm", "escalate": "consultant", "adjudicate": "cpo",
+    "portfolio-review": "cpo", "analysis": "pm", "proposals": "consultant",
+}
+
+
+def roles_config() -> dict:
+    try:
+        return json.loads((FLOW / "config.json").read_text()).get("roles", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def seat_label(seat: dict) -> str:
+    model = str(seat.get("model", "?"))
+    for prefix in ("claude-", "gpt-"):
+        if model.startswith(prefix):
+            model = model[len(prefix):]
+    return f"{seat.get('cli', '?')}/{model} {seat.get('difficulty', '?')}"
+
+
+def binding_label(role: str) -> str:
+    binding = roles_config().get(role)
+    if isinstance(binding, list):
+        return " + ".join(seat_label(s) for s in binding)
+    if isinstance(binding, dict):
+        return seat_label(binding)
+    return "?"
+
+
 def driver_alive() -> bool:
     try:
         out = subprocess.run(["pgrep", "-f", "pm_flow.sh"], capture_output=True, text=True)
@@ -145,9 +177,11 @@ def render(project: Path) -> str:
 
     live = in_flight(project, last_ts)
     if live:
+        role = STEP_ROLE.get(live["step"], "?")
         out.append(f"{GREEN}{BOLD}RUNNING{RESET}  {live['section']}  "
                    f"{live['step']} {live['cycle']}  "
                    f"{CYAN}{ago(time.time() - live['since'])}{RESET}")
+        out.append(f"         {BOLD}{role}{RESET}  {binding_label(role)}")
         if live["last_line"]:
             out.append(f"         {DIM}{live['last_line'][:110]}{RESET}")
     elif driver_alive():
@@ -181,6 +215,12 @@ def render(project: Path) -> str:
                   "active": CYAN}.get(status, "")
         out.append(f"{sec.name:<28}{pri:<6}{colour}{status:<11}{RESET}"
                    f"{spend:>9.2f}  {ago(time.time() - seen) if seen else '-'}")
+    out.append("")
+
+    out.append(f"{BOLD}ROLES{RESET}")
+    for role in ("cpo", "pm", "developer", "consultant", "10x_developer"):
+        if role in roles_config():
+            out.append(f"{role:<16}{binding_label(role)}")
     out.append("")
 
     out.append(f"{BOLD}RECENT{RESET}")
