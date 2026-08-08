@@ -101,20 +101,25 @@ def parse_iso(stamp: str) -> float:
 def in_flight(project: Path, last_ledger_ts: float):
     """The newest step claim with no ledger row after it is the live dispatch."""
     newest = None
-    for claim in project.glob("sections/*/cycles/*/.claim-*"):
-        mtime = claim.stat().st_mtime
-        if newest is None or mtime > newest[0]:
-            newest = (mtime, claim)
+    # Section steps claim under sections/<key>/cycles/<n>/. Project-level work
+    # (a portfolio review) claims under project_state/, so globbing only the
+    # section path reports a live review as IDLE.
+    for pattern in ("sections/*/cycles/*/.claim-*", "project_state/*/*/.claim-*"):
+        for claim in project.glob(pattern):
+            mtime = claim.stat().st_mtime
+            if newest is None or mtime > newest[0]:
+                newest = (mtime, claim)
     if newest is None or newest[0] <= last_ledger_ts:
         return None
     mtime, claim = newest
     cycle = claim.parent
     step = claim.name.replace(".claim-", "")
     heartbeat = read(cycle / "heartbeat.txt").splitlines()
+    is_section = cycle.parent.parent.parent.name == "sections"
     return {
-        "section": cycle.parent.parent.name,
+        "section": cycle.parent.parent.name if is_section else "(project)",
         "cycle": cycle.name,
-        "step": step,
+        "step": step if is_section else "portfolio-review",
         "since": mtime,
         "last_line": heartbeat[-1] if heartbeat else "",
     }
