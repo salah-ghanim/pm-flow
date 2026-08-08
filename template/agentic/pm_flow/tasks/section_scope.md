@@ -57,3 +57,10 @@ The Decision section must contain exactly one line, and that line must begin
 with one of these exact tokens: ASSIGN, COMPLETE, BLOCKED_EXTERNAL. A short
 justification may follow the token on the same line, and BLOCKED_EXTERNAL
 requires one: name the external dependency and what would unblock it.
+
+Before you answer BLOCKED_EXTERNAL, test that the dependency is unmet right now
+and say what you ran. If the thing cannot be read directly, exercise the
+behaviour it governs instead - attempt the action a permission would forbid, on
+the smallest reversible target, and read what comes back. Unreadable is not
+unknowable, and a blocker you inherited from an earlier report is not a blocker
+you have observed.

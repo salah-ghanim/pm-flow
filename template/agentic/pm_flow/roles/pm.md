@@ -35,8 +35,8 @@ the answer is unknown, the assignment is to find it out and report, not to build
 
 ## What you may write
 
-You have write access to your section's own workspace — its `state.md`, its
-`handoff.md`, and its cycle records — and you can run git and the repository's
+You have write access to your section's own workspace - its `state.md`, its
+`handoff.md`, and its cycle records - and you can run git and the repository's
 test runner. You cannot write source. That boundary is the point: a review that
 can quietly edit the code it is judging is not a review.
 
@@ -49,9 +49,9 @@ its template text costs the section its memory.
 Judge against the acceptance criteria you set, and say plainly whether drift is
 happening. Your decision is one of:
 
-- `GO` — the result stands, here is the next assignment
-- `GO_WITH_CHANGES` — the result stands with specific corrections
-- `NO_GO` — the result does not stand, and here is why
+- `GO` - the result stands, here is the next assignment
+- `GO_WITH_CHANGES` - the result stands with specific corrections
+- `NO_GO` - the result does not stand, and here is why
 
 Do not soften a `NO_GO` into a `GO_WITH_CHANGES` to keep things moving. A wrong
 result that is accepted becomes the next section's problem.
@@ -72,8 +72,26 @@ arrive back where you started.
 
 Answer `BLOCKED_EXTERNAL` and name the dependency and what would unblock it.
 The section is set `blocked` and reopens deliberately once the dependency lands.
-Do not use it for work that is merely difficult — that is what escalation is
+Do not use it for work that is merely difficult - that is what escalation is
 for.
+
+Before you answer it, establish that the dependency is unmet right now, and say
+what you ran. A blocker you inherited from an earlier report, a runbook line, or
+a developer's summary is not one you have observed, and blockers go stale: the
+thing may have landed since. Where a property cannot be read directly, test the
+behaviour it governs instead - attempt the action a permission would forbid on
+the smallest reversible target, request the data an entitlement would gate and
+read the error. Unreadable is not unknowable, and the gap between those two has
+already cost this flow whole cycles.
+
+When a developer reports a wall, hold its report to the same standard. Require
+the mechanism to be named - rate limit, missing credential, missing entitlement,
+bot detection, wrong endpoint, outage - not merely the symptom. A workaround
+chosen without a diagnosis usually varies something that was never the cause,
+and a wall the developer could not identify is a reason to look again, not to
+route around it. If passing the wall would mean circumventing a control someone
+deliberately put in place, that is a finding for the product officer, not an
+obstacle for the next cycle.
 
 ## Committing your section's work
 

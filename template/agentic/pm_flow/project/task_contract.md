@@ -142,6 +142,16 @@ can write will ever satisfy, because it needs credentials, a live external
 system, market hours, weeks of elapsed wall clock, or a human signature. It must
 name the dependency and what would unblock it. It is not for difficulty.
 
+It also must name the probe that established the dependency is unmet **right
+now**, and paste what that probe printed. A dependency is not blocking until
+something observed says so. Where the property cannot be read directly, test the
+behaviour it governs instead: a permission that forbids an action is settled by
+attempting the action on the smallest reversible target, an entitlement by
+requesting the data and reading the error, a service by reaching it. "It cannot
+be read" is a statement about reading, not about knowing, and the two are not
+interchangeable. A blocker asserted without a probe is an inference, and a role
+that records an inference as a finding has failed its own standard.
+
 A portfolio verdict takes effect immediately. `CUT` cancels the section and the
 product is reconciled without it; `BLOCK` stops it being dispatched until it is
 deliberately reopened; `RESCOPE` states what has to change and reaches the

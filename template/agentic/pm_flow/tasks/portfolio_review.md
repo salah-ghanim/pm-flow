@@ -55,6 +55,42 @@ A criterion is never met because a manager said so. If a criterion names no
 observable you can probe, that is a finding about the plan; say so and fix the
 plan.
 
+## Unknown is a task, not a verdict
+
+The probes above read the repository. Most of what blocks a product is not in
+the repository: a setting inside an external system, a permission, an
+entitlement, whether a remote endpoint answers. You will be told these are
+unknowable. Usually they are only unreadable, and those are different claims.
+
+Before you record anything as unknown or blocked, do this in order:
+
+1. **Say what would be different if it were true, versus false.** If nothing
+   observable differs, it does not block anything and you can stop worrying
+   about it. If something does differ, that difference is your probe.
+2. **Test the difference, not the setting.** You often cannot inspect a
+   property. You can almost always exercise the behaviour it governs. A flag
+   that forbids an action is proved by attempting the action; an entitlement is
+   proved by requesting the data and reading the error; a service being reachable
+   is proved by reaching it. Choose the smallest, safest, most reversible action
+   that would come out differently under each answer.
+3. **Ask why it is blocked before accepting that it is.** A stated blocker is
+   often a proxy for the real one, or is stale, or was inherited from a report
+   nobody retested. Check whether the thing said to be missing is actually
+   missing right now.
+4. **Look for the answer somewhere else in the evidence.** A question one
+   section calls open is often already answered in an artifact another section
+   committed. Search before you escalate.
+
+"The setting is stored encrypted so no probe can read it" is a correct statement
+about reading and a false conclusion about knowing. If the setting governs
+whether an action succeeds, attempt the action.
+
+You may not record `BLOCKED` or carry a dependency as unmet without naming the
+probe you ran and pasting what it printed. A blocker without a probe is an
+inference, and an inference recorded as a finding is the specific failure this
+review exists to prevent. The same standard you apply to every section applies
+to your own report.
+
 Run each probe as one plain command. Your tier allows commands by prefix, so a
 compound line - anything with `cd ... &&`, a `for` loop, or a leading `timeout` -
 matches no rule and is refused. Use `git -C <dir>` instead of changing
