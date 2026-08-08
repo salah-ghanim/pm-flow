@@ -157,6 +157,46 @@ def binding_label(role: str) -> str:
     return "?"
 
 
+def md_section(path: Path, heading: str, limit: int = 3) -> str:
+    """First lines under a `## <heading>` block, joined."""
+    lines, grabbing, out = read(path).splitlines(), False, []
+    for line in lines:
+        if line.startswith("## "):
+            if grabbing:
+                break
+            grabbing = line[3:].strip().lower().startswith(heading.lower())
+            continue
+        if grabbing and line.strip():
+            out.append(line.strip().lstrip("-* ").strip())
+        if len(out) >= limit:
+            break
+    return " ".join(out)
+
+
+def latest_cycle(section: Path):
+    cycles = sorted(section.glob("cycles/*/"), key=lambda p: p.name)
+    if not cycles:
+        return None, ""
+    last = cycles[-1]
+    return last.name, read(last / "decision.txt")
+
+
+def why_blocked(section: Path, status: str, decision: str) -> str:
+    """A status word alone does not tell you whether to intervene."""
+    if status == "blocked":
+        return md_section(section / "handoff.md", "Outcome", 2)[:150]
+    if decision == "NO_GO":
+        review = sorted(section.glob("cycles/*/review.md"))
+        if review:
+            tail = md_section(review[-1], "Decision", 1)
+            return tail[:150] if tail else "rejected, see review"
+        return "last cycle rejected"
+    if status == "waiting-dependencies":
+        deps = read(section / "dependency_handoffs.txt").splitlines()
+        return "waits on " + ", ".join(Path(d).parent.name for d in deps if d)
+    return ""
+
+
 def driver_alive() -> bool:
     try:
         out = subprocess.run(["pgrep", "-f", "pm_flow.sh"], capture_output=True, text=True)
@@ -207,20 +247,39 @@ def render(project: Path) -> str:
         per_section[r["section"]] = per_section.get(r["section"], 0.0) + r["cost"]
         latest[r["section"]] = max(latest.get(r["section"], 0.0), parse_iso(r["at"]))
 
-    out.append(f"{BOLD}{'SECTION':<28}{'PRI':<6}{'STATUS':<11}{'SPENT':>9}  LAST{RESET}")
+    out.append(f"{BOLD}SECTIONS{RESET}")
     sections = sorted(project.glob("sections/*/"), key=lambda p: p.name)
     for sec in sections:
         status = read(sec / "status.txt", "?")
         if status in {"cancelled", "done"} and per_section.get(sec.name, 0) == 0:
             continue
-        pri = (read(sec / "priority.txt", "must-have").splitlines() or ["?"])[0][:4]
         spend = per_section.get(sec.name, 0.0)
         seen = latest.get(sec.name, 0.0)
+        cycle, decision = latest_cycle(sec)
         colour = {"done": GREEN, "cancelled": DIM, "blocked": YELLOW,
                   "active": CYAN}.get(status, "")
-        out.append(f"{sec.name:<28}{pri:<6}{colour}{status:<11}{RESET}"
-                   f"{spend:>9.2f}  {ago(time.time() - seen) if seen else '-'}")
-    out.append("")
+        flag = RED if decision == "NO_GO" else ""
+        head = (f"{BOLD}{sec.name}{RESET}  {colour}{status}{RESET}"
+                f"  {DIM}cycle {cycle or '-'}{RESET}")
+        if decision:
+            head += f"  {flag}{decision}{RESET}"
+        head += (f"  {DIM}${spend:.0f}"
+                 f"  {ago(time.time() - seen) if seen else 'never'}{RESET}")
+        out.append(head)
+
+        goal = md_section(sec / "brief.md", "Objective", 2)
+        if goal:
+            out.append(f"    {DIM}goal {RESET}{goal[:104]}")
+        done = md_section(sec / "handoff.md", "Outcome", 2)
+        if done:
+            out.append(f"    {DIM}done {RESET}{done[:104]}")
+        nxt = md_section(sec / "handoff.md", "Next action", 2)
+        if nxt:
+            out.append(f"    {DIM}next {RESET}{nxt[:104]}")
+        reason = why_blocked(sec, status, decision)
+        if reason:
+            out.append(f"    {YELLOW}why  {RESET}{reason[:104]}")
+        out.append("")
 
     out.append(f"{BOLD}ROLES{RESET}")
     for role in ("cpo", "pm", "developer", "consultant", "10x_developer"):
