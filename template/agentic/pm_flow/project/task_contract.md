@@ -111,8 +111,15 @@ killed, a worktree is cleaned, or the next agent starts.
   `handoff.md`, so the work and the record of the work move as one.
 - Commit only your own owned paths. Sections run concurrently, and a commit that
   reaches across boundaries picks up another section's half-finished work.
-- The message names the section key and what the cycle established, negative
-  results included.
+- The message is `type(scope): short title` on one line under 72 characters,
+  then bullets. `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `plan`.
+  Scope is the section key.
+- Bullets state what changed, one change each. Not why it was hard, not what was
+  tried, not a recap of the cycle. A negative result is a change and belongs in
+  a bullet.
+- Reasoning goes in the body only when the next reader must reproduce it: a
+  measured number, a command, a non-obvious choice over the obvious one. The
+  cycle records hold the rest.
 - The product officer commits at the same cadence for product state: after
   decomposition, after any boundary or dependency change, and after every
   adjudication or abandonment decision.
