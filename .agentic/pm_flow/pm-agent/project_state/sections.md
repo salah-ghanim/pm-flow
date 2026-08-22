@@ -6,13 +6,15 @@ The root coordinator should read this file and the linked handoffs, not section 
 
 | Section | Priority | Status | Summary | PM handoff | Run | Updated (UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
-| agents-md | nice-to-have | active | Cycle 002; last action rescue. | [handoff](../sections/agents-md/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153706Z-agents-md-79b36bec` | 2026-08-22T21:06:13Z |
+| agent-bindings | must-have | planned | Section created; its PM sub-agent has not been launched yet. | [handoff](../sections/agent-bindings/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T211931Z-agent-bindings-e34faa2d` | 2026-08-22T21:19:31Z |
+| agents-md | nice-to-have | planned | Cycle 002; last action rescue. | [handoff](../sections/agents-md/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153706Z-agents-md-79b36bec` | 2026-08-22T21:06:13Z |
 | codex-usage | must-have | planned | Reopened: passed a mechanism-shaped acceptance while delivering no tokens to the store. | [handoff](../sections/codex-usage/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153704Z-codex-usage-5f13a050` | 2026-08-22T21:02:59Z |
 | green-suite | must-have | done | Suite runs to completion and exits zero; the guard was never broken, it was never called. | [handoff](../sections/green-suite/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153703Z-green-suite-51f4bdcf` | 2026-08-22T17:21:33Z |
 | installer | must-have | done | A stock install lands every module, ignores the store and bytecode, and preserves state on reinstall. | [handoff](../sections/installer/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153705Z-installer-3c68b20d` | 2026-08-22T18:14:05Z |
-| packaging | must-have | active | Cycle 003; last action review. | [handoff](../sections/packaging/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T162623Z-packaging-8802916e` | 2026-08-22T20:51:42Z |
-| persona-packs | must-have | active | Cycle 004; last action scope. | [handoff](../sections/persona-packs/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153706Z-persona-packs-538690db` | 2026-08-22T21:05:37Z |
+| packaging | must-have | active | Cycle 004; last action develop. | [handoff](../sections/packaging/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T162623Z-packaging-8802916e` | 2026-08-22T21:10:22Z |
+| persona-packs | must-have | active | Cycle 005; last action develop. | [handoff](../sections/persona-packs/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153706Z-persona-packs-538690db` | 2026-08-22T21:09:57Z |
 | store-ledger | must-have | planned | Reopened: its paths are disjoint from packaging and do not move. | [handoff](../sections/store-ledger/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153705Z-store-ledger-40f91f03` | 2026-08-22T18:40:41Z |
+| topology-compare | must-have | planned | Section created; its PM sub-agent has not been launched yet. | [handoff](../sections/topology-compare/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T211919Z-topology-compare-d633e224` | 2026-08-22T21:19:19Z |
 | trace-commands | must-have | blocked | Blocked: scoped against a layout packaging replaces; re-cut once packaging lands. | [handoff](../sections/trace-commands/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153704Z-trace-commands-f5a2c0a5` | 2026-08-22T18:24:54Z |
 | worktree-isolation | must-have | done | Each section dispatches in its own git worktree; accepted work merges back, rejected work never reaches the main tree. | [handoff](../sections/worktree-isolation/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153705Z-worktree-isolation-211e7a74` | 2026-08-22T18:12:36Z |
 

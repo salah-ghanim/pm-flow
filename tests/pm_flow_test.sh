@@ -1271,7 +1271,10 @@ wt_run() {
 # A worktree that a killed run left behind must not block the next one. git
 # keeps an administrative record per worktree that outlives the directory, and
 # a stale record is exactly what makes `git worktree add` refuse the path.
-WT_ROOT="$(git -C "$WT_REPO" rev-parse --path-format=absolute --git-common-dir)/pm-flow/worktrees/worktree-repo"
+# Beside the repository. Not inside it, where every find and glob would walk
+# it, and not under .git, where tools that exclude `.git` by path part exclude
+# the whole checkout and an agent's write controls refuse it as sensitive.
+WT_ROOT="${TEST_ROOT}/.pm-flow-worktrees/worktree repo/worktree-repo"
 mkdir -p "$WT_ROOT/alpha"
 printf 'left behind by a killed run\n' > "$WT_ROOT/alpha/debris.txt"
 
@@ -1284,9 +1287,9 @@ assert_contains "$wt_first_run" "complete -> section done" "a section in a workt
 # The dispatch ran somewhere else. Not "the driver said so" - the developer
 # recorded its own working directory from inside the process.
 wt_cwds="$(/bin/cat "$TEST_ROOT/wt-state/develop_cwd.log")"
-assert_contains "$wt_cwds" "/pm-flow/worktrees/worktree-repo/alpha" \
+assert_contains "$wt_cwds" "/.pm-flow-worktrees/worktree repo/worktree-repo/alpha" \
   "the developer dispatch ran inside the section's own worktree"
-assert_contains "$wt_cwds" "/pm-flow/worktrees/worktree-repo/beta" \
+assert_contains "$wt_cwds" "/.pm-flow-worktrees/worktree repo/worktree-repo/beta" \
   "each section got its own worktree, not a shared one"
 assert_not_contains "$wt_cwds" "$WT_REPO
 " "no developer dispatch ran in the main working tree"
@@ -1337,6 +1340,16 @@ PM_STUB_REVIEW=NO_GO wt_run 4 > /dev/null
   fail "a rejected cycle advanced the base branch"
 [[ -z "$(git -C "$WT_REPO" status --porcelain -- src)" ]] || \
   fail "a rejected cycle left the main working tree dirty"
+
+# Where a worktree lives is load-bearing, so it is asserted rather than assumed.
+# Under `.git`, MANIFEST generation enumerated 0 of 74 template files and a
+# developer's write controls refused its own owned paths as sensitive; a section
+# was blocked for two cycles by it.
+assert_not_contains "$WT_ROOT" "/.git/" "section worktrees are not placed under .git"
+[[ ! -d "$(git -C "$WT_REPO" rev-parse --path-format=absolute --git-common-dir)/pm-flow" ]] || \
+  fail "a worktree was created under .git"
+wt_manifest_count="$(cd "$WT_ROOT/../../../" 2>/dev/null && pwd -P)"
+assert_not_contains "$wt_manifest_count" "/.git" "the worktree root itself is outside .git"
 
 printf 'PASS: per-section git worktrees, merge-back, and cleanup\n'
 

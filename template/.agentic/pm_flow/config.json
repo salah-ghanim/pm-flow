@@ -33,12 +33,18 @@
       "cli": "claude",
       "model": "claude-opus-5",
       "difficulty": "max"
+    },
+    "maintenance_engineer": {
+      "cli": "claude",
+      "model": "claude-opus-5",
+      "difficulty": "medium"
     }
   },
   "access": {
     "write_roles": [
       "developer",
-      "10x_developer"
+      "10x_developer",
+      "maintenance_engineer"
     ],
     "scoped_roles": [
       "pm",
@@ -64,7 +70,8 @@
     "max_rescue_attempts": 1,
     "cycles_before_convergence_review": 6,
     "scope_history_cycles": 2,
-    "failure_brief_cycles": 3
+    "failure_brief_cycles": 3,
+    "max_maintenance_attempts": 2
   },
   "supervision": {
     "heartbeat_stall_seconds": 900,

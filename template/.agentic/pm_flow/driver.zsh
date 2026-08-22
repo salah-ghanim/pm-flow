@@ -217,6 +217,10 @@ section_next_action() {
       threshold="$(escalation_threshold)"
       failures="$(consecutive_failures "$section_dir")"
       if (( failures >= threshold )); then
+        if latest_failure_is_harness "$section_dir" &&
+           (( $(maintenance_attempts "$section_dir") < $(maintenance_budget) )); then
+          printf 'maintain\n'; return
+        fi
         printf 'escalate\n'; return
       fi
       printf 'review\n'; return
@@ -225,6 +229,14 @@ section_next_action() {
       threshold="$(escalation_threshold)"
       failures="$(consecutive_failures "$section_dir")"
       if (( failures >= threshold )); then
+        # Two ways to be stuck, and they cost very different amounts to
+        # unstick. A harness obstruction goes to one maintenance engineer; a
+        # task failure convenes a panel. Maintenance is bounded: a plumbing
+        # problem that survives repeated repair has stopped being one.
+        if latest_failure_is_harness "$section_dir" &&
+           (( $(maintenance_attempts "$section_dir") < $(maintenance_budget) )); then
+          printf 'maintain\n'; return
+        fi
         printf 'escalate\n'; return
       fi
       printf 'scope\n'; return
@@ -244,19 +256,87 @@ section_next_action() {
   esac
 }
 
-config_positive_int() {
-  python3 - "$AGENT_CONFIG_FILE" "$1" "$2" "$3" "$4" <<'PY'
+# The whole of config.json, read once per process.
+#
+# It was read afresh on every lookup, and a lookup is not rare: a single tick
+# asked for thresholds, budgets, access tiers and toggles dozens of times, so a
+# six-tick run spawned fifty-four python interpreters to parse the same
+# unchanged file. At roughly forty-five milliseconds of interpreter startup
+# each, that is most of a tick spent re-reading one small JSON document.
+#
+# Flattened to `section.key` and eval'd into an associative array, exactly the
+# way `paths.py --shell` already hands the layout to the shell half. Values are
+# normalised here so the readers stay simple: booleans become 1 or 0, null
+# becomes empty, everything else is its literal text.
+#
+# Cached for the life of the process. Config does not change under a running
+# driver, and a tick that saw two different values for one key would be worse
+# than a slow one.
+typeset -gA PM_FLOW_CONFIG
+typeset -g PM_FLOW_CONFIG_LOADED=0
+
+load_config_cache() {
+  (( PM_FLOW_CONFIG_LOADED == 0 )) || return 0
+  PM_FLOW_CONFIG_LOADED=1
+  local config_file="${AGENT_CONFIG_FILE:-}"
+  [[ -f "$config_file" ]] || return 0
+  local assignments
+  assignments="$(python3 - "$config_file" 2>/dev/null <<'PY_CONFIG_CACHE'
 import json
 import sys
 from pathlib import Path
 
-config_path, section, key, default, floor = sys.argv[1:]
-config = json.loads(Path(config_path).read_text())
-value = config.get(section, {}).get(key, int(default))
-if not isinstance(value, int) or isinstance(value, bool) or value < int(floor):
-    raise SystemExit(f"{section}.{key} must be >= {floor}, got {value!r}")
-print(value)
-PY
+
+def quote(text):
+    return "'" + str(text).replace("'", "'\\''") + "'"
+
+
+try:
+    config = json.loads(Path(sys.argv[1]).read_text())
+except (OSError, ValueError):
+    raise SystemExit(0)
+
+if not isinstance(config, dict):
+    raise SystemExit(0)
+
+for section, body in config.items():
+    if not isinstance(body, dict):
+        continue
+    for key, value in body.items():
+        if isinstance(value, bool):
+            value = "1" if value else "0"
+        elif value is None:
+            value = ""
+        elif isinstance(value, (dict, list)):
+            value = json.dumps(value)
+        print(f"PM_FLOW_CONFIG[{quote(f'{section}.{key}')}]={quote(value)}")
+PY_CONFIG_CACHE
+)" || return 0
+  [[ -z "$assignments" ]] || eval "$assignments"
+  return 0
+}
+
+# Present in config, as its literal text. Distinguishes "absent" from "empty",
+# which the callers need in order to apply their own defaults.
+config_raw() {
+  load_config_cache
+  local key="$1.$2"
+  if [[ -n "${PM_FLOW_CONFIG[$key]+set}" ]]; then
+    printf '%s\n' "${PM_FLOW_CONFIG[$key]}"
+    return 0
+  fi
+  return 1
+}
+
+config_positive_int() {
+  local value
+  if ! value="$(config_raw "$1" "$2")"; then
+    printf '%s\n' "$3"
+    return 0
+  fi
+  [[ "$value" == <-> ]] || fail "$1.$2 must be >= $4, got '$value'"
+  (( value >= $4 )) || fail "$1.$2 must be >= $4, got $value"
+  printf '%s\n' "$value"
 }
 
 escalation_threshold() {
@@ -500,18 +580,19 @@ PY_ACCESS
 }
 
 config_number() {
-  python3 - "$AGENT_CONFIG_FILE" "$1" "$2" "$3" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-config_path, section, key, default = sys.argv[1:]
-config = json.loads(Path(config_path).read_text())
-value = config.get(section, {}).get(key, float(default))
-if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
-    raise SystemExit(f"{section}.{key} must be a non-negative number, got {value!r}")
-print(f"{float(value):.4f}")
-PY
+  local value
+  if ! value="$(config_raw "$1" "$2")"; then
+    value="$3"
+  fi
+  # zsh does floating point natively; this used to spawn an interpreter to
+  # format one number. The check is a `case` rather than a pattern with a `#`
+  # closure, because that closure needs EXTENDED_GLOB and this file does not
+  # set it - the pattern silently matched nothing and every number was refused.
+  case "$value" in
+    <->|<->.<->|.<->) ;;
+    *) fail "$1.$2 must be a non-negative number, got '$value'" ;;
+  esac
+  printf '%.4f\n' "$value"
 }
 
 budget_limit() {
@@ -524,13 +605,13 @@ assert_within_budget() {
   local limit spent
   limit="$(budget_limit max_usd)"
   spent="$(spent_usd)"
-  if [[ "$(python3 -c 'import sys; print("1" if float(sys.argv[1]) > 0 and float(sys.argv[2]) >= float(sys.argv[1]) else "0")' "$limit" "$spent")" == "1" ]]; then
+  if (( limit > 0 && spent >= limit )); then
     fail "project budget exhausted: \$$spent spent against budget.max_usd \$$limit"
   fi
   [[ -n "$section_key" ]] || return 0
   limit="$(budget_limit max_usd_per_section)"
   spent="$(spent_usd "$section_key")"
-  if [[ "$(python3 -c 'import sys; print("1" if float(sys.argv[1]) > 0 and float(sys.argv[2]) >= float(sys.argv[1]) else "0")' "$limit" "$spent")" == "1" ]]; then
+  if (( limit > 0 && spent >= limit )); then
     fail "section $section_key budget exhausted: \$$spent spent against budget.max_usd_per_section \$$limit"
   fi
 }
@@ -571,23 +652,12 @@ telemetry_store_file() {
 # the project paths are resolved would then kill the run it was only supposed to
 # describe. Nothing here may be the reason a dispatch does not happen.
 config_setting() {
-  local config_file="${AGENT_CONFIG_FILE:-}"
-  [[ -f "$config_file" ]] || { printf '%s\n' "$3"; return 0; }
-  python3 - "$config_file" "$1" "$2" "$3" <<'PY_CONFIG' 2>/dev/null || printf '%s\n' "$3"
-import json
-import sys
-from pathlib import Path
-
-config_path, section, key, default = sys.argv[1:]
-try:
-    config = json.loads(Path(config_path).read_text())
-except (OSError, ValueError):
-    config = {}
-value = config.get(section, {}).get(key, default)
-if isinstance(value, bool):
-    value = "1" if value else "0"
-print("" if value is None else value)
-PY_CONFIG
+  local value
+  if value="$(config_raw "$1" "$2")"; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+  printf '%s\n' "$3"
 }
 
 telemetry_enabled() {
@@ -808,8 +878,10 @@ record_portfolio_baseline() {
 }
 
 portfolio_usd_since() {
-  python3 -c 'import sys; print("%.4f" % (float(sys.argv[1]) - float(sys.argv[2])))' \
-    "$(spent_usd)" "$(portfolio_baseline usd 0)"
+  local now baseline
+  now="$(spent_usd)"
+  baseline="$(portfolio_baseline usd 0)"
+  printf '%.4f\n' "$(( now - baseline ))"
 }
 
 # What triggered a review, or nothing. Whichever fires first wins; the reason is
@@ -831,7 +903,7 @@ portfolio_review_due() {
 
   delta="$(portfolio_usd_since)"
   threshold="$(portfolio_usd_threshold)"
-  if [[ "$(python3 -c 'import sys; print("1" if float(sys.argv[1]) > 0 and float(sys.argv[2]) >= float(sys.argv[1]) else "0")' "$threshold" "$delta")" == "1" ]]; then
+  if (( threshold > 0 && delta >= threshold )); then
     printf '$%s spent since the last portfolio review (threshold $%s)\n' "$delta" "$threshold"
     return 0
   fi
@@ -1298,9 +1370,71 @@ do_review() {
   printf 'review %s -> %s (developer said %s; consecutive failures: %s)\n' \
     "$cycle_number" "$decision" "$(first_line_or "$cycle_dir/dev_status.txt" UNSTATED)" \
     "$(consecutive_failures "$section_dir")"
+  # What kind of failure this was, recorded next to the verdict because it is
+  # what decides where the section goes when the failures add up. An
+  # unclassified rejection is treated as a task failure, which is the expensive
+  # answer, so the default is deliberately the conservative one.
+  local obstruction
+  obstruction="$(extract_markdown_decision "$(/bin/cat "$cycle_dir/review.md")" \
+    "NONE,HARNESS,TASK" Obstruction 2>/dev/null || printf 'NONE\n')"
+  printf '%s\n' "${obstruction%%$'\n'*}" > "$cycle_dir/obstruction.txt"
   case "$decision" in
     GO|GO_WITH_CHANGES) integrate_section_work "$section_dir" "$cycle_number" ;;
+    NO_GO) [[ "${obstruction%%$'\n'*}" != "HARNESS" ]] || \
+      printf '        obstruction: harness, not the work\n' ;;
   esac
+}
+
+# The obstruction recorded against a cycle, defaulting to the expensive answer.
+cycle_obstruction() {
+  first_line_or "$1/obstruction.txt" NONE
+}
+
+# Whether the failures that brought a section to the threshold were the
+# harness's fault rather than the work's.
+#
+# The distinction is the whole point of having two escalation paths. A panel of
+# independent consultants is the right instrument for a brief that cannot be
+# met; it is the wrong one, and many times the cost, for a sandbox that refuses
+# a cache directory. Every escalation this project saw before this existed was
+# the second kind sent to the first.
+#
+# The most recent failure decides, because that is the obstruction still
+# standing in the way.
+latest_failure_is_harness() {
+  local section_dir="$1"
+  local newest floor cycle decision
+  newest="$(latest_cycle "$section_dir")"
+  floor="$(first_line_or "$section_dir/failure_streak_reset.txt" 0)"
+  [[ "$floor" == <-> ]] || floor=0
+  for (( cycle = newest; cycle > floor; cycle-- )); do
+    local cycle_dir
+    cycle_dir="$(cycle_dir_for "$section_dir" "$cycle")"
+    decision="$(cycle_decision "$cycle_dir")"
+    case "$decision" in
+      NO_GO|UNPARSED)
+        [[ "$(cycle_obstruction "$cycle_dir")" == "HARNESS" ]] && return 0
+        return 1
+        ;;
+      "") continue ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
+}
+
+# How many times maintenance has been attempted for the current streak. A
+# plumbing problem that survives repeated repair is not a plumbing problem any
+# more, and the panel is the right place for it after all.
+maintenance_attempts() {
+  local value
+  value="$(first_line_or "$1/maintenance/attempts.txt" 0)"
+  [[ "$value" == <-> ]] || value=0
+  printf '%s\n' "$value"
+}
+
+maintenance_budget() {
+  config_positive_int escalation max_maintenance_attempts 2 1
 }
 
 # The section's own orchestration state, committed by the driver.
@@ -1412,6 +1546,98 @@ ${reviews%$'\n'}"
       ;;
   esac
   printf 'converge -> %s\n' "$decision"
+}
+
+# Repair the harness, then hand the section straight back.
+#
+# This is the loop a person was running by hand: read the failures, see the
+# cause was a sandbox or a flaky test or a path, fix that, wipe the failure
+# streak because the section never earned it, and let the section carry on. Four
+# times in one session. It is a loop, so the flow runs it.
+#
+# On CLEARED the streak resets and the section returns to scope with its cycles
+# intact. On NOT_PLUMBING the engineer is saying this is a product question, and
+# maintenance stands aside for the panel. On UNRESOLVED the attempt is counted
+# and, once the budget is gone, the panel gets it - a plumbing problem that
+# survives repeated repair has stopped being one.
+do_maintain() {
+  local section_dir="$1"
+  local section_key attempt_dir attempts prompt context decision heartbeat
+  section_key="$(basename "$section_dir")"
+  attempt_dir="$section_dir/maintenance"
+  mkdir -p "$attempt_dir"
+  attempts=$(( $(maintenance_attempts "$section_dir") + 1 ))
+  printf '%d\n' "$attempts" > "$attempt_dir/attempts.txt"
+  claim_step "$attempt_dir/.claim-maintain-$attempts"
+
+  heartbeat="$attempt_dir/heartbeat.txt"
+  # The failing cycles themselves, because the role that hit the obstruction
+  # described it better than any summary of it will.
+  context="$(context_bullet_list "$section_dir/brief.md" "$section_dir/state.md")
+$(cycle_history_files "$section_dir" "$(latest_cycle "$section_dir")" \
+    "$(failure_brief_window)")"
+
+  # Maintenance repairs the harness, which by definition lives outside the
+  # section's own paths, so it runs in the main tree rather than the section's
+  # worktree. Isolating a repair from the thing it is repairing would defeat it.
+  end_worktree_dispatch
+  prompt="$attempt_dir/prompt_$attempts.md"
+  compose_role_task maintenance_engineer "$(task_file section_maintenance)" \
+    "SECTION_KEY=$section_key" \
+    "FAILURES=$(consecutive_failures "$section_dir")" \
+    "CONTEXT_FILES=$context" \
+    "HEARTBEAT_SCRIPT=$(heartbeat_command)" \
+    "HEARTBEAT_FILE=$(dispatch_path "$heartbeat")" > "$prompt"
+
+  dispatch_role maintenance_engineer "$prompt" "$attempt_dir/report_$attempts.md" \
+    "$heartbeat" "maintain $section_key (attempt $attempts)"
+
+  decision="$(extract_markdown_decision "$(/bin/cat "$attempt_dir/report_$attempts.md")" \
+    "CLEARED,NOT_PLUMBING,UNRESOLVED" 2>/dev/null || printf 'UNRESOLVED\n')"
+  decision="${decision%%$'\n'*}"
+  printf '%s\n' "$decision" > "$attempt_dir/decision.txt"
+
+  case "$decision" in
+    CLEARED)
+      # The section never earned these failures, so it does not carry them.
+      printf '%s\n' "$(latest_cycle "$section_dir")" \
+        > "$section_dir/failure_streak_reset.txt"
+      printf '0\n' > "$attempt_dir/attempts.txt"
+      with_repo_git_lock commit_maintenance_work "$section_dir" "$section_key" "$attempts"
+      printf 'maintain -> obstruction cleared; %s resumes with its streak reset\n' "$section_key"
+      ;;
+    NOT_PLUMBING)
+      # Stand aside rather than spend the budget: the panel is the right
+      # instrument for a brief that cannot be met, and this is one.
+      printf '%s\n' "$(maintenance_budget)" > "$attempt_dir/attempts.txt"
+      printf 'maintain -> not a harness problem; escalating to the panel\n'
+      ;;
+    *)
+      printf 'maintain -> unresolved (attempt %d of %d)\n' \
+        "$attempts" "$(maintenance_budget)"
+      ;;
+  esac
+}
+
+# A repair touches the harness, which is nobody's section. It is committed on
+# the base directly, by the driver, for the same reason an accepted cycle is:
+# a role that cannot write to .git cannot record its own work.
+commit_maintenance_work() {
+  local section_dir="$1"
+  local section_key="$2"
+  local attempts="$3"
+  worktree_isolation_enabled || return 0
+  git -C "$PROJECT_ROOT" add -A >/dev/null 2>&1 || return 0
+  if git -C "$PROJECT_ROOT" diff --cached --quiet 2>/dev/null; then
+    return 0
+  fi
+  git -C "$PROJECT_ROOT" \
+    -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
+    -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
+    commit --quiet --no-verify \
+    -m "fix(harness): clear the obstruction blocking $section_key (attempt $attempts)" \
+    >/dev/null 2>&1 || true
+  return 0
 }
 
 do_escalate() {
@@ -1782,6 +2008,7 @@ run_action() {
     develop)       do_develop "$section_dir" ;;
     review)        do_review "$section_dir" ;;
     converge)      do_converge "$section_dir" ;;
+    maintain)      do_maintain "$section_dir" ;;
     escalate)      do_escalate "$section_dir" ;;
     adjudicate)    do_adjudicate "$section_dir" ;;
     rescue)        do_rescue "$section_dir" ;;
@@ -1892,14 +2119,25 @@ worktree_isolation_enabled() {
   [[ "$(git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]
 }
 
-# Under `.git`, not under the repository. A worktree inside the working tree
-# would be walked by every `find`, matched by every glob, and would need a
-# .gitignore entry in a file this flow does not own.
+# Beside the repository, not inside it and not under `.git`.
+#
+# Inside the working tree, a worktree is walked by every `find`, matched by
+# every glob, and needs a .gitignore entry in a file this flow may not own.
+# Under `.git` it is worse in a way that took a blocked section to discover:
+# tools that exclude `.git` by path part exclude the entire checkout - the
+# MANIFEST generator enumerated 0 of 74 template files there and produced an
+# empty manifest that looked plausible - and an agent's own write controls
+# refuse `.git` paths as sensitive, so a developer could not edit its owned
+# files at all. Both symptoms have one cause and one fix: put the worktree
+# somewhere that is neither.
 worktrees_root() {
-  local common
-  common="$(git -C "$PROJECT_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
-  [[ -n "$common" ]] || return 1
-  printf '%s/pm-flow/worktrees/%s\n' "${common%/}" "${PROJECT_KEY:-project}"
+  local top parent name
+  top="$(git -C "$PROJECT_ROOT" rev-parse --path-format=absolute --show-toplevel 2>/dev/null)" || return 1
+  [[ -n "$top" ]] || return 1
+  top="${top%/}"
+  parent="${top:h}"
+  name="${top:t}"
+  printf '%s/.pm-flow-worktrees/%s/%s\n' "$parent" "$name" "${PROJECT_KEY:-project}"
 }
 
 section_worktree_branch() {

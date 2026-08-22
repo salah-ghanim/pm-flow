@@ -54,14 +54,24 @@ peer of those sections; it is the re-baselining they will be re-cut against.
 
 ### Owned paths
 - pyproject.toml
-- src/**
+- src/pm_flow/cli.py
+- src/pm_flow/paths.py
+- src/pm_flow/__init__.py
 - install.sh
 - MANIFEST
 - template/.agentic/pm_flow/pm_flow.sh
 - template/.agentic/pm_flow/upgrade.py
 - template/.agentic/pm_flow/.gitignore
-- tests/**
+- tests/pm_flow_test.sh
+- tests/packaged_layout_test.sh
+- tests/fixtures/stub_*.zsh
 - .gitignore
+
+`src/**` and `tests/**` were both narrowed to the files this section actually
+edits. Owning a whole directory is a claim on every file anyone might ever add
+to it, and it blocked `topology-compare` from being cut at all - a section for
+the plan's headline promise, refused because of a wildcard rather than a
+conflict. The registry was right to refuse; the scope was wrong.
 
 Narrowed from `template/**` and `README.md`. Owning all of `template/` was
 over-claiming: packaging does not move the engine's source files - the wheel

@@ -5,7 +5,8 @@
     "pm": "Infrastructure Program Manager",
     "developer": "Infrastructure Engineer",
     "consultant": "Principal Cloud Architect",
-    "10x_developer": "Principal Infrastructure Engineer"
+    "10x_developer": "Principal Infrastructure Engineer",
+    "maintenance_engineer": "Infrastructure Maintenance Engineer"
   },
   "context": [
     "Changes are stateful and often hard to reverse. Plan before apply; know the rollback before the change lands.",

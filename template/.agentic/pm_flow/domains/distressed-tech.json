@@ -5,7 +5,8 @@
     "pm": "Desk Lead",
     "developer": "Research Analyst",
     "consultant": "Independent Verification Analyst",
-    "10x_developer": "Senior Diligence Lead"
+    "10x_developer": "Senior Diligence Lead",
+    "maintenance_engineer": "Maintenance Engineer"
   },
   "context": [
     "The deliverable is a sourced record, never an opinion. Every fact carries the source it came from, the date it was retrieved, and a verbatim quote carrying the number, name, date or case reference it asserts. A fact without a quote is a recollection, and a recollection is not a finding.",

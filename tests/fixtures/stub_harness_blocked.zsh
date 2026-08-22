@@ -1,6 +1,11 @@
 #!/bin/zsh -f
-# Test double for an agent CLI: a section that keeps failing, forcing the panel,
-# an ADOPT_PARALLEL adjudication, and a rescue that does not hold.
+# Test double for an agent CLI: a section blocked by the harness rather than by
+# its own work, so it routes to a maintenance engineer instead of a consultant
+# panel. The reviews are identical to stub_failing's except for the Obstruction
+# line, which is the whole point: the same rejection, classified differently,
+# has to reach a different and far cheaper place.
+#
+# PM_STUB_MAINTENANCE  CLEARED (default), NOT_PLUMBING, or UNRESOLVED
 prompt="${@[-1]}"
 emit() { python3 -c 'import json,sys; print(json.dumps({"is_error":False,"result":sys.argv[1],"session_id":""}))' "$1"; }
 
@@ -70,12 +75,32 @@ Make it work.
 
 ## Status
 PARTIAL - incomplete" ;;
+  *"Task: clear an obstruction"*)
+    emit "## Obstruction
+The acceptance command could not run in the review sandbox.
+
+## Cause
+The cache directory it needs is outside the writable root, so the command
+failed before it began. Pointing the cache inside the workspace fixes the cause
+rather than retrying past the symptom.
+
+## What I changed
+The dispatch environment names a cache directory inside the project.
+
+## Evidence
+The previously failing command now exits zero.
+
+## What I did not fix
+Nothing found beyond the obstruction above.
+
+## Decision
+${PM_STUB_MAINTENANCE:-CLEARED} - reported by the test double" ;;
   *"Task: review a developer result"*)
     emit "## Assessment
 No evidence.
 
 ## Obstruction
-TASK - the work does not meet the brief; nothing about the harness stopped it
+HARNESS - the acceptance command cannot run here; the sandbox refuses its cache directory
 
 ## Drift review
 None.

@@ -1,9 +1,13 @@
 pyproject.toml
-src/**
+src/pm_flow/cli.py
+src/pm_flow/paths.py
+src/pm_flow/__init__.py
 install.sh
 MANIFEST
 template/.agentic/pm_flow/pm_flow.sh
 template/.agentic/pm_flow/upgrade.py
 template/.agentic/pm_flow/.gitignore
-tests/**
+tests/pm_flow_test.sh
+tests/packaged_layout_test.sh
+tests/fixtures/stub_*.zsh
 .gitignore

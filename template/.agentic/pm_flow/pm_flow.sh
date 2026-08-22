@@ -117,9 +117,30 @@ ensure_state_dir() {
   mkdir -p "$STATE_DIR"
 }
 
+# A path as the repository sees it.
+#
+# This used to spawn a python interpreter for what is, in the overwhelmingly
+# common case, stripping a prefix - and it is called several times per tick, so
+# a six-tick run spent thirty-two interpreter startups on string manipulation.
+# zsh's `:A` resolves symlinks and makes the path absolute, which is the only
+# reason python was here: on macOS a temp directory is reached through a
+# symlink, so two spellings of one file compare unequal.
+#
+# The interpreter is kept for the case that actually needs it - a target
+# outside the repository, which needs `../` segments counted - because that is
+# fiddly and rare.
 repo_relative_path() {
-  local target_path="$1"
-  python3 - "$PROJECT_ROOT" "$target_path" <<'PY'
+  local target_path="${1:A}"
+  local root="${PROJECT_ROOT:A}"
+  if [[ "$target_path" == "$root" ]]; then
+    printf '.\n'
+    return 0
+  fi
+  if [[ "$target_path" == "$root"/* ]]; then
+    printf '%s\n' "${target_path#"$root"/}"
+    return 0
+  fi
+  python3 - "$root" "$target_path" <<'PY'
 from pathlib import Path
 import os
 import sys
@@ -484,6 +505,15 @@ initialize_project_paths() {
   CONTRACT_FILE="$PROJECT_DIR/task_contract.md"
   SECTIONS_DIR="$PROJECT_DIR/sections"
   SECTIONS_INDEX_FILE="$STATE_DIR/sections.md"
+  # Warm the caches here, in the parent, before anything forks.
+  #
+  # `perform_action` runs each transition in its own subshell, so a cache filled
+  # inside one dies with it and the next transition pays for it again. Filled
+  # before the fork it is simply inherited, which is the difference between
+  # reading config.json once per run and once per lookup. Both are cheap to warm
+  # and neither changes under a running driver.
+  load_config_cache 2>/dev/null || true
+  resolve_domain 2>/dev/null || true
 }
 
 resolve_section_dir() {

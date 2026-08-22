@@ -293,6 +293,32 @@ one question — is the remaining distance shrinking — reading only the brief 
 the last two reviews. It answers `CONTINUE`, `RESCOPE`, `BLOCKED_EXTERNAL`, or
 `ABANDON`.
 
+## When the harness is what failed
+
+Not every stuck section is stuck on its work. A sandbox refuses the cache
+directory an acceptance check needs; a shared test is flaky under load; a tool
+fails because of where the checkout lives. The deliverable may be perfectly
+fine and simply never got measured.
+
+Every review classifies its rejection as `HARNESS` or `TASK`, and the two route
+to very different places. `HARNESS` sends the section to a single maintenance
+engineer, whose only job is the plumbing: reproduce the obstruction, fix the
+cause rather than the symptom, never touch what the section was scoped to
+deliver, and never work around a gate. If it reports `CLEARED`, the section's
+failure streak is wiped - it never earned those failures - and it resumes at
+the next cycle with its history intact.
+
+It is bounded by `escalation.max_maintenance_attempts` (default 2). A plumbing
+problem that survives repeated repair has stopped being one, and the consultant
+panel gets it after all. An engineer that finds the real cause is the brief or
+the design reports `NOT_PLUMBING` and stands aside immediately.
+
+This exists because of what happened without it. Every escalation this project
+saw in its first day of self-hosting was a harness problem - a sandbox denying
+`~/.cache/uv`, a racy test, worktrees placed somewhere an agent's write
+controls refused - sent to a panel of consultants that could not have fixed any
+of them, and rescued by a person each time.
+
 ## When a section keeps failing
 
 Repeated failure is treated as a signal about the approach, not about effort.

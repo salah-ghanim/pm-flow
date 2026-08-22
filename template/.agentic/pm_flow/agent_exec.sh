@@ -397,11 +397,22 @@ run_attempt() {
     stall_budget="$SILENT_STALL_SECONDS"
   fi
 
-  # Poll every second. A few cheap syscalls per second is nothing next to a
-  # model call that runs for minutes, and a coarser interval would make a fast
-  # agent wait just to be observed finishing.
+  # Poll on a backoff rather than a flat second.
+  #
+  # A few cheap syscalls per second is nothing next to a model call that runs
+  # for minutes, and that reasoning was right for the case it considered. It
+  # missed the other one: a dispatch that finishes in twenty milliseconds still
+  # waited a full second to be noticed, because the first thing the loop did was
+  # sleep. The test suite makes roughly a hundred such dispatches against stub
+  # CLIs, so the better part of two minutes of a five-minute run was this line.
+  #
+  # Starting at fifty milliseconds and doubling to a one-second ceiling costs a
+  # real dispatch five extra wakeups in its first second and nothing afterwards,
+  # while a dispatch that returns immediately is noticed immediately.
+  local -F poll_interval=0.05
   while kill -0 "$child" 2>/dev/null; do
-    sleep 1
+    sleep "$poll_interval"
+    (( poll_interval = poll_interval >= 1 ? 1 : poll_interval * 2 ))
     kill -0 "$child" 2>/dev/null || break
     now_epoch="$(date +%s)"
     # The attempt log is the only stream that receives incremental output on

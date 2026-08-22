@@ -5,7 +5,8 @@
     "pm": "Startup Product Manager",
     "developer": "Full-Stack Product Developer",
     "consultant": "Startup Technical Advisor",
-    "10x_developer": "Founding Engineer"
+    "10x_developer": "Founding Engineer",
+    "maintenance_engineer": "Platform Maintenance Engineer"
   },
   "context": [
     "Time to a usable product beats architectural completeness. Ship a narrow slice that a real user can exercise end to end.",

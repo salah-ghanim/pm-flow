@@ -5,7 +5,8 @@
     "pm": "AI Tooling Migration Manager",
     "developer": "AI Automation Engineer",
     "consultant": "Principal Migration Architect",
-    "10x_developer": "Principal AI Tooling Engineer"
+    "10x_developer": "Principal AI Tooling Engineer",
+    "maintenance_engineer": "Migration Tooling Engineer"
   },
   "context": [
     "A working system is already in use. The deliverable is a cutover that preserves what people depend on, not a parallel rewrite that never lands.",

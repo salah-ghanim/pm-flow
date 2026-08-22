@@ -69,8 +69,15 @@ def iter_template_files():
     for path in sorted(TEMPLATE.rglob("*")):
         if not path.is_file():
             continue
-        rel = path.relative_to(TEMPLATE).as_posix()
-        if any(part in EXCLUDE_PARTS for part in path.parts):
+        relative = path.relative_to(TEMPLATE)
+        rel = relative.as_posix()
+        # Filtered on the path *within* template/, not on the absolute path.
+        # Matching absolute parts meant the checkout's own location could
+        # exclude everything: in a git worktree under `.git/`, every template
+        # file has `.git` as an ancestor part, so this yielded zero of 74 files
+        # and generated an empty MANIFEST that looked plausible. A section
+        # working in such a worktree could not regenerate it at all.
+        if any(part in EXCLUDE_PARTS for part in relative.parts):
             continue
         if path.suffix in EXCLUDE_SUFFIX:
             continue

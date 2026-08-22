@@ -56,10 +56,36 @@ on its merits.
 ## Respond with these sections only, each as a Markdown heading
 
 1. Assessment
-2. Drift review
-3. Evidence check
-4. Risks
-5. Decision
+2. Obstruction
+3. Drift review
+4. Evidence check
+5. Risks
+6. Decision
+
+**Obstruction** must contain exactly one line beginning with one of these
+exact tokens, and it decides what happens next, so it is not a formality:
+
+- `NONE` - the work was judged on its merits, whatever the verdict.
+- `HARNESS` - the section was stopped by something that is not its work and not
+  its brief: a sandbox refusing a path, a flaky or environment-dependent test,
+  a tool that fails from where it was invoked, a generated file that comes back
+  empty because of where the checkout lives, an acceptance command that cannot
+  be executed here at all. The deliverable may be fine and untested.
+- `TASK` - the work itself did not meet the brief, or the brief cannot be met:
+  too vague to act on, internally contradictory, or asking for something that
+  cannot be built.
+
+A short reason follows the token on the same line.
+
+Get this right rather than defaulting. `HARNESS` routes the section to a single
+maintenance engineer who repairs the plumbing and hands the section straight
+back. `TASK` convenes a panel of independent consultants, which costs many
+times more and is the right answer only for a real disagreement about the work.
+Every escalation this project has seen so far was a `HARNESS` problem sent to a
+panel that could not have fixed it.
+
+If you are rejecting work whose every technical criterion you just confirmed,
+that is almost certainly `HARNESS`.
 
 The Decision section must contain exactly one line, and that line must begin
 with one of these exact tokens: GO, GO_WITH_CHANGES, NO_GO. A short

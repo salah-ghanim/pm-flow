@@ -238,9 +238,39 @@ dispatches.
 
 ## Failure and escalation
 
+There are two ways to be stuck and they cost very different amounts to unstick,
+so every rejection is classified before it is routed. The review records an
+`Obstruction` of `NONE`, `HARNESS` or `TASK`, and an unclassified rejection is
+read as `TASK`, which is the conservative and expensive answer.
+
+- **`HARNESS`** - the section was stopped by something that is neither its work
+  nor its brief: a sandbox refusing a path, a flaky or environment-dependent
+  test, a tool that fails from where it was invoked, an acceptance command that
+  cannot be executed here at all. The deliverable may be fine and untested. This
+  goes to a single maintenance engineer, who repairs the plumbing and hands the
+  section straight back with its failure streak reset, because the section never
+  earned those failures.
+- **`TASK`** - the work did not meet the brief, or the brief cannot be met. This
+  convenes the consultant panel, which is many times the cost and is the right
+  instrument only for a real disagreement about the work.
+
+Getting this right is not bookkeeping. Before the distinction existed, every
+escalation this project saw was a `HARNESS` problem sent to a panel that could
+not have fixed it, and a person had to step in each time.
+
 - consecutive rejections are counted from the section's own cycle history
-- reaching the configured threshold sends the section to the consultant panel
-  with everything that was attempted and observed
+- reaching the configured threshold routes on the most recent obstruction: a
+  maintenance engineer for `HARNESS`, the consultant panel otherwise
+- maintenance is bounded by `escalation.max_maintenance_attempts`. A plumbing
+  problem that survives repeated repair has stopped being one, and the panel
+  gets it after all
+- a maintenance engineer that finds the cause is the brief or the design says
+  `NOT_PLUMBING` and stands aside rather than spending the budget
+- a maintenance engineer never changes what the section was scoped to deliver,
+  never changes the acceptance it is judged against, and never defeats a gate.
+  A bypass shipped there is a bypass everyone inherits
+- reaching the threshold on a task failure sends the section to the consultant
+  panel with everything that was attempted and observed
 - the product officer may adopt one path, several in parallel, a synthesis, or
   abandon the section
 - a rescue that fails review consumes a round; when the rounds are spent the

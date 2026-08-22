@@ -5,7 +5,8 @@
     "pm": "Prop Trading Product Manager",
     "developer": "Prop Trading Developer",
     "consultant": "Quantitative Research Consultant",
-    "10x_developer": "Principal Trading Systems Engineer"
+    "10x_developer": "Principal Trading Systems Engineer",
+    "maintenance_engineer": "Trading Systems Maintenance Engineer"
   },
   "context": [
     "A backtest is evidence, not proof. State the baseline, the sample, and the out-of-sample check before claiming an edge.",

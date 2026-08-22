@@ -5,7 +5,8 @@
     "pm": "Project Manager",
     "developer": "Software Developer",
     "consultant": "Principal Engineering Consultant",
-    "10x_developer": "Principal Software Engineer"
+    "10x_developer": "Principal Software Engineer",
+    "maintenance_engineer": "Maintenance Engineer"
   },
   "context": [
     "The domain has not been specified, so do not assume one. Derive constraints from the repository and the project plan rather than from industry priors.",

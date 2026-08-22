@@ -5,7 +5,8 @@
     "pm": "Crypto Trading Product Manager",
     "developer": "Crypto Trading Systems Developer",
     "consultant": "Quantitative Trading Consultant",
-    "10x_developer": "Principal Trading Systems Engineer"
+    "10x_developer": "Principal Trading Systems Engineer",
+    "maintenance_engineer": "Trading Systems Maintenance Engineer"
   },
   "context": [
     "Markets are adversarial, non-stationary, and run continuously. A result that holds in one regime is not a result.",
