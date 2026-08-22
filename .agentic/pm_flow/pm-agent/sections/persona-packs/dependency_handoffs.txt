@@ -1,1 +1,1 @@
-agentic/pm_flow/pm-agent/sections/installer/handoff.md
+.agentic/pm_flow/pm-agent/sections/installer/handoff.md

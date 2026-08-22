@@ -35,7 +35,7 @@ Report the full pass/fail list; nobody has seen one since 7 August.
 
 ### Owned paths
 - tests/**
-- template/agentic/pm_flow/driver.zsh
+- template/.agentic/pm_flow/driver.zsh
 
 Note on the second path: this section was originally scoped to tests only, on the
 assumption the tests were stale. Half of them were, but the guard defect is in

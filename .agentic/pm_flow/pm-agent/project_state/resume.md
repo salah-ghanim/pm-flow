@@ -3,7 +3,7 @@
 Run it again:
 
 ```bash
-./agentic/pm_flow/pm_flow.sh run
+./.agentic/pm_flow/pm_flow.sh run
 ```
 
 There is nothing to clean up first and no recovery flag to pass. The driver
@@ -18,7 +18,7 @@ stops the run rather than spending further.
 To see where things stand before continuing:
 
 ```bash
-./agentic/pm_flow/pm_flow.sh status
+./.agentic/pm_flow/pm_flow.sh status
 ```
 
 `STATUS` is the section's lifecycle — `planned`, `active`, `blocked`, `done`,

@@ -18,7 +18,7 @@ is a live hazard, and a worktree removes it.
   it is the precondition for pm-flow working on itself safely.
 
 ### Owned paths
-- template/agentic/pm_flow/driver.zsh
+- template/.agentic/pm_flow/driver.zsh
 
 ### Dependencies
 - green-suite

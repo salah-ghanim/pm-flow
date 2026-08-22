@@ -19,7 +19,7 @@ dispatched process.
   at all and cross-model comparison is impossible.
 
 ### Owned paths
-- template/agentic/pm_flow/agent_exec.sh
+- template/.agentic/pm_flow/agent_exec.sh
 
 ### Dependencies
 - green-suite

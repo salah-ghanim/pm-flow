@@ -22,8 +22,8 @@ nor safe to install.
   today can tell you whether any of them work.
 
 ### Owned paths
-- template/agentic/pm_flow/catalog.py
-- template/agentic/pm_flow/store.py
+- template/.agentic/pm_flow/catalog.py
+- template/.agentic/pm_flow/store.py
 
 ### Dependencies
 - installer

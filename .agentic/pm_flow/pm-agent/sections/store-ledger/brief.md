@@ -17,8 +17,8 @@ and this runs against a live install with ten workspaces.
 - must-have. This is the churn the whole store exists to remove.
 
 ### Owned paths
-- template/agentic/pm_flow/cost.py
-- template/agentic/pm_flow/watch.py
+- template/.agentic/pm_flow/cost.py
+- template/.agentic/pm_flow/watch.py
 
 ### Dependencies
 - trace-commands

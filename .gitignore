@@ -40,3 +40,9 @@ __pycache__/
 # Runtime locks, not state.
 .agentic/pm_flow/*/sections/.*.lock
 .agentic/pm_flow/*/sections/*.lock
+
+# Build artifacts from packaging.
+dist/
+build/
+*.egg-info/
+.venv/

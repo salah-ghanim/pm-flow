@@ -271,11 +271,41 @@ migrate_legacy_flow_dir() {
     mv "$legacy" "$current"
   fi
 
-  if [[ -d "$current/pm_flow" ]]; then
-    printf 'migrated=agentic -> .agentic\n'
-    printf 'NOTE: paths that name agentic/ elsewhere - CI, editor config, your own\n' >&2
-    printf 'NOTE: scripts - need updating; the flow'"'"'s own files were rewritten.\n' >&2
-  fi
+  [[ -d "$current/pm_flow" ]] || return 0
+
+  # Moving the directory is not enough. Project state records repo-relative
+  # paths - each section's run_path.txt, its owned paths, its dependency
+  # handoffs - and every one of them still names the old location. A section
+  # whose run directory cannot be found is a section the flow refuses to act on,
+  # so a migration that skipped this would leave a project that looks intact and
+  # will not move.
+  python3 - "$current" <<'PY_MIGRATE' || true
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+# A path segment, never the word in prose and never an already-migrated path.
+pattern = re.compile(r"(?<![\w.-])agentic/")
+rewritten = 0
+for path in root.rglob("*"):
+    if not path.is_file():
+        continue
+    try:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError):
+        continue
+    updated = pattern.sub(".agentic/", text)
+    if updated != text:
+        path.write_text(updated)
+        rewritten += 1
+if rewritten:
+    print(f"migrated_paths={rewritten}")
+PY_MIGRATE
+
+  printf 'migrated=agentic -> .agentic\n'
+  printf 'NOTE: paths that name agentic/ elsewhere - CI, editor config, your own\n' >&2
+  printf 'NOTE: scripts - need updating; the flow'"'"'s own files were rewritten.\n' >&2
 }
 
 sync_manifest_engine() {

@@ -16,8 +16,8 @@ Endpoints worth documenting: Phoenix on 6006, Jaeger on 4318, Langfuse on
   it usable.
 
 ### Owned paths
-- template/agentic/pm_flow/pm_flow.sh
-- template/agentic/pm_flow/config.json
+- template/.agentic/pm_flow/pm_flow.sh
+- template/.agentic/pm_flow/config.json
 
 ### Dependencies
 - green-suite
