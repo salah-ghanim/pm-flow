@@ -1079,6 +1079,146 @@ assert_contains "$("$DRIVER_PM" status)" "cancelled" "the abandoned section is c
   fail "parallel rescue did not create an isolated attempt per path"
 
 printf 'PASS: headless driver, escalation, and parallel rescue\n'
+# --- worktree isolation ------------------------------------------------------
+#
+# Sections owning disjoint paths is an honour system. A worktree per section
+# makes the isolation structural: the dispatch runs somewhere else entirely, an
+# accepted cycle merges back, and a rejected one never reaches the main tree.
+WT_REPO="$TEST_ROOT/worktree repo"
+mkdir "$WT_REPO"
+git -C "$WT_REPO" init -q -b main
+git -C "$WT_REPO" config user.name "pm-flow test"
+git -C "$WT_REPO" config user.email "pm-flow-test@localhost"
+mkdir -p "$WT_REPO/src"
+printf 'seed\n' > "$WT_REPO/src/seed.txt"
+"$REPO_ROOT/install.sh" "$WT_REPO" --name "Worktree Project" > "$TEST_ROOT/wt-install.out"
+WT_PM="$WT_REPO/.agentic/pm_flow/pm_flow.sh"
+WT_FLOW="$WT_REPO/.agentic/pm_flow"
+WT_PROJECT="$WT_REPO/.agentic/pm_flow/worktree-repo"
+
+python3 - "$WT_FLOW/config.json" <<'PYCFG'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+for role in ("cpo", "pm", "developer", "10x_developer"):
+    config["roles"][role] = {"cli": "claude", "model": "", "difficulty": "low"}
+config["supervision"] = {
+    "heartbeat_stall_seconds": 30, "max_attempts": 1,
+    "retry_backoff_seconds": 1, "usage_limit_pause_seconds": 1,
+}
+path.write_text(json.dumps(config, indent=2) + "\n")
+PYCFG
+
+wt_init_section() {
+  "$WT_PM" init-section "$1" <<SECTIONBRIEF > /dev/null
+## Objective
+
+- Write the $1 file.
+
+## Scope
+
+- That file only.
+
+## Priority
+
+- must-have: the product cannot ship without it
+
+## Owned paths
+
+- \`src/$1.txt\`
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- The file exists.
+
+## Rejection conditions
+
+- Any other file changes.
+SECTIONBRIEF
+}
+
+wt_init_section alpha
+wt_init_section beta
+
+git -C "$WT_REPO" add -A
+git -C "$WT_REPO" -c user.name="pm-flow test" -c user.email="pm-flow-test@localhost" \
+  commit -q -m "seed the worktree project"
+WT_BASE_COMMIT="$(git -C "$WT_REPO" rev-parse HEAD)"
+
+mkdir "$TEST_ROOT/wt-bin" "$TEST_ROOT/wt-state"
+/bin/cp "$REPO_ROOT/tests/fixtures/stub_worktree.zsh" "$TEST_ROOT/wt-bin/claude"
+chmod +x "$TEST_ROOT/wt-bin/claude"
+
+wt_run() {
+  PM_STUB_STATE="$TEST_ROOT/wt-state" PM_STUB_REVIEW="${PM_STUB_REVIEW:-GO}" \
+  PATH="$TEST_ROOT/wt-bin:$PATH" "$WT_PM" run --max-ticks "${1:-30}" 2>&1
+}
+
+# A worktree that a killed run left behind must not block the next one. git
+# keeps an administrative record per worktree that outlives the directory, and
+# a stale record is exactly what makes `git worktree add` refuse the path.
+WT_ROOT="$(git -C "$WT_REPO" rev-parse --path-format=absolute --git-common-dir)/pm-flow/worktrees/worktree-repo"
+mkdir -p "$WT_ROOT/alpha"
+printf 'left behind by a killed run\n' > "$WT_ROOT/alpha/debris.txt"
+
+wt_first_run="$(wt_run 30)"
+
+assert_contains "$wt_first_run" "complete -> section done" "a section in a worktree still completes"
+[[ ! -f "$WT_ROOT/alpha/debris.txt" ]] || \
+  fail "an orphaned worktree directory blocked the next run instead of being reclaimed"
+
+# The dispatch ran somewhere else. Not "the driver said so" - the developer
+# recorded its own working directory from inside the process.
+wt_cwds="$(/bin/cat "$TEST_ROOT/wt-state/develop_cwd.log")"
+assert_contains "$wt_cwds" "/pm-flow/worktrees/worktree-repo/alpha" \
+  "the developer dispatch ran inside the section's own worktree"
+assert_contains "$wt_cwds" "/pm-flow/worktrees/worktree-repo/beta" \
+  "each section got its own worktree, not a shared one"
+assert_not_contains "$wt_cwds" "$WT_REPO
+" "no developer dispatch ran in the main working tree"
+
+# An accepted cycle merges back. Both sections wrote a file, each in its own
+# tree, and both files are in the main tree afterwards without either having
+# collided with the other.
+assert_file_contains "$WT_REPO/src/alpha.txt" "written by alpha" \
+  "an accepted section's work merged into the main tree"
+assert_file_contains "$WT_REPO/src/beta.txt" "written by beta" \
+  "a second section merged back without colliding with the first"
+[[ "$(git -C "$WT_REPO" rev-parse HEAD)" != "$WT_BASE_COMMIT" ]] || \
+  fail "the base branch did not advance, so nothing was actually merged"
+assert_contains "$(git -C "$WT_REPO" log --oneline -20)" "merge(alpha)" \
+  "the merge is recorded on the base branch"
+
+# Finishing a section gives its checkout back, and takes no work with it: the
+# branch that carries the history stays.
+[[ ! -d "$WT_ROOT/alpha" ]] || fail "a completed section kept its worktree"
+assert_contains "$(git -C "$WT_REPO" branch --list 'pm-flow/*')" "pm-flow/worktree-repo/alpha" \
+  "removing a worktree did not remove the branch behind it"
+
+# A rejected result never reaches the main tree. The same stub, reviewing NO_GO,
+# writes its file in the worktree and the main tree must not see it.
+wt_init_section gamma
+git -C "$WT_REPO" add -A
+git -C "$WT_REPO" -c user.name="pm-flow test" -c user.email="pm-flow-test@localhost" \
+  commit -q -m "add the rejected section"
+WT_REJECT_COMMIT="$(git -C "$WT_REPO" rev-parse HEAD)"
+PM_STUB_REVIEW=NO_GO wt_run 4 > /dev/null
+[[ ! -f "$WT_REPO/src/gamma.txt" ]] || \
+  fail "a rejected result reached the main working tree"
+[[ -f "$WT_ROOT/gamma/src/gamma.txt" ]] || \
+  fail "the rejected work did not survive in the section's own worktree"
+[[ "$(git -C "$WT_REPO" rev-parse HEAD)" == "$WT_REJECT_COMMIT" ]] || \
+  fail "a rejected cycle advanced the base branch"
+[[ -z "$(git -C "$WT_REPO" status --porcelain -- src)" ]] || \
+  fail "a rejected cycle left the main working tree dirty"
+
+printf 'PASS: per-section git worktrees, merge-back, and cleanup\n'
+
 # The product officer cuts the product into sections before any section exists,
 # and a run started from an empty project drives them all to completion.
 DECOMP_REPO="$TEST_ROOT/decomp repo"

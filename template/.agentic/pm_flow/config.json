@@ -36,10 +36,19 @@
     }
   },
   "access": {
-    "write_roles": ["developer", "10x_developer"],
-    "scoped_roles": ["pm", "cpo"],
+    "write_roles": [
+      "developer",
+      "10x_developer"
+    ],
+    "scoped_roles": [
+      "pm",
+      "cpo"
+    ],
     "scoped_write_paths": [],
     "scoped_isolate_settings": true
+  },
+  "isolation": {
+    "worktrees": true
   },
   "budget": {
     "max_usd": 0,

@@ -306,12 +306,32 @@ rescue_attempt_budget() {
   config_positive_int escalation max_rescue_attempts 1 1
 }
 
+# A dispatch that runs inside a section worktree has a working directory that is
+# not the repository root, so a repo-relative context path resolves to nothing
+# there. `begin_worktree_dispatch` sets this to `absolute` for the length of
+# such a dispatch and back afterwards.
+CONTEXT_PATH_STYLE="relative"
+
 context_bullet_list() {
   local context_path
   for context_path in "$@"; do
     [[ -f "$context_path" ]] || continue
-    printf -- '- %s\n' "$(repo_relative_path "$context_path")"
+    if [[ "$CONTEXT_PATH_STYLE" == absolute ]]; then
+      printf -- '- %s\n' "${context_path:A}"
+    else
+      printf -- '- %s\n' "$(repo_relative_path "$context_path")"
+    fi
   done
+}
+
+# The same choice for a single path, for the prompt substitutions that name one
+# file rather than a list.
+dispatch_path() {
+  if [[ "$CONTEXT_PATH_STYLE" == absolute ]]; then
+    printf '%s\n' "${1:A}"
+  else
+    repo_relative_path "$1"
+  fi
 }
 
 # --- money ------------------------------------------------------------------
@@ -719,6 +739,15 @@ dispatch_role() {
 
   local dispatch_args=("$role" --prompt-file "$prompt_file" --output "$response_json" --label "$label")
   [[ -z "$heartbeat" ]] || dispatch_args+=(--heartbeat "$heartbeat")
+  # Set by begin_worktree_dispatch and empty otherwise, so a project without
+  # git, or with isolation turned off, dispatches exactly as it always did.
+  if [[ -n "${DISPATCH_WORK_ROOT:-}" ]]; then
+    dispatch_args+=(--work-root "$DISPATCH_WORK_ROOT")
+    local granted
+    for granted in "${DISPATCH_EXTRA_DIRS[@]}"; do
+      dispatch_args+=(--extra-dir "$granted")
+    done
+  fi
 
   local dispatch_status=0
   "$SCRIPT_DIR/agent_exec.sh" "${dispatch_args[@]}" >/dev/null || dispatch_status=$?
@@ -1065,16 +1094,22 @@ do_develop() {
   claim_step "$cycle_dir/.claim-develop"
   heartbeat="$cycle_dir/heartbeat.txt"
 
+  # The developer is the role that changes code, so it is the role that runs in
+  # the section's worktree. The cycle directory travels with it as a grant: the
+  # assignment has to be readable and the heartbeat writable, and both live with
+  # the run records rather than with the code.
+  begin_worktree_dispatch "$(basename "$section_dir")" "$cycle_dir"
   context="$(context_bullet_list "$cycle_dir/assignment.md" "$section_dir/brief.md" "$section_dir/state.md")"
   prompt="$cycle_dir/develop_prompt.md"
   compose_role_task developer "$(task_file developer_assignment)" \
     "SECTION_KEY=$(basename "$section_dir")" \
     "CYCLE=$cycle_number" \
     "CONTEXT_FILES=$context" \
-    "HEARTBEAT_FILE=$(repo_relative_path "$heartbeat")" > "$prompt"
+    "HEARTBEAT_FILE=$(dispatch_path "$heartbeat")" > "$prompt"
 
   dispatch_role developer "$prompt" "$cycle_dir/result.md" "$heartbeat" \
     "develop $(basename "$section_dir") $cycle_number"
+  end_worktree_dispatch
 
   # The developer's own status has been part of the response contract all along
   # and was parsed by nothing. Record it so the review sees a claim the
@@ -1107,6 +1142,35 @@ do_review() {
   printf 'review %s -> %s (developer said %s; consecutive failures: %s)\n' \
     "$cycle_number" "$decision" "$(first_line_or "$cycle_dir/dev_status.txt" UNSTATED)" \
     "$(consecutive_failures "$section_dir")"
+  case "$decision" in
+    GO|GO_WITH_CHANGES) integrate_section_work "$section_dir" "$cycle_number" ;;
+  esac
+}
+
+# An accepted cycle is the only thing that moves code out of a section's
+# worktree. A rejected one leaves it on the branch, where the next cycle
+# continues from it and the main tree never saw it.
+integrate_section_work() {
+  local section_dir="$1"
+  local cycle_number="$2"
+  local section_key merge_status
+  worktree_isolation_enabled || return 0
+  section_key="$(basename "$section_dir")"
+  local tree_path
+  tree_path="$(section_worktree_path "$section_key")" || return 0
+  [[ -d "$tree_path" ]] || return 0
+  commit_section_worktree "$tree_path" \
+    "$section_key: accepted cycle $cycle_number" || true
+  merge_status=0
+  merge_section_worktree "$section_dir" || merge_status=$?
+  case "$merge_status" in
+    0) printf '        merged %s into %s\n' "$(section_worktree_branch "$section_key")" \
+         "$(driver_base_branch 2>/dev/null || printf 'HEAD\n')" ;;
+    2) : ;;  # nothing new on the branch; a cycle may legitimately change no code
+    *) printf '        merge held back: %s\n' \
+         "$(first_line_or "$section_dir/merge_blocked.txt" 'see merge_blocked.txt')" ;;
+  esac
+  return 0
 }
 
 # The product officer, reading only the brief and the last two reviews, is asked
@@ -1264,17 +1328,31 @@ do_rescue() {
   fi
   claim_step "$escalation_dir/.claim-rescue"
 
-  context="$(context_bullet_list "$section_dir/brief.md" "$escalation_dir/failure_brief.md" "$escalation_dir/adjudication.md")"
+  # Rescue paths are dispatched concurrently and are meant to be independent
+  # attempts at the same problem, so they cannot share one tree: two of them
+  # editing the same file is the whole reason the panel was convened. Each path
+  # gets its own worktree, named for the path rather than the section.
+  # Created before anything forks: `git worktree add` takes a repository-wide
+  # lock, and several of them starting at once is a race this dispatch does not
+  # need to run.
+  if worktree_isolation_enabled; then
+    for (( index = 1; index <= path_count; index++ )); do
+      ensure_section_worktree "$(basename "$section_dir")-rescue-$index" >/dev/null 2>&1 || true
+    done
+  fi
   for (( index = 1; index <= path_count; index++ )); do
     local attempt_dir="$escalation_dir/rescue_$index"
     mkdir -p "$attempt_dir"
-    prompt="$attempt_dir/prompt.md"
-    compose_role_task 10x_developer "$(task_file section_rescue)" \
-      "SECTION_KEY=$(basename "$section_dir")" \
-      "CONTEXT_FILES=$context" \
-      "CHOSEN_PATH=$(printf '%s\n' "$paths" | sed -n "${index}p")" \
-      "HEARTBEAT_FILE=$(repo_relative_path "$attempt_dir/heartbeat.txt")" > "$prompt"
     (
+      begin_worktree_dispatch "$(basename "$section_dir")-rescue-$index" "$attempt_dir"
+      context="$(context_bullet_list "$section_dir/brief.md" \
+        "$escalation_dir/failure_brief.md" "$escalation_dir/adjudication.md")"
+      prompt="$attempt_dir/prompt.md"
+      compose_role_task 10x_developer "$(task_file section_rescue)" \
+        "SECTION_KEY=$(basename "$section_dir")" \
+        "CONTEXT_FILES=$context" \
+        "CHOSEN_PATH=$(printf '%s\n' "$paths" | sed -n "${index}p")" \
+        "HEARTBEAT_FILE=$(dispatch_path "$attempt_dir/heartbeat.txt")" > "$prompt"
       dispatch_role 10x_developer "$prompt" "$attempt_dir/result.md" \
         "$attempt_dir/heartbeat.txt" "rescue $(basename "$section_dir") path $index" \
         > "$attempt_dir/dispatch.log" 2>&1
@@ -1346,8 +1424,83 @@ do_review_rescue() {
   # next tick recounted the same failures, escalated again, and convened another
   # panel - an unbounded loop on the success path.
   printf '%s\n' "$(latest_cycle "$section_dir")" > "$section_dir/failure_streak_reset.txt"
+  integrate_rescue_work "$section_dir" "$escalation_dir"
   mv "$escalation_dir" "${escalation_dir}-resolved-$(now_compact_utc)"
   printf 'review-rescue -> %s; section resumes\n' "$decision"
+}
+
+# A rescue that held still has its work sitting in one worktree per path.
+#
+# One path merges: there is a single answer and the review accepted it. Several
+# paths do not, and must not. Parallel rescue exists so independent attempts at
+# the same problem are made without seeing each other, so merging them together
+# would combine two solutions to one problem into a tree neither author wrote.
+# The branches are named instead and the manager chooses.
+integrate_rescue_work() {
+  local section_dir="$1"
+  local escalation_dir="$2"
+  local section_key index delivered=() attempt_dir
+  worktree_isolation_enabled || return 0
+  section_key="$(basename "$section_dir")"
+  for attempt_dir in "$escalation_dir"/rescue_<->(/N); do
+    index="${attempt_dir:t}"
+    index="${index#rescue_}"
+    [[ -f "$attempt_dir/result.md" ]] || continue
+    commit_section_worktree "$(section_worktree_path "$section_key-rescue-$index")" \
+      "$section_key: rescue path $index" >/dev/null 2>&1 || true
+    delivered+=("$index")
+  done
+  if (( ${#delivered[@]} == 1 )); then
+    local only="${delivered[1]}"
+    local merged=0
+    merge_rescue_branch "$section_dir" "$section_key-rescue-$only" || merged=$?
+    if (( merged == 0 )); then
+      printf '        merged rescue path %s\n' "$only"
+    fi
+  elif (( ${#delivered[@]} > 1 )); then
+    {
+      printf '# Rescue branches awaiting a choice\n\n'
+      printf 'Parallel rescue ran %d independent attempts at the same problem, so\n' "${#delivered[@]}"
+      printf 'they were not merged together: combining them would produce a tree no\n'
+      printf 'author wrote. Each path is committed on its own branch. Pick one.\n\n'
+      for index in "${delivered[@]}"; do
+        printf -- '- path %s: `%s`\n' "$index" "$(section_worktree_branch "$section_key-rescue-$index")"
+      done
+    } > "$section_dir/rescue_branches.txt"
+    printf '        %d rescue branches held for a choice; see rescue_branches.txt\n' \
+      "${#delivered[@]}"
+  fi
+  for index in "${delivered[@]}"; do
+    remove_section_worktree "$section_key-rescue-$index"
+  done
+  return 0
+}
+
+# The same merge discipline as an accepted cycle, against a branch that is not
+# the section's own.
+merge_rescue_branch() {
+  local section_dir="$1"
+  local worktree_key="$2"
+  local branch base ahead
+  branch="$(section_worktree_branch "$worktree_key")"
+  base="$(driver_base_branch)" || return 1
+  git_worktree show-ref --verify --quiet "refs/heads/$branch" || return 1
+  ahead="$(git_worktree rev-list --count "$base..$branch" 2>/dev/null || printf '0\n')"
+  [[ "$ahead" == <-> ]] || ahead=0
+  (( ahead > 0 )) || return 2
+  if ! git_worktree merge-tree --write-tree "$base" "$branch" >/dev/null 2>&1; then
+    printf 'merging %s into %s conflicts; it was left on its branch\n' "$branch" "$base" \
+      > "$section_dir/merge_blocked.txt"
+    return 1
+  fi
+  if ! git_worktree merge --no-ff --no-edit \
+      -m "merge($worktree_key): accepted rescue work" "$branch" >/dev/null 2>&1; then
+    git_worktree merge --abort >/dev/null 2>&1 || true
+    printf 'the main working tree has changes %s would overwrite; nothing merged\n' "$branch" \
+      > "$section_dir/merge_blocked.txt"
+    return 1
+  fi
+  return 0
 }
 
 do_abandon() {
@@ -1367,6 +1520,7 @@ do_abandon() {
   } > "$escalation_dir/abandon_handoff.md"
   cmd_section_handoff "$(basename "$section_dir")" cancelled "$summary" \
     --file "$escalation_dir/abandon_handoff.md" >/dev/null
+  remove_section_worktree "$(basename "$section_dir")"
   printf 'abandon -> section cancelled\n'
 }
 
@@ -1412,6 +1566,10 @@ $report"
 
   cmd_section_handoff "$section_key" done \
     "Section completed and validated across $newest cycle(s)" --file "$handoff" >/dev/null
+  # The section is finished, so its checkout is dead weight. The branch stays:
+  # it is the history of how the section got there, and removing a worktree
+  # never removes work.
+  remove_section_worktree "$section_key"
   printf 'complete -> section done\n'
 }
 
@@ -1455,13 +1613,265 @@ stamp_section_progress() {
     "$(latest_cycle "$section_dir")" "$action" > "$section_dir/summary.txt"
 }
 
+# --- section worktrees -----------------------------------------------------
+#
+# Sections owning disjoint paths is an honour system. It holds only while every
+# role obeys its brief, it cannot survive two sections touching the same file,
+# and it cannot run two sections at once with any confidence. A git worktree per
+# section makes the isolation structural instead of contractual.
+#
+# It is also what makes it safe for pm-flow to work on its own machinery. A
+# developer rewriting driver.zsh while driver.zsh is executing the run is a live
+# hazard; inside a worktree that developer is rewriting a different copy, and
+# the change reaches the running engine only when a human merges the branch.
+#
+# Orchestration state does not move. The cycle directory, the section state and
+# the handoff stay in the main tree, because the product officer and the next
+# fresh process read them there. Only the code work moves: the dispatch runs
+# with the worktree as its working root, and the cycle directory is granted
+# alongside it so the role can still read its assignment and write its heartbeat.
+
+DISPATCH_WORK_ROOT=""
+DISPATCH_EXTRA_DIRS=()
+
+worktree_isolation_enabled() {
+  [[ "$(config_setting isolation worktrees 1)" != "0" ]] || return 1
+  command -v git >/dev/null 2>&1 || return 1
+  # The answer is the output, not the exit status. `rev-parse
+  # --is-inside-work-tree` prints `false` and exits zero from inside a .git
+  # directory, so testing the status alone calls a bare directory a worktree.
+  [[ "$(git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]
+}
+
+# Under `.git`, not under the repository. A worktree inside the working tree
+# would be walked by every `find`, matched by every glob, and would need a
+# .gitignore entry in a file this flow does not own.
+worktrees_root() {
+  local common
+  common="$(git -C "$PROJECT_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [[ -n "$common" ]] || return 1
+  printf '%s/pm-flow/worktrees/%s\n' "${common%/}" "${PROJECT_KEY:-project}"
+}
+
+section_worktree_branch() {
+  printf 'pm-flow/%s/%s\n' "${PROJECT_KEY:-project}" "$1"
+}
+
+section_worktree_path() {
+  local root
+  root="$(worktrees_root)" || return 1
+  printf '%s/%s\n' "$root" "$1"
+}
+
+# The branch the driver merges into: whatever the main tree currently has
+# checked out. A detached HEAD has no branch to merge into, so isolation stays
+# on but the merge back is refused rather than guessed at.
+driver_base_branch() {
+  local branch
+  branch="$(git -C "$PROJECT_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null)" || return 1
+  [[ -n "$branch" ]] || return 1
+  printf '%s\n' "$branch"
+}
+
+git_worktree() {
+  git -C "$PROJECT_ROOT" "$@"
+}
+
+# Create the section's worktree, or hand back the one it already has. Prints the
+# path; prints nothing and fails if the worktree cannot be established, and the
+# caller then dispatches against the main tree exactly as it did before.
+ensure_section_worktree() {
+  local section_key="$1"
+  local tree_path branch
+  tree_path="$(section_worktree_path "$section_key")" || return 1
+  branch="$(section_worktree_branch "$section_key")"
+  # A worktree, not merely a directory that happens to sit where one belongs.
+  # These live under .git, where `rev-parse --is-inside-work-tree` answers for
+  # the repository rather than for the path, so the check is that this path is
+  # its own top level.
+  local existing
+  existing="$(git -C "$tree_path" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -e "$tree_path/.git" && -n "$existing" && "${existing:A}" == "${tree_path:A}" ]]; then
+    printf '%s\n' "$tree_path"
+    return 0
+  fi
+  # A directory that is not a worktree is a leftover from a killed run. Prune
+  # first: git refuses to add a worktree whose administrative record still
+  # exists, and that record outlives the directory.
+  rm -rf -- "$tree_path"
+  git_worktree worktree prune >/dev/null 2>&1 || true
+  mkdir -p -- "${tree_path:h}"
+  if git_worktree show-ref --verify --quiet "refs/heads/$branch"; then
+    git_worktree worktree add --force "$tree_path" "$branch" >/dev/null 2>&1 || return 1
+  else
+    git_worktree worktree add --force -b "$branch" "$tree_path" HEAD >/dev/null 2>&1 || return 1
+  fi
+  printf '%s\n' "$tree_path"
+}
+
+# Bring the section's branch up to the base before it is worked on again, so a
+# section is never rebuilding against a tree three merges old. Only a
+# fast-forward is taken: a real merge here could conflict, and a conflict in the
+# section's own worktree at the start of a cycle is a worse place to discover it
+# than at the merge back, where there is a manager to tell.
+sync_section_worktree() {
+  local tree_path="$1"
+  local base
+  base="$(driver_base_branch)" || return 0
+  git -C "$tree_path" merge --ff-only "$base" >/dev/null 2>&1 || true
+}
+
+# Everything the role changed, on the section's own branch. Returns 1 when there
+# was nothing to commit, which is the ordinary case for a cycle that only wrote
+# a report.
+commit_section_worktree() {
+  local tree_path="$1"
+  local message="$2"
+  git -C "$tree_path" add -A >/dev/null 2>&1 || return 1
+  if git -C "$tree_path" diff --cached --quiet 2>/dev/null; then
+    return 1
+  fi
+  git -C "$tree_path" \
+    -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
+    -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
+    commit --quiet --no-verify -m "$message" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+# Merge an accepted section back into the base branch.
+#
+# The conflict check runs first and touches nothing: `merge-tree --write-tree`
+# computes the merge in the object database and reports whether it is clean. A
+# merge attempted without it would leave conflict markers in the main working
+# tree, which is exactly the failure this section is forbidden to cause. On any
+# refusal the branch is left intact, the reason is written next to the section,
+# and the main tree is as it was.
+merge_section_worktree() {
+  local section_dir="$1"
+  local section_key tree_path branch base reason
+  section_key="$(basename "$section_dir")"
+  tree_path="$(section_worktree_path "$section_key")" || return 1
+  branch="$(section_worktree_branch "$section_key")"
+  rm -f "$section_dir/merge_blocked.txt"
+
+  if ! base="$(driver_base_branch)"; then
+    printf 'the main tree has a detached HEAD; %s stays on its branch\n' "$branch" \
+      > "$section_dir/merge_blocked.txt"
+    return 1
+  fi
+  if ! git_worktree show-ref --verify --quiet "refs/heads/$branch"; then
+    return 1
+  fi
+  # Nothing new on the branch is not a failure. A cycle that only produced a
+  # report has nothing to merge and must not be reported as blocked.
+  local ahead
+  ahead="$(git_worktree rev-list --count "$base..$branch" 2>/dev/null || printf '0\n')"
+  [[ "$ahead" == <-> ]] || ahead=0
+  (( ahead > 0 )) || return 2
+  if ! git_worktree merge-tree --write-tree "$base" "$branch" >/dev/null 2>&1; then
+    {
+      printf 'merging %s into %s conflicts, so nothing was merged and the main\n' "$branch" "$base"
+      printf 'working tree was not touched. Resolve it in the worktree:\n\n'
+      printf '  git -C %s merge %s\n\n' "$tree_path" "$base"
+      printf 'then let the next accepted cycle merge it back.\n'
+    } > "$section_dir/merge_blocked.txt"
+    return 1
+  fi
+  if ! git_worktree merge --no-ff --no-edit \
+      -m "merge($section_key): accepted work from $branch" "$branch" >/dev/null 2>&1; then
+    # merge-tree said it was clean, so this is a local-changes refusal: git
+    # stops before writing anything rather than overwrite an edit in progress.
+    git_worktree merge --abort >/dev/null 2>&1 || true
+    {
+      printf 'the main working tree has changes that %s would overwrite, so\n' "$branch"
+      printf 'nothing was merged. Commit or stash them and the next accepted\n'
+      printf 'cycle will merge the section back.\n'
+    } > "$section_dir/merge_blocked.txt"
+    return 1
+  fi
+  return 0
+}
+
+remove_section_worktree() {
+  local section_key="$1"
+  local tree_path
+  tree_path="$(section_worktree_path "$section_key")" || return 0
+  [[ -d "$tree_path" ]] || return 0
+  git_worktree worktree remove --force "$tree_path" >/dev/null 2>&1 || rm -rf -- "$tree_path"
+  git_worktree worktree prune >/dev/null 2>&1 || true
+}
+
+# A killed run leaves worktrees behind, and git refuses to reuse a path whose
+# administrative record survived the directory. Pruning at the start of every
+# run means the next one never inherits that. Worktrees for sections that no
+# longer exist go with it; their branches stay, so no work is destroyed.
+prune_section_worktrees() {
+  worktree_isolation_enabled || return 0
+  local root entry key
+  git_worktree worktree prune >/dev/null 2>&1 || true
+  root="$(worktrees_root)" || return 0
+  [[ -d "$root" ]] || return 0
+  for entry in "$root"/*(/N); do
+    key="$(basename "$entry")"
+    [[ -d "$SECTIONS_DIR/$key" ]] && continue
+    remove_section_worktree "$key"
+  done
+}
+
+# The workspace a section's dispatches run in, and the directories they are
+# granted. Sets DISPATCH_WORK_ROOT and DISPATCH_EXTRA_DIRS for dispatch_role,
+# and CONTEXT_PATH_STYLE so the prompt names files by a path that resolves from
+# there. Leaves all three at their defaults when isolation is off or the
+# worktree could not be established, which is how a non-git project keeps
+# working unchanged.
+begin_worktree_dispatch() {
+  local section_key="$1"
+  shift
+  DISPATCH_WORK_ROOT=""
+  DISPATCH_EXTRA_DIRS=()
+  CONTEXT_PATH_STYLE="relative"
+  worktree_isolation_enabled || return 0
+  # Never `local path`: zsh ties that name to PATH, and declaring it local
+  # empties PATH for the rest of the function, so the very git this needs stops
+  # being on it. It cost an afternoon once.
+  local tree_path
+  tree_path="$(ensure_section_worktree "$section_key")" || return 0
+  [[ -n "$tree_path" ]] || return 0
+  sync_section_worktree "$tree_path"
+  DISPATCH_WORK_ROOT="$tree_path"
+  DISPATCH_EXTRA_DIRS=("$@")
+  CONTEXT_PATH_STYLE="absolute"
+  return 0
+}
+
+end_worktree_dispatch() {
+  DISPATCH_WORK_ROOT=""
+  DISPATCH_EXTRA_DIRS=()
+  CONTEXT_PATH_STYLE="relative"
+}
+
+# The tree a section's dispatches actually change. With isolation on that is the
+# section's worktree, and watching the main tree instead would report every
+# dispatch as having changed nothing.
+section_tree_root() {
+  local section_key="$1"
+  local tree_path
+  if worktree_isolation_enabled && tree_path="$(section_worktree_path "$section_key")" \
+      && [[ -d "$tree_path" ]]; then
+    printf '%s\n' "$tree_path"
+    return 0
+  fi
+  printf '%s\n' "$PROJECT_ROOT"
+}
+
 # The repository as the dispatch found it, so a failed dispatch's leftovers can
 # be named rather than silently inherited by the next one.
 snapshot_worktree() {
   local target="$1"
+  local tree="${2:-$PROJECT_ROOT}"
   {
-    printf 'head %s\n' "$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown\n')"
-    git -C "$PROJECT_ROOT" status --porcelain 2>/dev/null || true
+    printf 'head %s\n' "$(git -C "$tree" rev-parse HEAD 2>/dev/null || printf 'unknown\n')"
+    git -C "$tree" status --porcelain 2>/dev/null || true
   } > "$target"
 }
 
@@ -1470,7 +1880,7 @@ report_orphaned_worktree() {
   local before="$section_dir/.pre_dispatch.txt"
   local after="$section_dir/.post_dispatch.txt"
   [[ -f "$before" ]] || return 0
-  snapshot_worktree "$after"
+  snapshot_worktree "$after" "$(section_tree_root "$(basename "$section_dir")")"
   if ! diff -q "$before" "$after" >/dev/null 2>&1; then
     {
       printf '# Uncommitted changes left by a failed dispatch\n\n'
@@ -1509,7 +1919,8 @@ perform_action() {
   local action_status=0
   DISPATCH_SECTION_KEY="$(basename "$section_dir")"
   stamp_section_progress "$section_dir" "$action"
-  snapshot_worktree "$section_dir/.pre_dispatch.txt"
+  snapshot_worktree "$section_dir/.pre_dispatch.txt" \
+    "$(section_tree_root "$(basename "$section_dir")")"
   # The transition runs in its own subshell on purpose. Everything below it
   # reports a fatal condition through `fail`, which calls `exit`; without the
   # subshell that exit tears down the caller too and the quarantine below is
@@ -1628,6 +2039,7 @@ cmd_tick() {
   local requested_section="${SECTION_OVERRIDE:-}"
   local section_dir action
   acquire_driver_lock
+  prune_section_worktrees
   if [[ -n "$requested_section" ]]; then
     section_dir="$(resolve_section_dir "$requested_section")"
     action="$(section_next_action "$section_dir")"
@@ -1698,6 +2110,10 @@ cmd_run() {
   done
 
   acquire_driver_lock
+  # A killed run leaves worktrees whose administrative record outlives the
+  # directory, and git then refuses to reuse the path. Clearing that once per
+  # run is what keeps a crash from blocking the next one.
+  prune_section_worktrees
   local tick=0 section_dir action quarantined deadlocked project_action
   while (( tick < max_ticks )); do
     if [[ -n "${SECTION_OVERRIDE:-}" ]]; then

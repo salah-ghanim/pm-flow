@@ -9,6 +9,18 @@
 # Usage:
 #   agent_exec.sh <role> --prompt-file <file> --output <response.json>
 #                 [--heartbeat <file>] [--label <text>] [--dry-run]
+#                 [--work-root <dir>] [--extra-dir <dir>]...
+#
+# --work-root moves the workspace without moving the installation. The role runs
+# with that directory as its repository - it is the cwd, the granted root, and
+# the sandbox boundary - while config.json, the personas and the task files
+# still come from this script's own directory. That is what lets a section run
+# in its own git worktree: the developer edits the worktree's copy of the engine
+# rather than the copy this process is executing.
+#
+# --extra-dir grants one more directory alongside the work root, repeatably. A
+# role isolated in a worktree still has to read the assignment and write the
+# heartbeat that live with the run records, and those are outside it.
 #
 # Exit status:
 #   0  the role produced a response
@@ -30,8 +42,11 @@ usage() {
 Usage:
   agent_exec.sh <role> --prompt-file <file> --output <response.json>
                 [--heartbeat <file>] [--label <text>] [--dry-run]
+                [--work-root <dir>] [--extra-dir <dir>]...
 
 Roles are defined in .agentic/pm_flow/config.json. Each call is a fresh process.
+--work-root runs the role against a different working tree; --extra-dir grants
+one more directory alongside it.
 EOF
 }
 
@@ -46,9 +61,13 @@ HEARTBEAT_FILE=""
 LABEL="$ROLE"
 DRY_RUN="0"
 SEAT="1"
+WORK_ROOT=""
+EXTRA_DIRS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --seat)        SEAT="${2:-}"; [[ "$SEAT" == <-> ]] || fail "--seat requires a positive integer"; shift 2 ;;
+    --work-root)   WORK_ROOT="${2:-}"; [[ -n "$WORK_ROOT" ]] || fail "--work-root requires a value"; shift 2 ;;
+    --extra-dir)   [[ -n "${2:-}" ]] || fail "--extra-dir requires a value"; EXTRA_DIRS+=("$2"); shift 2 ;;
     --prompt-file) PROMPT_FILE="${2:-}"; [[ -n "$PROMPT_FILE" ]] || fail "--prompt-file requires a value"; shift 2 ;;
     --output)      OUTPUT_FILE="${2:-}"; [[ -n "$OUTPUT_FILE" ]] || fail "--output requires a value"; shift 2 ;;
     --heartbeat)   HEARTBEAT_FILE="${2:-}"; [[ -n "$HEARTBEAT_FILE" ]] || fail "--heartbeat requires a value"; shift 2 ;;
@@ -63,6 +82,18 @@ done
 [[ -n "$OUTPUT_FILE" ]] || fail "--output is required"
 [[ -f "$CONFIG_FILE" ]] || fail "missing agent config: $CONFIG_FILE"
 command -v python3 >/dev/null 2>&1 || fail "python3 not found in PATH"
+
+# Everything below reads PROJECT_ROOT as "the repository this role is working
+# in", so the override lands here, once, rather than at each of the dozen
+# places that would otherwise have to know about it. SCRIPT_DIR is untouched:
+# the installation stays where it is even when the workspace moves.
+if [[ -n "$WORK_ROOT" ]]; then
+  [[ -d "$WORK_ROOT" ]] || fail "--work-root is not a directory: $WORK_ROOT"
+  PROJECT_ROOT="$(cd -P -- "$WORK_ROOT" && pwd -P)"
+fi
+for extra_dir in "${EXTRA_DIRS[@]}"; do
+  [[ -d "$extra_dir" ]] || fail "--extra-dir is not a directory: $extra_dir"
+done
 
 # Roles are dispatched directly rather than through net_exec.sh, so honour the
 # same repo-local environment hook here.
@@ -400,16 +431,20 @@ codex_effort() {
 # ones this tier exists to refuse.
 write_scoped_settings() {
   local settings_path="$1"
-  python3 - "$settings_path" "$SCOPED_POLICY" <<'PY'
+  # An --extra-dir is granted to a scoped role the same way it is to a writing
+  # one. A manager isolated in a worktree still has to write its own cycle
+  # records, and those live with the run, not with the code.
+  python3 - "$settings_path" "$SCOPED_POLICY" "${EXTRA_DIRS[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-settings_path, policy_json = sys.argv[1:]
+settings_path, policy_json = sys.argv[1:3]
+extra_dirs = sys.argv[3:]
 policy = json.loads(policy_json)
 
 allow = []
-for root in policy.get("roots", []):
+for root in list(policy.get("roots", [])) + extra_dirs:
     # A leading `//` is how a claude permission rule spells an absolute path.
     pattern = "//" + str(root).lstrip("/").rstrip("/") + "/**"
     for tool in ("Edit", "Write", "NotebookEdit"):
@@ -436,6 +471,9 @@ build_command() {
   case "$AGENT_CLI" in
     claude)
       AGENT_ARGV=(claude -p --output-format json --effort "$AGENT_DIFFICULTY" --add-dir "$PROJECT_ROOT")
+      for extra_dir in "${EXTRA_DIRS[@]}"; do
+        AGENT_ARGV+=(--add-dir "$extra_dir")
+      done
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(--model "$AGENT_MODEL")
       case "$AGENT_ACCESS" in
         write)
@@ -471,6 +509,9 @@ build_command() {
       AGENT_ARGV+=(-- "$(/bin/cat "$PROMPT_FILE")")
       ;;
     codex)
+      # codex takes a single working root and offers no second grant, so an
+      # --extra-dir is a prompt-level boundary here rather than an enforced one,
+      # exactly as its scoped access tier already is.
       AGENT_ARGV=(codex exec --ephemeral --cd "$PROJECT_ROOT"
                   -c "model_reasoning_effort=$(codex_effort "$AGENT_DIFFICULTY")"
                   -o "$RAW_OUTPUT")
@@ -491,6 +532,9 @@ build_command() {
       AGENT_ARGV=(copilot -p "$(/bin/cat "$PROMPT_FILE")"
                   --effort "$AGENT_DIFFICULTY" --add-dir "$PROJECT_ROOT"
                   --no-custom-instructions --no-ask-user --silent --stream off)
+      for extra_dir in "${EXTRA_DIRS[@]}"; do
+        AGENT_ARGV+=(--add-dir "$extra_dir")
+      done
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(--model "$AGENT_MODEL")
       case "$AGENT_ACCESS" in
         # Same limitation as codex: the boundary is stated in the prompt only.

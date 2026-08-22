@@ -76,6 +76,44 @@ enforce the tier if that difference matters to you.
 Add extra writable roots with `access.scoped_write_paths` and extra shell
 prefixes with `access.scoped_bash`.
 
+## Isolation
+
+Every section gets its own git worktree, and its dispatches run there rather
+than in the repository you are sitting in. Sections owning disjoint paths is an
+honour system: it holds only while every role obeys its brief, and it cannot
+survive two sections editing the same file. A worktree makes the separation
+structural.
+
+It is also what makes it safe for the flow to work on its own machinery. A
+developer rewriting `driver.zsh` while `driver.zsh` is executing the run is a
+live hazard; inside a worktree that developer is editing a different copy, and
+the change reaches the running engine only when the branch is merged.
+
+- Worktrees live under `.git/pm-flow/worktrees/<project>/<section>`, so they are
+  outside the working tree and need no `.gitignore` entry of their own.
+- The branch is `pm-flow/<project>/<section>`.
+- An accepted cycle is committed on that branch and merged back into whatever
+  branch the main tree has checked out. The merge is tested with `merge-tree`
+  first, so a conflict leaves the main working tree untouched and writes
+  `merge_blocked.txt` next to the section instead.
+- A rejected cycle merges nothing. Its work stays on the branch, and the next
+  cycle continues from it.
+- Parallel rescue gives each path its own worktree, because the paths are meant
+  to be independent attempts at the same problem. When several deliver, they are
+  *not* merged together — the branches are named in `rescue_branches.txt` and
+  the choice is yours.
+- Finishing or abandoning a section removes its worktree and keeps its branch.
+- Orphaned worktrees from a killed run are pruned at the start of every run.
+
+Orchestration state does not move: the cycle records, `state.md` and `handoff.md`
+stay in the main tree, because that is where the next fresh process reads them.
+The dispatch is given its cycle directory as an explicit grant alongside the
+worktree.
+
+Set `isolation.worktrees` to `false` to turn this off. It is off automatically
+when the project is not a git repository, and the flow then behaves exactly as
+it did before worktrees existed.
+
 ## Personas
 
 Each role is specialised for the project's domain, set at install with

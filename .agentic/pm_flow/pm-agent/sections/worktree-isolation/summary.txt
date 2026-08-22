@@ -1,1 +1,1 @@
-Section created; its PM sub-agent has not been launched yet.
+Each section dispatches in its own git worktree; accepted work merges back, rejected work never reaches the main tree.
