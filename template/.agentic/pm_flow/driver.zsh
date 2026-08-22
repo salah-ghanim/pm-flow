@@ -1765,6 +1765,10 @@ $report"
   # it is the history of how the section got there, and removing a worktree
   # never removes work.
   remove_section_worktree "$section_key"
+  # Completion is a result too. The accept path commits section state and this
+  # one did not, so the final handoff - the one the whole project reads - was
+  # the only record left uncommitted.
+  with_repo_git_lock commit_section_state "$section_dir" "$section_key" "$newest"
   printf 'complete -> section done\n'
 }
 

@@ -1,55 +1,33 @@
-# codex-usage handoff
-
 ## Outcome
 
-Cycle 002 is technically validated but not accepted. Codex dispatch behavior
-meets every assigned criterion, but the manager could not create the mandatory
-commit because the managed sandbox denied Git object and ref writes.
+Codex dispatches now retain their JSONL event stream for token accounting, count event-file activity as liveness, propagate `TRACEPARENT`, and keep event content out of failure classification. The change is committed in `07848d3`, integrated into `main`, and the full nine-group suite passed.
 
 ## Decisions
 
-- Preserve the current owned-path diff; do not send it through another
-  implementation cycle.
-- Keep `events_seen` in the function-level local declaration because a repeated
-  loop-local declaration prints its value in zsh.
-- Keep `unsetopt BG_NICE` at supervisor startup. This prevents zsh's background
-  `nice(2)` attempt rather than hiding the resulting warning.
-- Retry the review commit only in a context with writable Git metadata.
+- Run Codex as `exec --json` and store stdout separately from diagnostics.
+- Declare `events_seen` once at function scope; redeclaring it in the zsh poll loop leaked values onto supervisor stdout.
+- Disable zsh `BG_NICE` at startup, preventing the background `nice(2)` call and its sandbox warning rather than filtering stderr.
+- Reuse `telemetry.py usage_from_codex_events`; no second token parser was introduced.
 
 ## Interfaces
 
-- Codex stdout is `<response-without-.json>.events.jsonl`.
-- Codex stderr remains the attempt log and the only classifier input.
-- The final response is read from the path supplied to Codex with `-o`.
-- `TRACEPARENT` reaches the child unchanged.
-- `telemetry.py usage_from_codex_events` consumes the retained JSONL and
-  recovers input, cached-input, output, reasoning, and total token counts.
-
-## Evidence
-
-- Independent direct probe: exit 0, including exact four-record supervisor
-  stdout and empty successful supervisor stderr.
-- Independent clean suite: exit 0 with all nine PASS groups.
-- Disposable `events_seen` mutation: exit 1 on stdout leakage.
-- Disposable `BG_NICE` mutation: exit 1 on the managed-sandbox niceness warning.
-- `git merge --ff-only main` failed creating `ORIG_HEAD.lock`; direct Git object
-  writes failed with `unable to create temporary file: Operation not permitted`.
+- A Codex response at `<name>.json` has an event stream at `<name>.events.jsonl`; telemetry consumers depend on that adjacency and JSONL format.
+- Codex stdout goes only to the events file. Codex stderr remains the attempt log and sole input to `classify_failure`.
+- The final response remains the file supplied through Codex `-o`.
+- The dispatched process inherits the caller's exact `TRACEPARENT`.
+- Supervisor stdout remains exactly `role`, `cli`, `response`, and `attempts` records; callers may parse that contract.
 
 ## Risks
 
-- The validated source diff is currently staged because `git add` could reuse
-  its existing blob, while both attempts to restore the index were denied when
-  creating `index.lock`. The file content itself is unchanged.
-- The focused acceptance probe is temporary rather than a tracked repository
-  test because this section owns only `agent_exec.sh`; the tracked suite passed.
+- Codex CLI event schemas or `--json`/`-o` behavior may change; a real dispatch producing missing token totals, malformed/empty JSONL, or no final response would reveal it.
+- Event liveness was tested with a short synthetic cadence; a real long-running dispatch could still stall if Codex stops emitting events beyond the configured threshold.
+- The focused probes are temporary, not tracked regression tests. Future stdout leakage, re-enabled `BG_NICE`, or classifier contamination would be revealed by rerunning equivalent probes or adding permanent coverage.
 
 ## What is unproven
 
-- No product behavior remains unproven. Only the required durable Git commit is
-  missing.
+- No real Codex CLI or service was contacted. `exec --json`, `-o`, event capture, token recovery, and trace propagation were demonstrated with a fake executable. One real authenticated dispatch, verifying argv-compatible execution, a non-empty adjacent event file, parsed totals, final response, and observed trace context would settle this.
+- Liveness was demonstrated once with four seconds of synthetic once-per-second JSONL against a two-second threshold, not with a production-length Codex run. A real run exceeding its stall threshold while only the event stream changes would settle this.
 
 ## Next action
 
-- Re-run the manager commit with Git metadata write permission, committing only
-  `template/.agentic/pm_flow/agent_exec.sh`, this `state.md`, and this
-  `handoff.md`, then integrate the section branch.
+The product officer can treat `codex-usage` as complete and allow downstream telemetry and dispatch work to depend on the interfaces above. Add a real-Codex smoke check when credentials and an execution environment are available; reopen this section only if that check contradicts the validated contract.
