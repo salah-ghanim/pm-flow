@@ -964,6 +964,46 @@ project_idle_tick="$("$SCHED_PM" tick)"
 assert_contains "$project_idle_tick" "idle=project" "automatic tick ignores a blocked section"
 [[ ! -d "$SCHED_BLOCKED/cycles" ]] || fail "a blocked section was dispatched"
 
+# --- access observation ------------------------------------------------------
+#
+# The access tiers say what a role may touch. On codex the scoped tier bounds
+# writes and not reads, and on claude the write tier grants bare Bash, which is
+# unrestricted read by construction. Both are documented; neither was ever
+# measured. The hook is what measures it, so it is asserted rather than assumed
+# - the first version logged one empty record per tool call and looked fine,
+# because `python3 - <<'PY'` had already eaten the payload off stdin.
+ACCESS_HOOK="$FIXTURE_REPO/.agentic/pm_flow/access_hook.sh"
+[[ -x "$ACCESS_HOOK" ]] || fail "the access hook was installed without the execute bit"
+ACCESS_LOG="$TEST_ROOT/access-probe.jsonl"
+access_probe() {
+  printf '%s' "$1" | PM_FLOW_ACCESS_LOG="$ACCESS_LOG" PM_FLOW_ACCESS_ROLE=developer \
+    PM_FLOW_ACCESS_LABEL="develop widget 001" PM_FLOW_REPO_ROOT="$FIXTURE_REPO" \
+    PM_FLOW_ACCESS_WORK_ROOT="$FIXTURE_REPO" "$ACCESS_HOOK"
+}
+access_probe '{"tool_name":"Read","tool_input":{"file_path":"/etc/passwd"}}' \
+  || fail "the access hook exited non-zero; it must never break a dispatch"
+access_probe "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$FIXTURE_REPO/README.md\"}}"
+access_probe '{"tool_name":"Bash","tool_input":{"command":"cat ~/.ssh/config"}}'
+access_probe 'not json at all'
+
+access_records="$(/bin/cat "$ACCESS_LOG")"
+assert_contains "$access_records" '"tool": "Read"' "the hook records which tool was used"
+assert_contains "$access_records" '"path": "/etc/passwd", "outside": true' \
+  "a read outside the repository is recorded as outside"
+assert_contains "$access_records" "$FIXTURE_REPO/README.md\", \"outside\": false" \
+  "a read inside the repository is not flagged"
+assert_contains "$access_records" '"command": "cat ~/.ssh/config"' \
+  "a shell command is recorded verbatim, not merely counted"
+# Four probes, four records: the malformed one is still logged rather than
+# dropped, because a payload the hook could not read is itself worth knowing.
+access_line_count="$(/usr/bin/wc -l < "$ACCESS_LOG" | tr -d '[:space:]')"
+[[ "$access_line_count" == 4 ]] || \
+  fail "expected 4 access records, got $access_line_count"
+assert_not_contains "$access_records" '"targets": [], "outside": false, "command"' \
+  "a shell command with paths in it does not record an empty target list"
+
+printf 'PASS: per-dispatch access observation\n'
+
 printf 'PASS: dependency scheduling and blocked sections\n'
 
 reset_driver_section

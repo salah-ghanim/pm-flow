@@ -384,6 +384,105 @@ cmd_cost() {
   python3 "$SCRIPT_DIR/cost.py" report "$PROJECT_DIR" "$(cost_ledger_file)"
 }
 
+# What the roles actually reached for.
+#
+# The access tiers describe what a role is *allowed* to touch, and on two of the
+# three backends that description is a promise rather than an enforcement: codex
+# bounds writes and not reads, and claude's write tier grants bare Bash, which
+# is unrestricted read by construction. Both facts are in the README. Neither
+# was ever measured. This reads the per-dispatch access logs and says what
+# happened, so the question is settled by evidence rather than by reasoning
+# about flags.
+cmd_access() {
+  local show_all=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all) show_all=1 ;;
+      *) fail "unknown access argument: $1" ;;
+    esac
+    shift || true
+  done
+  python3 - "$RUNS_DIR" "$SECTIONS_DIR" "$PROJECT_ROOT" "$show_all" <<'PY_ACCESS'
+import json
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+runs_dir, sections_dir, repo_root, show_all = sys.argv[1:5]
+show_all = show_all == "1"
+
+logs = []
+for base in (Path(runs_dir), Path(sections_dir)):
+    if base.is_dir():
+        logs.extend(sorted(base.rglob("*.access.jsonl")))
+
+if not logs:
+    print("No access records yet. They are written beside each dispatch response")
+    print("as `<response>.access.jsonl`, from the next dispatch onwards.")
+    raise SystemExit(0)
+
+by_role = defaultdict(lambda: {"calls": 0, "outside": 0, "tools": Counter()})
+outside_paths = Counter()
+outside_examples = {}
+total = 0
+partial_roles = set()
+
+for log in logs:
+    for line in log.read_text(errors="replace").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        total += 1
+        role = record.get("role") or "unknown"
+        entry = by_role[role]
+        entry["calls"] += 1
+        entry["tools"][record.get("tool") or "?"] += 1
+        if record.get("source") == "codex-events":
+            partial_roles.add(role)
+        if record.get("outside"):
+            entry["outside"] += 1
+            for target in record.get("targets") or []:
+                if not target.get("outside"):
+                    continue
+                path = target.get("path") or "?"
+                # Grouped by the directory two levels up, so a hundred reads of
+                # one tree read as one fact rather than a hundred.
+                parts = Path(path).parts
+                key = str(Path(*parts[:4])) if len(parts) > 4 else path
+                outside_paths[key] += 1
+                outside_examples.setdefault(key, path)
+
+print(f"{total} recorded tool call(s) across {len(logs)} dispatch(es)\n")
+print(f"{'ROLE':<18}{'CALLS':>8}{'OUTSIDE':>9}   TOP TOOLS")
+for role in sorted(by_role):
+    entry = by_role[role]
+    tools = ", ".join(f"{name} {count}" for name, count in entry["tools"].most_common(3))
+    mark = " *" if role in partial_roles else ""
+    print(f"{role + mark:<18}{entry['calls']:>8}{entry['outside']:>9}   {tools}")
+
+if partial_roles:
+    print("\n* reconstructed from codex's event stream after the dispatch, not")
+    print("  observed as it happened. Shell commands only; direct file reads by")
+    print("  the model are not in that stream, so this is a floor, not a total.")
+
+if outside_paths:
+    print(f"\nReached outside {repo_root}:\n")
+    limit = None if show_all else 15
+    for key, count in outside_paths.most_common(limit):
+        print(f"  {count:>5}  {key}")
+        if key != outside_examples[key]:
+            print(f"         e.g. {outside_examples[key]}")
+    if limit and len(outside_paths) > limit:
+        print(f"\n  ... and {len(outside_paths) - limit} more; pass --all to see them.")
+else:
+    print(f"\nNothing recorded outside {repo_root}.")
+PY_ACCESS
+}
+
 config_number() {
   python3 - "$AGENT_CONFIG_FILE" "$1" "$2" "$3" <<'PY'
 import json

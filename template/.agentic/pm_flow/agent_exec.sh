@@ -99,6 +99,14 @@ done
 # same repo-local environment hook here.
 export PROJECT_ROOT
 export PM_FLOW_ROOT="$SCRIPT_DIR"
+# What the observation hook needs, and what a codex event scan is labelled with.
+# The log sits beside the response so it is kept with the run record rather than
+# in a temp directory that is gone by the time anyone asks the question.
+export PM_FLOW_ACCESS_LOG="${PM_FLOW_ACCESS_LOG:-${OUTPUT_FILE%.json}.access.jsonl}"
+export PM_FLOW_ACCESS_ROLE="$ROLE"
+export PM_FLOW_ACCESS_LABEL="$LABEL"
+export PM_FLOW_ACCESS_WORK_ROOT="$PROJECT_ROOT"
+[[ -n "${PM_FLOW_REPO_ROOT:-}" ]] || export PM_FLOW_REPO_ROOT="$PROJECT_ROOT"
 export PYTHONUTF8=1
 if [[ -d "$PROJECT_ROOT/.venv" && -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
   export VIRTUAL_ENV="$PROJECT_ROOT/.venv"
@@ -363,7 +371,12 @@ run_attempt() {
   local child last_activity heartbeat_seen output_seen log_seen now_epoch
   local started_at stall_budget
   if [[ "$AGENT_CLI" == "codex" ]]; then
-    ( cd "$PROJECT_ROOT" && exec python3 -c "$PGROUP_SHIM" "${AGENT_ARGV[@]}" ) > "$ATTEMPT_LOG" 2>&1 &
+    # stdout is the event stream and stderr is the diagnostics. They used to be
+    # merged, which meant classify_failure read the role's own narration: a
+    # dispatch that merely *discussed* a rate limit was classified as having
+    # hit one. Splitting them is what makes the event stream safe to capture.
+    ( cd "$PROJECT_ROOT" && exec python3 -c "$PGROUP_SHIM" "${AGENT_ARGV[@]}" ) \
+      > "$EVENTS_FILE" 2> "$ATTEMPT_LOG" &
   else
     ( cd "$PROJECT_ROOT" && exec python3 -c "$PGROUP_SHIM" "${AGENT_ARGV[@]}" ) > "$RAW_OUTPUT" 2> "$ATTEMPT_LOG" &
   fi
@@ -387,6 +400,12 @@ run_attempt() {
     # liveness signal a file the role was merely asked to append to.
     output_seen="$(file_mtime "$RAW_OUTPUT")"
     log_seen="$(file_mtime "$ATTEMPT_LOG")"
+    # On codex the response file is written once at the end and stderr may stay
+    # empty for minutes, so the event stream is the only thing that moves while
+    # the role is working.
+    local events_seen
+    events_seen="$(file_mtime "$EVENTS_FILE")"
+    (( events_seen <= log_seen )) || log_seen="$events_seen"
     heartbeat_seen=0
     [[ -z "$HEARTBEAT_FILE" ]] || heartbeat_seen="$(file_mtime "$HEARTBEAT_FILE")"
     last_activity=$(( output_seen > log_seen ? output_seen : log_seen ))
@@ -429,18 +448,39 @@ codex_effort() {
 # anything the list does not name is denied outright. `acceptEdits` is
 # deliberately not used here, because it would accept every edit including the
 # ones this tier exists to refuse.
+# A settings file every claude dispatch gets, whatever its access tier, because
+# the PreToolUse hook that records what a role reached for has to be installed
+# on all of them. The scoped tier layers its allow-list on top.
+write_access_settings() {
+  local settings_path="$1"
+  python3 - "$settings_path" "$SCRIPT_DIR/access_hook.sh" <<'PY_ACCESS'
+import json
+import sys
+from pathlib import Path
+
+settings_path, hook = sys.argv[1:3]
+Path(settings_path).write_text(json.dumps({
+    "hooks": {
+        "PreToolUse": [
+            {"matcher": "*", "hooks": [{"type": "command", "command": hook}]}
+        ]
+    },
+}, indent=2) + "\n")
+PY_ACCESS
+}
+
 write_scoped_settings() {
   local settings_path="$1"
   # An --extra-dir is granted to a scoped role the same way it is to a writing
   # one. A manager isolated in a worktree still has to write its own cycle
   # records, and those live with the run, not with the code.
-  python3 - "$settings_path" "$SCOPED_POLICY" "${EXTRA_DIRS[@]}" <<'PY'
+  python3 - "$settings_path" "$SCOPED_POLICY" "$SCRIPT_DIR/access_hook.sh" "${EXTRA_DIRS[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-settings_path, policy_json = sys.argv[1:3]
-extra_dirs = sys.argv[3:]
+settings_path, policy_json, hook = sys.argv[1:4]
+extra_dirs = sys.argv[4:]
 policy = json.loads(policy_json)
 
 allow = []
@@ -462,6 +502,13 @@ for entry in policy.get("deny", []):
 
 Path(settings_path).write_text(json.dumps({
     "permissions": {"defaultMode": "default", "allow": allow, "deny": deny},
+    # The scoped tier isolates settings sources, so the observation hook has to
+    # be carried in here or it is stripped along with everything else.
+    "hooks": {
+        "PreToolUse": [
+            {"matcher": "*", "hooks": [{"type": "command", "command": hook}]}
+        ]
+    },
 }, indent=2) + "\n")
 PY
 }
@@ -475,6 +522,15 @@ build_command() {
         AGENT_ARGV+=(--add-dir "$extra_dir")
       done
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(--model "$AGENT_MODEL")
+      # Installed for every tier, so the read boundary is observed on the roles
+      # that have the widest one. The write tier grants bare Bash, which is
+      # unrestricted read by construction; that is exactly the tier worth
+      # watching.
+      if [[ "$AGENT_ACCESS" != "scoped" ]]; then
+        settings_path="$WORK_DIR/access_settings.json"
+        write_access_settings "$settings_path"
+        AGENT_ARGV+=(--settings "$settings_path")
+      fi
       case "$AGENT_ACCESS" in
         write)
           # acceptEdits auto-accepts file edits, not Bash. An unrecognised
@@ -512,7 +568,7 @@ build_command() {
       # codex takes a single working root and offers no second grant, so an
       # --extra-dir is a prompt-level boundary here rather than an enforced one,
       # exactly as its scoped access tier already is.
-      AGENT_ARGV=(codex exec --ephemeral --cd "$PROJECT_ROOT"
+      AGENT_ARGV=(codex exec --json --ephemeral --cd "$PROJECT_ROOT"
                   -c "model_reasoning_effort=$(codex_effort "$AGENT_DIFFICULTY")"
                   -o "$RAW_OUTPUT")
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(-m "$AGENT_MODEL")
@@ -666,6 +722,14 @@ cleanup_work_dir() {
 trap cleanup_work_dir EXIT HUP INT TERM
 
 RAW_OUTPUT="$WORK_DIR/raw.txt"
+# codex reports token usage nowhere the response envelope can reach, so the
+# driver has always looked for `<response>.events.jsonl` beside the response -
+# and nothing ever wrote it, because `--json` was never passed. Its token counts
+# have therefore been silently absent. The same stream is the only account of
+# what a codex role read, which is the other reason it is captured now.
+EVENTS_FILE="${OUTPUT_FILE%.json}.events.jsonl"
+mkdir -p "$(dirname "$EVENTS_FILE")"
+: > "$EVENTS_FILE"
 ATTEMPT_LOG="$WORK_DIR/attempt.log"
 : > "$RAW_OUTPUT"
 
@@ -699,6 +763,7 @@ failure_output="$ATTEMPT_LOG"
 while (( attempt <= MAX_ATTEMPTS )); do
   : > "$ATTEMPT_LOG"
   : > "$RAW_OUTPUT"
+  : > "$EVENTS_FILE"
   build_command
 
   attempt_status=0
@@ -812,6 +877,99 @@ os.replace(temp, path)
 PY
 else
   write_response "$RAW_OUTPUT" "0" "none" "$attempt"
+fi
+
+# codex has no hook mechanism, so its account of what it reached for is
+# reconstructed from the event stream after the fact rather than observed as it
+# happens. That is a weaker record than claude's and is marked as such in the
+# log, so an analysis never treats the two as equally complete.
+if [[ "$AGENT_CLI" == "codex" && -s "$EVENTS_FILE" ]]; then
+  python3 - "$EVENTS_FILE" "$PM_FLOW_ACCESS_LOG" "$ROLE" "$LABEL" \
+      "$PROJECT_ROOT" "${PM_FLOW_REPO_ROOT:-$PROJECT_ROOT}" <<'PY_CODEX_ACCESS' 2>/dev/null || true
+import json
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+events_path, log_path, role, label, work_root, repo_root = sys.argv[1:7]
+roots = [Path(p).resolve() for p in (work_root, repo_root) if p]
+
+
+def classify(raw):
+    if not raw:
+        return None
+    try:
+        resolved = Path(raw).expanduser()
+        if not resolved.is_absolute():
+            resolved = Path(work_root or ".") / resolved
+        resolved = Path(os.path.normpath(str(resolved)))
+    except (OSError, ValueError):
+        return None
+    for root in roots:
+        try:
+            resolved.relative_to(root)
+            return {"path": str(resolved), "outside": False}
+        except ValueError:
+            continue
+    return {"path": str(resolved), "outside": True}
+
+
+def commands(event):
+    """Every shell invocation this event describes, however it is nested."""
+    found = []
+    stack = [event]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "command":
+                    if isinstance(value, str):
+                        found.append(value)
+                    elif isinstance(value, list) and all(isinstance(v, str) for v in value):
+                        found.append(" ".join(value))
+                else:
+                    stack.append(value)
+        elif isinstance(node, list):
+            stack.extend(node)
+    return found
+
+
+records = []
+for line in Path(events_path).read_text(errors="replace").splitlines():
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        event = json.loads(line)
+    except ValueError:
+        continue
+    for command in commands(event):
+        targets = []
+        for token in re.findall(
+                r"(?:^|\s)(~?/[^\s;|&'\"()]+|\.{1,2}/[^\s;|&'\"()]+)", command):
+            hit = classify(token)
+            if hit and hit not in targets:
+                targets.append(hit)
+        records.append({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "role": role,
+            "label": label,
+            "tool": "Shell",
+            "source": "codex-events",
+            "targets": targets,
+            "outside": any(t["outside"] for t in targets),
+            "command": command[:600],
+        })
+
+if records:
+    path = Path(log_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+PY_CODEX_ACCESS
 fi
 
 if [[ -n "$HEARTBEAT_FILE" ]]; then
