@@ -79,6 +79,9 @@ Widget API.
 ## Risks
 None.
 
+## What is unproven
+None; every claim above was demonstrated.
+
 ## Next action
 Integrate." ;;
   *) emit "## Decision

@@ -120,6 +120,10 @@ alpha_output="$("$PM" init-section alpha <<'EOF'
 
 - Alpha implementation and its focused tests.
 
+## Priority
+
+- must-have: the product cannot ship without it
+
 ## Owned paths
 
 - `src/alpha/**`
@@ -146,6 +150,10 @@ beta_output="$("$PM" init-section beta <<'EOF'
 
 - Beta implementation and its focused tests.
 
+## Priority
+
+- must-have: the product cannot ship without it
+
 ## Owned paths
 
 - `src/beta/**`
@@ -171,8 +179,8 @@ beta_run="$(output_value "$beta_output" run_dir)"
 [[ "$alpha_run" != "$beta_run" ]] || fail "sections share a run"
 
 sections_output="$("$PM" list-sections)"
-assert_contains "$sections_output" "| alpha | planned |" "alpha registry row"
-assert_contains "$sections_output" "| beta | planned |" "beta registry row"
+assert_contains "$sections_output" "| alpha | must-have | planned |" "alpha registry row"
+assert_contains "$sections_output" "| beta | must-have | planned |" "beta registry row"
 assert_contains "$sections_output" "[handoff](../sections/alpha/handoff.md)" "registry handoff link"
 assert_file_contains "$PROJECT_DIR/sections/alpha/brief.md" "Implement alpha." "the brief is persisted"
 [[ ! -e "$PROJECT_DIR/sections/alpha/pm_prompt.md" ]] || \
@@ -194,6 +202,7 @@ assert_file_contains "$TEST_ROOT/expected-failure.log" "section Scope heading" "
 {
   printf '## Objective\n\n- Overlap alpha.\n\n'
   printf '## Scope\n\n- Nested alpha work.\n\n'
+  printf '## Priority\n\n- must-have: the product cannot ship without it\n\n'
   printf '## Owned paths\n\n- `src/alpha/internal/**`\n\n'
   printf '## Dependencies\n\n- None.\n\n'
   printf '## Acceptance\n\n- Tests pass.\n\n'
@@ -216,6 +225,7 @@ assert_file_contains "$TEST_ROOT/expected-failure.log" "owned paths overlap" "ow
   printf '## Decisions\n\n- Kept the bounded implementation.\n\n'
   printf '## Interfaces\n\n- Exposes the alpha interface.\n\n'
   printf '## Risks\n\n- None open.\n\n'
+  printf '## What is unproven\n\n- None; every claim above was demonstrated.\n\n'
   printf '## Next action\n\n- Integrate from the root coordinator.\n'
 } > "$TEST_ROOT/handoff.md"
 
@@ -226,11 +236,12 @@ assert_file_contains "$TEST_ROOT/expected-failure.log" "completion review" "done
 
 "$PM" section-handoff alpha active "Alpha under way" --file "$TEST_ROOT/handoff.md" > "$TEST_ROOT/handoff.out"
 sections_output="$("$PM" list-sections)"
-assert_contains "$sections_output" "| alpha | active | Alpha under way |" "a published handoff updates the registry"
+assert_contains "$sections_output" "| alpha | must-have | active | Alpha under way |" "a published handoff updates the registry"
 
 {
   printf '## Objective\n\n- Replace alpha ownership.\n\n'
   printf '## Scope\n\n- Follow-up alpha work.\n\n'
+  printf '## Priority\n\n- must-have: the product cannot ship without it\n\n'
   printf '## Owned paths\n\n- `src/alpha/**`\n\n'
   printf '## Dependencies\n\n- None.\n\n'
   printf '## Acceptance\n\n- Replacement tests pass.\n\n'
@@ -247,6 +258,7 @@ assert_file_contains "$TEST_ROOT/expected-failure.log" "owned paths overlap" "a 
   printf '\n\n## Decisions\n\n- None.\n\n'
   printf '## Interfaces\n\n- None.\n\n'
   printf '## Risks\n\n- None.\n\n'
+  printf '## What is unproven\n\n- None; every claim above was demonstrated.\n\n'
   printf '## Next action\n\n- None.\n'
 } > "$TEST_ROOT/oversized-handoff.md"
 expect_failure \
@@ -260,6 +272,7 @@ assert_file_contains "$TEST_ROOT/expected-failure.log" "500-word context budget"
   printf '\n\n## Decisions\n\n- None.\n\n'
   printf '## Interfaces\n\n- None.\n\n'
   printf '## Risks\n\n- None.\n\n'
+  printf '## What is unproven\n\n- None; every claim above was demonstrated.\n\n'
   printf '## Next action\n\n- None.\n'
 } > "$TEST_ROOT/oversized-byte-handoff.md"
 expect_failure \
@@ -328,6 +341,10 @@ MOVE_PM="$MOVE_SOURCE/agentic/pm_flow/pm_flow.sh"
 
 - Relocation fixture only.
 
+## Priority
+
+- must-have: the product cannot ship without it
+
 ## Owned paths
 
 - `src/mover/**`
@@ -346,7 +363,7 @@ MOVE_PM="$MOVE_SOURCE/agentic/pm_flow/pm_flow.sh"
 EOF
 mv "$MOVE_SOURCE" "$MOVE_DESTINATION"
 MOVED_PM="$MOVE_DESTINATION/agentic/pm_flow/pm_flow.sh"
-assert_contains "$("$MOVED_PM" list-sections)" "| mover | planned |" "moved install resolves persisted project key"
+assert_contains "$("$MOVED_PM" list-sections)" "| mover | must-have | planned |" "moved install resolves persisted project key"
 "$REPO_ROOT/install.sh" "$MOVE_DESTINATION" --name "Movable Project" > "$TEST_ROOT/move-reinstall.out"
 assert_file_contains "$MOVE_DESTINATION/agentic/pm_flow/.project-key" "move-source" "project key persists across rename"
 [[ ! -d "$MOVE_DESTINATION/agentic/pm_flow/move-destination" ]] || \
@@ -481,7 +498,12 @@ assert_contains "$developer_dry" "acceptEdits" "building roles get write access"
 rebind_role pm codex gpt-5.1-codex max
 pm_dry="$(dry_run_argv pm)"
 assert_contains "$pm_dry" "model_reasoning_effort=high" "codex collapses the top difficulty levels"
-assert_contains "$pm_dry" "sandbox read-only" "reviewing roles stay read-only"
+# `pm` is a scoped role, not a read-only one: codex cannot express a boundary
+# below its working root, so the tier degrades to workspace-write there.
+assert_contains "$pm_dry" "sandbox workspace-write" "scoped roles get a workspace on codex"
+
+rebind_role consultant codex gpt-5.1-codex high
+assert_contains "$(dry_run_argv consultant)" "sandbox read-only" "reviewing roles stay read-only"
 
 rebind_role consultant copilot claude-opus-4.6 xhigh
 consultant_dry="$(dry_run_argv consultant)"
@@ -516,7 +538,7 @@ rebind_role developer claude "" low
 stub_cli 'print -u2 "Error: invalid model specified"; exit 1'
 run_supervised
 [[ "$(response_field attempts)" == "1" ]] || fail "a fatal CLI error must not be retried"
-[[ "$(response_field failure_reason)" == "fatal" ]] || fail "fatal failure was misclassified"
+[[ "$(response_field failure_reason)" == "permanent" ]] || fail "permanent failure was misclassified"
 
 stub_cli 'print -u2 "fetch failed: ECONNRESET"; exit 1'
 run_supervised
@@ -567,7 +589,7 @@ assert_file_contains "$TEST_ROOT/heartbeat.txt" "network" \
 stub_cli "printf '{\"type\":\"result\",\"is_error\":true,\"result\":\"API Error: 400 invalid request shape\"}'
 exit 1"
 run_supervised
-[[ "$(response_field failure_reason)" == "fatal" ]] || \
+[[ "$(response_field failure_reason)" == "unknown" ]] || \
   fail "an unrecognized stdout error was misclassified"
 assert_contains "$(response_field result)" "invalid request shape" \
   "the retained failure detail comes from whichever stream carried it"
@@ -638,6 +660,10 @@ assert_contains "$("$ROLE_PM" config)" "consultant: seats=2" "panel restored for
 ## Scope
 
 - Signal generation only.
+
+## Priority
+
+- must-have: the product cannot ship without it
 
 ## Owned paths
 
@@ -750,6 +776,10 @@ PYCFG
 
 - The widget only.
 
+## Priority
+
+- must-have: the product cannot ship without it
+
 ## Owned paths
 
 - `src/widget/**`
@@ -821,6 +851,10 @@ init_schedule_section() {
 ## Scope
 
 - The bounded $name change only.
+
+## Priority
+
+- must-have: the product cannot ship without it
 
 ## Owned paths
 

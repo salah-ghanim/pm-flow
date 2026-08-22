@@ -10,7 +10,7 @@ TEMPLATE_CACHE_DIR=""
 # Named once, so prefetching and installing can never disagree about what the
 # template set contains.
 ROLE_NAMES=(cpo pm developer consultant 10x_developer)
-DOMAIN_NAMES=(generic saas prop-trading crypto-trading infrastructure migration)
+DOMAIN_NAMES=(generic saas prop-trading crypto-trading infrastructure migration distressed-tech)
 TASK_NAMES=(
   consultant_panel_adjudication
   convergence_review
@@ -19,9 +19,16 @@ TASK_NAMES=(
   section_review
   section_handoff
   section_rescue
+  section_analysis
   developer_assignment
   project_decomposition
 )
+
+# A domain may replace the personas, the task prompts and the contract outright
+# rather than only retitling roles, for work that does not resemble building a
+# product at all. Listed explicitly rather than probed for: a remote install
+# fetches by name and cannot ask a URL whether it exists.
+OVERLAY_DOMAINS=(distressed-tech)
 
 usage() {
   cat <<'EOF'
@@ -110,7 +117,10 @@ prefetch_templates() {
     "template/agentic/pm_flow/pm_flow.sh"
     "template/agentic/pm_flow/net_exec.sh"
     "template/agentic/pm_flow/agent_exec.sh"
+    "template/agentic/pm_flow/fetch.sh"
     "template/agentic/pm_flow/driver.zsh"
+    "template/agentic/pm_flow/cost.py"
+    "template/agentic/pm_flow/watch.py"
     "template/agentic/pm_flow/config.json"
     "template/agentic/pm_flow/local_env.sh.example"
     "template/agentic/pm_flow/projects.md"
@@ -132,6 +142,16 @@ prefetch_templates() {
   done
   for name in "${TASK_NAMES[@]}"; do
     template_paths+=("template/agentic/pm_flow/tasks/$name.md")
+  done
+  local overlay
+  for overlay in "${OVERLAY_DOMAINS[@]}"; do
+    template_paths+=("template/agentic/pm_flow/domains/$overlay/task_contract.md")
+    for name in "${ROLE_NAMES[@]}"; do
+      template_paths+=("template/agentic/pm_flow/domains/$overlay/roles/$name.md")
+    done
+    for name in "${TASK_NAMES[@]}"; do
+      template_paths+=("template/agentic/pm_flow/domains/$overlay/tasks/$name.md")
+    done
   done
 
   TEMPLATE_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-install.XXXXXX")"
@@ -441,7 +461,12 @@ main() {
   copy_template "template/agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
   copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
   copy_template "template/agentic/pm_flow/agent_exec.sh" "$flow_dir/agent_exec.sh"
+  copy_template "template/agentic/pm_flow/fetch.sh" "$flow_dir/fetch.sh"
   copy_template "template/agentic/pm_flow/driver.zsh" "$flow_dir/driver.zsh"
+  # driver.zsh calls cost.py on every dispatch and `status` reads it, so an
+  # install without it reports an error where the spend should be.
+  copy_template "template/agentic/pm_flow/cost.py" "$flow_dir/cost.py"
+  copy_template "template/agentic/pm_flow/watch.py" "$flow_dir/watch.py"
   local template_name
   for template_name in "${ROLE_NAMES[@]}"; do
     copy_template "template/agentic/pm_flow/roles/$template_name.md" "$flow_dir/roles/$template_name.md"
@@ -451,6 +476,19 @@ main() {
   done
   for template_name in "${TASK_NAMES[@]}"; do
     copy_template "template/agentic/pm_flow/tasks/$template_name.md" "$flow_dir/tasks/$template_name.md"
+  done
+  local overlay_domain
+  for overlay_domain in "${OVERLAY_DOMAINS[@]}"; do
+    for template_name in "${ROLE_NAMES[@]}"; do
+      copy_template \
+        "template/agentic/pm_flow/domains/$overlay_domain/roles/$template_name.md" \
+        "$flow_dir/domains/$overlay_domain/roles/$template_name.md"
+    done
+    for template_name in "${TASK_NAMES[@]}"; do
+      copy_template \
+        "template/agentic/pm_flow/domains/$overlay_domain/tasks/$template_name.md" \
+        "$flow_dir/domains/$overlay_domain/tasks/$template_name.md"
+    done
   done
   # config.json carries the operator's cli/model/difficulty choices, so a
   # reinstall must never overwrite it.
@@ -531,8 +569,27 @@ main() {
     mv "$project_dir/.project.json.tmp" "$project_dir/project.json"
   fi
 
+  # The contract is the project's rules, and a domain that replaces the roles
+  # replaces the rules with them. Read the effective domain back off disk: a
+  # reinstall without --domain keeps whatever the project recorded, and the
+  # contract has to follow the project rather than this invocation's default.
+  local effective_domain="$domain"
+  if [[ "$domain_explicit" != "1" && -f "$project_dir/project.json" ]]; then
+    local recorded_domain
+    recorded_domain="$(python3 -c 'import json,sys
+try:
+    print(json.load(open(sys.argv[1])).get("domain", "") or "")
+except Exception:
+    print("")' "$project_dir/project.json")"
+    [[ -z "$recorded_domain" ]] || effective_domain="$recorded_domain"
+  fi
+  local contract_template="template/agentic/pm_flow/project/task_contract.md"
+  if (( ${OVERLAY_DOMAINS[(Ie)$effective_domain]} )); then
+    contract_template="template/agentic/pm_flow/domains/$effective_domain/task_contract.md"
+  fi
+
   render_template \
-    "template/agentic/pm_flow/project/task_contract.md" \
+    "$contract_template" \
     "$project_dir/task_contract.md" \
     "$project_name" \
     "$abs_target" \
@@ -569,6 +626,8 @@ main() {
   chmod +x "$flow_dir/pm_flow.sh"
   chmod +x "$flow_dir/net_exec.sh"
   chmod +x "$flow_dir/agent_exec.sh"
+  chmod +x "$flow_dir/fetch.sh"
+  chmod +x "$flow_dir/watch.py"
 
   touch "$project_dir/runs/.gitkeep"
   touch "$project_dir/sections/.gitkeep"

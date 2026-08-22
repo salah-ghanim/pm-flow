@@ -708,7 +708,17 @@ record_cycle_decision() {
 # never assumes what the previous tick was doing; it reads the same files
 # section_next_action read.
 
+# A domain may replace what a role is asked to do on a call, the same way it may
+# replace who the role is. The generic task set asks for code, tests and commits;
+# a research domain asks for sourced findings and a counter-search. Overlay wins,
+# generic falls through, so existing domains are unaffected.
 task_file() {
+  [[ -n "${DOMAIN:-}" ]] || resolve_domain
+  local override="$SCRIPT_DIR/domains/$DOMAIN/tasks/$1.md"
+  if [[ -f "$override" ]]; then
+    printf '%s\n' "$override"
+    return
+  fi
   printf '%s/tasks/%s.md\n' "$SCRIPT_DIR" "$1"
 }
 

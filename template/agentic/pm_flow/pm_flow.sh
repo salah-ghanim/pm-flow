@@ -188,7 +188,13 @@ compose_role_prompt() {
   local role="$1"
   [[ -f "$AGENT_CONFIG_FILE" ]] || fail "missing agent config: $AGENT_CONFIG_FILE"
   resolve_domain
-  local role_file="$ROLES_DIR/$role.md"
+  # A domain may replace a persona outright, not merely retitle it. Research
+  # work and build work do not differ by an adjective: one delivers code and
+  # tests, the other delivers sourced findings, and one persona cannot describe
+  # both. An overlay file wins; a domain with nothing to say about a role falls
+  # through to the generic persona and is retitled as before.
+  local role_file="$DOMAINS_DIR/$DOMAIN/roles/$role.md"
+  [[ -f "$role_file" ]] || role_file="$ROLES_DIR/$role.md"
   [[ -f "$role_file" ]] || fail "unknown role '$role'; no persona at $role_file"
   local project_name="$PROJECT_KEY"
   if [[ -f "$CONTRACT_FILE" ]]; then
