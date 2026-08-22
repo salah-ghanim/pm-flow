@@ -6,8 +6,8 @@ The root coordinator should read this file and the linked handoffs, not section 
 
 | Section | Priority | Status | Summary | PM handoff | Run | Updated (UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
-| agents-md | nice-to-have | blocked | Blocked: scoped against a layout packaging replaces; re-cut once packaging lands. | [handoff](../sections/agents-md/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153706Z-agents-md-79b36bec` | 2026-08-22T18:24:54Z |
-| codex-usage | must-have | active | Cycle 001; last action scope. | [handoff](../sections/codex-usage/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153704Z-codex-usage-5f13a050` | 2026-08-22T20:01:10Z |
+| agents-md | nice-to-have | planned | Reopened: no longer collides with packaging, and installer is done. | [handoff](../sections/agents-md/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153706Z-agents-md-79b36bec` | 2026-08-22T20:17:56Z |
+| codex-usage | must-have | active | Cycle 002; last action review. | [handoff](../sections/codex-usage/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153704Z-codex-usage-5f13a050` | 2026-08-22T20:13:24Z |
 | green-suite | must-have | done | Suite runs to completion and exits zero; the guard was never broken, it was never called. | [handoff](../sections/green-suite/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153703Z-green-suite-51f4bdcf` | 2026-08-22T17:21:33Z |
 | installer | must-have | done | A stock install lands every module, ignores the store and bytecode, and preserves state on reinstall. | [handoff](../sections/installer/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T153705Z-installer-3c68b20d` | 2026-08-22T18:14:05Z |
 | packaging | must-have | active | Cycle 002; last action escalate. | [handoff](../sections/packaging/handoff.md) | `.agentic/pm_flow/pm-agent/runs/20260822T162623Z-packaging-8802916e` | 2026-08-22T19:39:40Z |

@@ -1,3 +1,5 @@
 template/CLAUDE.md
 template/AGENTS.md
 README.md
+install.sh
+MANIFEST
