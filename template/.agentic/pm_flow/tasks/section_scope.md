@@ -42,6 +42,36 @@ section's owned paths, `state.md` or `handoff.md` have uncommitted changes from
 work already accepted, commit them now — the next developer starts fresh and
 cannot recover what an interrupted process leaves behind.
 
+## What an acceptance criterion has to be
+
+State the outcome in the running system, not the mechanism that produces it. A
+criterion is only worth writing if failing it would mean the product is worse
+off, and passing it would mean a user of this project can do something they
+could not do before.
+
+This is not style. `codex-usage` was accepted, marked done, and delivered
+nothing usable. Its acceptance read "a Codex dispatch writes a non-empty
+`.events.jsonl` beside its response" - a mechanism. It was met by a *fake*
+codex emitting a key real codex never sends, so every real dispatch recorded no
+tokens at all; and the code that would have carried those tokens into the store
+was never called, so even correct parsing would have reached nothing. Every
+criterion passed. The feature did not exist.
+
+So:
+
+- Name the observable, not the artifact. Not "a file is written" but "`pm-flow
+  cost` reports non-zero tokens for that dispatch". Not "the parser handles the
+  schema" but "the recorded run shows the tokens the provider charged for".
+- A section that integrates with an external tool is proven against that tool.
+  A stub proves the stub. Where a real call cannot be made, say so in the
+  criterion itself and name what would settle it, rather than letting a double
+  stand in silently.
+- End the chain where the project's own goal begins. `plan.md` says what this
+  product is for; a criterion that stops short of it leaves the section
+  disconnected, and a disconnected section can be complete and worthless at the
+  same time.
+- Prefer a criterion someone else could check without reading the diff.
+
 ## Respond with these sections only, each as a Markdown heading
 
 1. Where the section stands

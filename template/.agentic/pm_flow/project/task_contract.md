@@ -101,6 +101,14 @@ What does not count:
 
 ## Version control
 
+An acceptance criterion states an outcome in the running system, never the
+mechanism that produces it, and never an artifact merely appearing. A section
+that integrates with an external tool is proven against that tool; a stub
+proves the stub. Where a real call cannot be made, the criterion says so and
+names what would settle it. A criterion that stops short of the product's own
+goal leaves the section disconnected, and a disconnected section can be
+complete and worthless at once - which is not hypothetical here.
+
 Work that is not committed does not exist. Every role runs as its own process
 with a fresh context, so an uncommitted tree is lost the moment a process is
 killed, a worktree is cleaned, or the next agent starts.

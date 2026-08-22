@@ -29,6 +29,13 @@ missing independence, and both are required:
 If either is impossible in this cycle, say which and why in the Evidence check
 section rather than passing over it.
 
+Judge the deliverable, not the demonstration. If the acceptance was met by a
+stub standing in for a real dependency, or by an artifact appearing rather than
+the system behaving differently, the criterion was weak and meeting it proves
+little. Say so under Evidence check and name what would actually settle it. A
+section can pass every criterion in its brief and still have delivered nothing
+the project can use; that has already happened here once.
+
 Do not soften a rejection to keep things moving. A wrong result that is accepted
 becomes the next section's problem, and this project escalates repeated failure
 to a consultant rather than expecting you to absorb it.

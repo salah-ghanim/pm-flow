@@ -170,6 +170,18 @@ def usage_from_codex_events(path) -> dict:
     except OSError:
         return usage
 
+    # Two shapes, because codex has more than one. A real `codex exec --json`
+    # run today reports usage on the `turn.completed` event:
+    #
+    #   {"type":"turn.completed","usage":{"input_tokens":13937,
+    #    "cached_input_tokens":12032,"output_tokens":5,
+    #    "reasoning_output_tokens":0}}
+    #
+    # and never emits `total_token_usage` at all. Reading only the latter meant
+    # every real dispatch recorded no tokens whatsoever, which nothing noticed
+    # because the acceptance for this was demonstrated against a fake codex that
+    # emitted the shape the parser wanted. Both are read now, last one wins, and
+    # a total is computed when the payload does not carry one.
     totals = None
     for line in lines:
         line = line.strip()
@@ -179,9 +191,10 @@ def usage_from_codex_events(path) -> dict:
             event = json.loads(line)
         except ValueError:
             continue
-        found = _find_key(event, "total_token_usage")
-        if isinstance(found, dict):
-            totals = found
+        for key in ("total_token_usage", "usage"):
+            found = _find_key(event, key)
+            if isinstance(found, dict) and found:
+                totals = found
     if not isinstance(totals, dict):
         return usage
 
@@ -190,6 +203,10 @@ def usage_from_codex_events(path) -> dict:
     usage["cache_read_tokens"] = _as_int(totals.get("cached_input_tokens"))
     usage["reasoning_tokens"] = _as_int(totals.get("reasoning_output_tokens"))
     usage["total_tokens"] = _as_int(totals.get("total_tokens"))
+    if usage["total_tokens"] is None:
+        parts = [usage["input_tokens"], usage["output_tokens"]]
+        if any(part is not None for part in parts):
+            usage["total_tokens"] = sum(part or 0 for part in parts)
     return {key: value for key, value in usage.items() if value is not None}
 
 

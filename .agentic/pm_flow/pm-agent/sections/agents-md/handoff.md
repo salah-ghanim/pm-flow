@@ -2,7 +2,8 @@
 
 ## Outcome
 
-Cycle 001 is `NO_GO`. No implementation was returned, accepted, or committed.
+Cycles 001 and 002 are `NO_GO`. No implementation was returned, accepted, or
+committed. The configured two-failure threshold has been reached.
 
 ## Decisions
 
@@ -18,6 +19,15 @@ Cycle 001 is `NO_GO`. No implementation was returned, accepted, or committed.
   worktree are refused as sensitive, while `/tmp` and the main cycle-record
   directory remain writable. This is an internal dispatch/worktree-placement
   defect, not an external dependency.
+- Cycle 002 independently reproduced both failed gates: the worktree resolves
+  below `.git`, manifest print contains zero template entries, and manifest
+  check exits 1. The exact isolated suite still exits 0 with all nine PASS
+  groups.
+- Fresh and existing-repository installs still create no `AGENTS.md`, leave the
+  full router and invariants in CLAUDE without an AGENTS pointer, and README does
+  not identify AGENTS. Existing CLAUDE content survives.
+- Mutation evidence cannot be produced against this return: there is no
+  implementation and the feature probe fails before mutation.
 
 ## Interfaces
 
@@ -29,6 +39,8 @@ None accepted.
   the refusal without producing new evidence.
 - The green full suite can mask a regression or total absence of AGENTS install
   behavior until a focused assertion is added or run during review.
+- A third unchanged developer dispatch would repeat an already-confirmed
+  internal mechanism failure and violate the escalation policy.
 
 ## What is unproven
 
@@ -38,8 +50,8 @@ that detect violations of those guarantees.
 
 ## Next action
 
-Escalate the internal section-worktree placement/sandbox collision. Once the
-developer receives a writable worktree outside a `.git` path (or an equivalent
-explicitly supported configuration), repeat the bounded implementation and its
-fresh-install plus mutation checks. One rejection has been recorded; the
-configured consultant threshold is two.
+Escalate to a consultant now. Provide both cycle reports and ask for an
+alternative section-execution path that is writable, resolves outside `.git`,
+and lets `tools/manifest.py` enumerate the template tree without bypassing
+controls. Only after that mechanism is established should the bounded
+implementation and focused mutation checks be reassigned.

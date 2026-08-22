@@ -1017,6 +1017,39 @@ access_line_count="$(/usr/bin/wc -l < "$ACCESS_LOG" | tr -d '[:space:]')"
 assert_not_contains "$access_records" '"targets": [], "outside": false, "command"' \
   "a shell command with paths in it does not record an empty target list"
 
+# --- codex token accounting, against a real event stream ---------------------
+#
+# This fixture is a verbatim `codex exec --json` stream, captured from a real
+# dispatch. It exists because the parser was written and accepted against a
+# *fake* codex that emitted `total_token_usage`, a key real codex never sends -
+# so every real dispatch recorded no tokens at all, and the section that built
+# it passed its acceptance and was marked done. The acceptance said "a Codex
+# dispatch writes a non-empty .events.jsonl" and never said a real one.
+#
+# A section that integrates with an external tool has to be proven against that
+# tool. Anything else measures the stub.
+codex_usage="$(python3 - "$REPO_ROOT/template/.agentic/pm_flow/telemetry.py" \
+    "$REPO_ROOT/tests/fixtures/codex_events_real.jsonl" <<'PYUSAGE'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("telemetry", sys.argv[1])
+telemetry = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(telemetry)
+print(json.dumps(telemetry.usage_from_codex_events(sys.argv[2]), sort_keys=True))
+PYUSAGE
+)"
+assert_contains "$codex_usage" '"input_tokens": 13937' \
+  "real codex input tokens are recovered from turn.completed"
+assert_contains "$codex_usage" '"output_tokens": 5' \
+  "real codex output tokens are recovered"
+assert_contains "$codex_usage" '"cache_read_tokens": 12032' \
+  "real codex cached input is recorded as a cache read"
+assert_contains "$codex_usage" '"total_tokens": 13942' \
+  "a total is computed when the real payload carries none"
+assert_not_contains "$codex_usage" '{}' \
+  "the real stream does not parse to nothing"
+
+printf 'PASS: codex token accounting against a real event stream\n'
+
 printf 'PASS: per-dispatch access observation\n'
 
 printf 'PASS: dependency scheduling and blocked sections\n'

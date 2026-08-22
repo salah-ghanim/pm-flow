@@ -61,14 +61,27 @@
   allowed. This is an internal dispatch/worktree-placement defect outside this
   section's owned paths, not an external credential, entitlement, or service
   dependency.
+- Cycle 002 review is `NO_GO`; the developer correctly stopped without an
+  implementation after both explicit pre-edit gate conditions failed. The
+  returned branch is clean at base commit `76ee9ef`, `pwd -P` still resolves
+  below `.git`, manifest print has zero template entries, and manifest check
+  exits 1.
+- The reviewer ran the isolated full suite independently: it exits 0 and reaches
+  all nine PASS groups, but independent fresh and existing-repository installs
+  still create no `AGENTS.md`; their `CLAUDE.md` files retain both full sections
+  and do not point to AGENTS, and README still does not name AGENTS. Existing
+  CLAUDE content is preserved.
+- A valid mutation test is impossible because there is no returned
+  implementation and the focused baseline already fails. This is the second
+  rejected cycle and reaches the configured consultant threshold.
 
 ## Current assignment
 
-- Do not re-issue the implementation unchanged into the same nested worktree.
-  Escalate the observed worktree/sandbox collision so the next developer gets a
-  writable section worktree whose path also permits manifest generation; then
-  repeat the same bounded implementation and require focused probes capable of
-  failing when `AGENTS.md` is absent or `CLAUDE.md` duplicates the full body.
+- Do not re-issue the implementation. Escalate to a consultant with both cycle
+  reports and seek an alternative that gives the section a writable source
+  checkout outside `.git` and preserves manifest enumeration without bypassing
+  either control. Any later implementation must retain the same owned-path
+  boundary and focused pass-to-fail mutation requirements.
 
 ## Dependencies
 
@@ -76,3 +89,5 @@
 - Section execution is currently impeded by the internal worktree location
   `.git/pm-flow/worktrees/...`: the developer could not write owned paths there,
   and `tools/manifest.py` excludes the entire template for the same path shape.
+- Two rejected cycles meet the configured consultant threshold. This remains an
+  internal execution dependency and does not qualify as `BLOCKED_EXTERNAL`.
