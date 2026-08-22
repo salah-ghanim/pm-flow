@@ -688,6 +688,36 @@ def adopt_persona(connection, row, spec, pack, pack_id, source) -> bool:
     return True
 
 
+def reject_cross_pack_claim(connection, row, spec, pack, pack_id) -> None:
+    """Refuse to move a persona away from the pack that already owns it.
+
+    Adoption above is for a persona that belongs to no pack: it has no pack
+    provenance to lose, so gaining this pack's is a strict improvement. A
+    persona another pack already ships is a different case. Two packs are
+    separate publications that happen to contain the same words, and silently
+    re-attributing the row would rewrite the first pack's author, licence,
+    version and source - while every measurement recorded against that row
+    stays, now filed under a pack that never published it.
+
+    Identical content is not a merge signal, so the second pack is refused
+    whole rather than partly applied. The caller's transaction is what makes
+    that atomic; this only decides, and says which persona collided with whom.
+    """
+    if row["pack_id"] is None or row["pack_id"] == pack_id:
+        return
+    owner = connection.execute(
+        "SELECT name FROM persona_packs WHERE id = ?", (row["pack_id"],)
+    ).fetchone()
+    owner_name = owner["name"] if owner else f"pack id {row['pack_id']}"
+    raise PackError(
+        f"persona '{spec['key']}' is identical to one already installed from "
+        f"pack '{owner_name}', which keeps it along with everything measured "
+        f"about it; pack '{pack['name']}' was not installed. Give the persona "
+        f"a different key, change its words so it is a distinct persona, or "
+        f"remove '{owner_name}' first."
+    )
+
+
 def install_pack(connection, pack: dict) -> dict:
     """Record the pack and its personas in one commit.
 
@@ -719,6 +749,7 @@ def install_pack(connection, pack: dict) -> dict:
             digest = persona_digest(spec["key"], spec["layer"], spec["body"])
             found = find_persona(connection, spec["key"], digest)
             if found is not None:
+                reject_cross_pack_claim(connection, found, spec, pack, pack_id)
                 if adopt_persona(connection, found, spec, pack, pack_id, source):
                     adopted.append(spec["key"])
                 else:
@@ -971,7 +1002,12 @@ def cmd_persona_add(args):
     except PackError as error:
         raise SystemExit(f"persona add: {error}")
     connection = store.connect(args.db)
-    result = install_pack(connection, pack)
+    try:
+        result = install_pack(connection, pack)
+    except PackError as error:
+        # install_pack has already rolled back, so the store is exactly as it
+        # was; the only thing left to do is say why, without a traceback.
+        raise SystemExit(f"persona add: {error}")
     print(f"pack {pack['name']} {pack['version']} from {pack['root']}")
     print(f"  author {pack['author']} | license {pack['license']} | "
           f"tags {', '.join(pack['tags']) or '-'}")
