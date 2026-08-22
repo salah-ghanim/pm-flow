@@ -17,6 +17,17 @@ compatibility is wanted, rather than duplicating content that will drift.
 - template/CLAUDE.md
 - template/AGENTS.md
 - README.md
+- install.sh (the CLAUDE.md/AGENTS.md rendering block only)
+- MANIFEST
+
+install.sh is added because the acceptance cannot be met without it: the
+CLAUDE.md handling is hardcoded there, around the managed-block merge, not
+driven by MANIFEST. `packaging` also lists install.sh, so touch only the
+instructions-file block and nothing else in that file. MANIFEST is generated
+from whatever under `template/` moves, so adding AGENTS.md changes it whether
+this section wants it to or not; regenerate it with `python3 tools/manifest.py`
+rather than editing it, and a concurrent regeneration then produces the same
+bytes instead of a conflict.
 
 ### Dependencies
 - installer
@@ -30,3 +41,6 @@ compatibility is wanted, rather than duplicating content that will drift.
 ### Rejection conditions
 - Content is duplicated between the two files rather than one pointing at the other.
 - An existing CLAUDE.md is destroyed.
+- Anything in install.sh outside the instructions-file rendering block changes.
+- MANIFEST is edited by hand rather than regenerated.
+- The suite is weakened or made to exit zero without running to completion.

@@ -1310,6 +1310,31 @@ assert_file_contains "$WT_REPO/src/epsilon.txt" "written by epsilon" \
 [[ -z "$(git -C "$WT_REPO" status --porcelain -- src)" ]] || \
   fail "concurrent merges left the main working tree dirty"
 
+# A section whose branch has commits of its own must still pick up the base.
+# It used to fast-forward only, so once a section had committed anything it was
+# pinned to the base as it stood at that moment - including the shared
+# acceptance check every section is judged on. persona-packs lost two cycles and
+# reached the escalation threshold on a flaky test it did not own, because its
+# branch could never receive the fix.
+WT_SYNC_BRANCH="pm-flow/worktree-repo/delta"
+git -C "$WT_REPO" show-ref --verify --quiet "refs/heads/$WT_SYNC_BRANCH" || \
+  fail "the delta section left no branch to test syncing against"
+printf 'a shared fix that landed after the section branched\n' > "$WT_REPO/src/shared-fix.txt"
+git -C "$WT_REPO" add -A
+git -C "$WT_REPO" -c user.name="pm-flow test" -c user.email="pm-flow-test@localhost" \
+  commit -q -m "a fix on the base, after delta already committed"
+WT_SYNC_TREE="$WT_ROOT/delta-sync"
+git -C "$WT_REPO" worktree add --force "$WT_SYNC_TREE" "$WT_SYNC_BRANCH" > /dev/null 2>&1
+[[ ! -f "$WT_SYNC_TREE/src/shared-fix.txt" ]] || \
+  fail "the section branch already had the base fix; the test proves nothing"
+( eval "$(sed -n '/^sync_section_worktree() {/,/^}/p' "$WT_FLOW/driver.zsh")"
+  PROJECT_ROOT="$WT_REPO"
+  driver_base_branch() { printf 'main\n'; }
+  sync_section_worktree "$WT_SYNC_TREE" "" ) || true
+[[ -f "$WT_SYNC_TREE/src/shared-fix.txt" ]] || \
+  fail "a section branch with its own commits never received the base fix"
+git -C "$WT_REPO" worktree remove --force "$WT_SYNC_TREE" > /dev/null 2>&1 || true
+
 # A section run holds the project lock in shared mode, so a project-wide run,
 # which schedules across every section, must be refused rather than allowed to
 # race it. Asserted by holding the shared lock directly rather than by starting
