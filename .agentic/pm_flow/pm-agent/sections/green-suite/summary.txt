@@ -1,1 +1,1 @@
-Section created; its PM sub-agent has not been launched yet.
+Suite runs to completion and exits zero; the guard was never broken, it was never called.

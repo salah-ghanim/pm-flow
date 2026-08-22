@@ -817,6 +817,29 @@ run_driver() {
   PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" run --max-ticks "${1:-12}" 2>&1
 }
 
+# Project-level work preempts section work: the driver reviews the whole
+# portfolio on a dispatch cadence, and a tick that lands on a due review spends
+# itself there and returns before any section is touched. Anything asserting on
+# a single section tick has to clear that queue first, or it reads the review's
+# output and reports the section as broken. `status` is side-effect free, so the
+# due-ness is read without spending a dispatch to discover it.
+drain_project_work() {
+  local guard=0
+  while [[ "$("$DRIVER_PM" status)" == *"portfolio review due"* ]]; do
+    (( guard += 1 ))
+    (( guard <= 8 )) || fail "the portfolio review queue would not drain"
+    PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
+    PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick > /dev/null 2>&1
+  done
+}
+
+# One section tick, with the project queue drained first.
+driver_tick() {
+  drain_project_work
+  PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
+  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick
+}
+
 install_driver_stub "$REPO_ROOT/tests/fixtures/stub_success.zsh"
 
 # Dependencies are scheduling gates, not merely context allowlists. An
@@ -970,6 +993,7 @@ assert_contains "$resumed_run" "complete -> section done" "a resumed run still r
 # file, the dispatch overwrites it, and review rejects the work as absent. The
 # driver must refuse the assignment instead of spending a dispatch on it.
 reset_driver_section
+drain_project_work
 run_driver 1 > /dev/null
 GUARD_CYCLE="$DRIVER_SECTION/cycles/001"
 [[ -f "$GUARD_CYCLE/assignment.md" ]] || fail "the guard fixture was not scoped"
@@ -985,8 +1009,7 @@ GUARD_OUTPUT="${GUARD_CYCLE#$DRIVER_REPO/}/result.md"
 # aside, the cycle returns to scope, and the tick succeeds. It used to fail the
 # whole tick, which left the cycle wedged on the same rejected assignment
 # forever.
-guard_reject_tick="$(PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
-  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick)"
+guard_reject_tick="$(driver_tick)"
 assert_contains "$guard_reject_tick" "assignment rejected; returning the cycle to scope" \
   "an assignment owning the dispatch output path is refused and re-scoped"
 assert_file_contains "$GUARD_CYCLE/rescope_reason.txt" \
@@ -1011,8 +1034,7 @@ assert_file_contains "$GUARD_CYCLE/rescope_reason.txt" "$GUARD_OUTPUT" \
   printf 'Reject if any file outside the writable paths changes; if `result.md`\n'
   printf 'is treated as a durable artifact.\n'
 } > "$GUARD_CYCLE/assignment.md"
-guard_prohibition_tick="$(PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
-  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick)"
+guard_prohibition_tick="$(driver_tick)"
 assert_contains "$guard_prohibition_tick" "develop 001 -> result" \
   "a prohibition naming the output path is not a grant"
 rm -f "$GUARD_CYCLE/result.md"
@@ -1021,8 +1043,7 @@ rm -f "$GUARD_CYCLE/result.md"
 # usually phrased in prose.
 printf '## Assignment\n\nThe developer may write only `heartbeat.txt` and\n`result.md`.\n' \
   > "$GUARD_CYCLE/assignment.md"
-guard_inline_tick="$(PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
-  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick)"
+guard_inline_tick="$(driver_tick)"
 assert_contains "$guard_inline_tick" "assignment rejected; returning the cycle to scope" \
   "an inline write grant on the output name is rejected"
 assert_file_contains "$GUARD_CYCLE/rescope_reason.txt" \
@@ -1037,8 +1058,7 @@ assert_file_contains "$GUARD_CYCLE/rescope_reason.txt" \
   printf 'Writable paths:\n\n- `src/widget/thing.py`\n\n'
   printf 'Report what cycle 003 recorded in its result.md before reviewing.\n'
 } > "$GUARD_CYCLE/assignment.md"
-guard_allowed_tick="$(PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
-  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick)"
+guard_allowed_tick="$(driver_tick)"
 assert_contains "$guard_allowed_tick" "develop 001 -> result" \
   "a read-only reference to another cycle's result stays legal"
 [[ -f "$GUARD_CYCLE/result.md" ]] || fail "the permitted assignment was not dispatched"
@@ -1046,8 +1066,8 @@ assert_contains "$guard_allowed_tick" "develop 001 -> result" \
 install_driver_stub "$REPO_ROOT/tests/fixtures/stub_failing.zsh"
 reset_driver_section
 failing_run="$(run_driver 16)"
-assert_contains "$failing_run" "review 001 -> NO_GO (consecutive failures: 1)" "failures are counted from cycle history"
-assert_contains "$failing_run" "review 002 -> NO_GO (consecutive failures: 2)" "consecutive failures accumulate"
+assert_contains "$failing_run" "review 001 -> NO_GO (developer said PARTIAL; consecutive failures: 1)" "failures are counted from cycle history"
+assert_contains "$failing_run" "review 002 -> NO_GO (developer said PARTIAL; consecutive failures: 2)" "consecutive failures accumulate"
 assert_contains "$failing_run" "widget: escalate" "reaching the threshold escalates automatically"
 assert_contains "$failing_run" "adjudicate -> ADOPT_PARALLEL" "the product officer may adopt several paths"
 assert_contains "$failing_run" "rescue -> 2 of 2 path(s) delivered" "ADOPT_PARALLEL runs one rescue per path"
@@ -1085,8 +1105,15 @@ mkdir "$TEST_ROOT/decomp-bin"
 chmod +x "$TEST_ROOT/decomp-bin/claude"
 
 assert_not_contains "$("$DECOMP_FLOW/pm_flow.sh" status)" "widget" "an empty project has no sections yet"
+decomp_code=0
 decomp_run="$(PM_DONE_FLAG="$TEST_ROOT/decomp.flag" PATH="$TEST_ROOT/decomp-bin:$PATH" \
-  "$DECOMP_FLOW/pm_flow.sh" run --max-ticks 20 2>&1)"
+  "$DECOMP_FLOW/pm_flow.sh" run --max-ticks 20 2>&1)" || decomp_code=$?
+# Reported rather than left to `set -e`. A run that exits non-zero inside a
+# command substitution kills the suite with no output at all, which is how a
+# missing heading in the decomposition fixture read as "the suite stops after
+# the driver tests" for weeks.
+(( decomp_code == 0 )) || fail "the decomposition run exited $decomp_code:
+$decomp_run"
 assert_contains "$decomp_run" "(project): decompose" "an empty project decomposes first"
 assert_contains "$decomp_run" "decompose -> 2 section(s)" "the officer emits several sections"
 assert_contains "$decomp_run" "data-model" "the decomposition names its sections"
