@@ -96,6 +96,12 @@ ASSIGN - first piece"
     # The dispatch's working directory is the claim under test, so it is both
     # written into the tree and recorded outside it.
     printf '%s\n' "$PWD" >> "$state_dir/develop_cwd.log"
+    # Recorded from inside the dispatch, because that is the only place the
+    # question can be answered: a reviewer whose sandbox refuses writes to
+    # $HOME/.cache cannot run an acceptance check that builds anything.
+    printf 'UV_CACHE_DIR=%s\nXDG_CACHE_HOME=%s\nPIP_CACHE_DIR=%s\n' \
+      "${UV_CACHE_DIR:-unset}" "${XDG_CACHE_HOME:-unset}" "${PIP_CACHE_DIR:-unset}" \
+      >> "$state_dir/develop_env.log"
     mkdir -p "$PWD/src"
     printf 'written by %s in %s\n' "$section_key" "$PWD" > "$PWD/src/$section_key.txt"
     emit "## What I changed

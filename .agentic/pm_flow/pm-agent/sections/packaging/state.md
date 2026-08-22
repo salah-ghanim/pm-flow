@@ -2,60 +2,39 @@
 
 ## Objective
 
-- Run the engine from an installed, per-project Python package while keeping
-  only mutable project data in `.agentic/`, then remove copy-versioning
-  machinery and migrate existing installs without losing state.
+- Run the engine from an installed, per-project Python package while keeping only mutable project data in `.agentic/`, then remove copy-versioning machinery and migrate existing installs without losing state.
 
 ## Owned paths
 
-- `pyproject.toml`, `src/**`, `install.sh`, `MANIFEST`, `template/**`,
-  `tests/**`, `.gitignore`, and `README.md`.
+- `pyproject.toml`
+- `src/**`
+- `install.sh`
+- `MANIFEST`
+- `template/.agentic/pm_flow/pm_flow.sh`
+- `template/.agentic/pm_flow/upgrade.py`
+- `template/.agentic/pm_flow/.gitignore`
+- `tests/**`
+- `.gitignore`
 
 ## Plan
 
-- First prove the installed shell entry reads repository data from the invoked
-  repository and packaged defaults from the wheel, with no copied engine.
+- First prove the installed shell entry reads repository data from the invoked repository and packaged defaults from the wheel, with no copied engine.
 - Then move dispatch and persona overlays across the same engine/data boundary.
-- Replace installation with project-data creation and a lossless legacy
-  migration; delete MANIFEST, upgrade.py, and copy lifecycle code.
-- Close with independent-version, upgrade-immutability, migration-equivalence,
-  and full-suite probes against installed artifacts.
+- Replace installation with project-data creation and a lossless legacy migration; delete MANIFEST, upgrade.py, and copy lifecycle code.
+- Close with independent-version, upgrade-immutability, migration-equivalence, and full-suite probes against installed artifacts.
 
 ## Decisions and evidence
 
-- `green-suite/handoff.md` records six PASS groups across three full runs and
-  requires fixture ticks to drain project-level governance work.
-- `worktree-isolation/handoff.md` records isolated section worktrees and safe
-  merge-back; its only unproven point is simultaneous dispatch, which packaging
-  does not require.
-- Commit `b864674` already provides `pyproject.toml`, `pm_flow.cli`,
-  `pm_flow.paths`, wheel package data, and a console entry point. The brief says
-  that wheel was run from a clean venv, so rebuilding that scaffold is out of
-  scope.
-- Current gap: packaged `pm_flow.sh` sets `PROJECT_ROOT` from its own location
-  and uses `SCRIPT_DIR` for `.project-key`, config, and project workspaces.
-  `pm_flow.cli` already exports `PM_FLOW_ENGINE_ROOT`, `PM_FLOW_REPO_ROOT`, and
-  `PM_FLOW_FLOW_DIR`; the shell entry does not yet consume the data roots.
-- Cycle 001 starts with no prior accepted cycle. The dirty packaging
-  `status.txt`, `summary.txt`, timestamps, and dispatch markers are current
-  orchestration state, not uncommitted accepted implementation.
-- Cycle 001 review is `NO_GO`. The focused packaged-layout test passes in a
-  disposable offline build environment and its project-data boundary mutation
-  is detected, but the assigned command `zsh tests/pm_flow_test.sh` exits 1 in
-  the actual PM environment because inherited `PM_FLOW_PROJECT=pm-agent`
-  redirects the fixture to a nonexistent workspace before any PASS group.
-  Removing `PM_FLOW_PROJECT` and `PM_FLOW_ROOT` makes the unchanged suite exit
-  0 with seven PASS groups, confirming both that the implementation does not
-  regress the suite and that the assignment's "six PASS groups" count is stale.
-  No implementation is accepted or committed from this cycle.
+- `green-suite/handoff.md` records six PASS groups across three full runs and requires fixture ticks to drain project-level governance work.
+- `worktree-isolation/handoff.md` records isolated section worktrees and safe merge-back; simultaneous dispatch is not required by packaging.
+- Commit `b864674` provides `pyproject.toml`, `pm_flow.cli`, `pm_flow.paths`, wheel package data, and a console entry point.
+- Cycle 001 is `NO_GO`: its focused packaged-layout proof passed and caught a project-data mutation, but the exact full-suite command inherited PM-flow selectors and exited before any PASS group.
+- Cycle 002 is `NO_GO`: both exact full-suite commands exited 0 with the same seven PASS groups, and a disposable mutation disabling the new selector cleanup was caught. The exact `zsh tests/packaged_layout_test.sh` command exited 1 before any of its six PASS groups because `uv build` panicked while initializing macOS system configuration. The returned implementation remains uncommitted.
+- The Cycle 002 developer notes that redirecting to a fresh cache requires network to fetch the wheel build backend. That exchanges caller-cache dependence for an external dependency and does not meet the hermetic exact-command criterion.
 
 ## Current assignment
 
-- Re-scope cycle 002 so the acceptance command itself is hermetic to inherited
-  orchestration selectors (including permission to change the full-suite
-  harness if that is the chosen boundary), retain the cycle-001 engine/data
-  change, and require the exact listed commands to exit zero without reviewer
-  environment surgery.
+- None. Two consecutive rejected cycles meet `escalation.failures_before_consultant = 2`; prepare consultant escalation with the exact `uv` panic, the cache/network dependency, the successful seven-group selector-isolation runs, and the caught mutation. Do not re-issue the same assignment.
 
 ## Dependencies
 

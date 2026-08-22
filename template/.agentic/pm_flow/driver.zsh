@@ -863,6 +863,25 @@ dispatch_role() {
 
   assert_within_budget "$section_key"
 
+  # Tool caches, pointed somewhere the dispatch is actually allowed to write.
+  #
+  # codex runs with --sandbox workspace-write, which permits writes under the
+  # working root and refuses them everywhere else - including $HOME/.cache. A
+  # reviewer asked to run an acceptance check that builds anything therefore
+  # failed on `uv build: Failed to initialize cache at ~/.cache/uv: Operation
+  # not permitted`, and reported the section as not meeting acceptance. The
+  # implementation was fine both times; the check could not be executed at all.
+  #
+  # That is the worst failure mode this flow has: an acceptance no reviewer can
+  # run is unpassable, and the section escalates to a consultant panel that
+  # cannot fix a sandbox either. Two cycles were spent on it.
+  local dispatch_cache="$RUNS_DIR/.cache"
+  mkdir -p "$dispatch_cache"
+  export XDG_CACHE_HOME="$dispatch_cache"
+  export UV_CACHE_DIR="$dispatch_cache/uv"
+  export PIP_CACHE_DIR="$dispatch_cache/pip"
+  export npm_config_cache="$dispatch_cache/npm"
+
   # The real repository, named before the dispatch can confuse it for one.
   # agent_exec.sh falls back to its own PROJECT_ROOT, and under --work-root that
   # *is* the worktree - so without this the access log calls every read of the
