@@ -272,30 +272,53 @@ def register_clis(connection):
             )
 
 
-def read_persona_layers(flow_dir: Path, role: str, domain: str):
+def read_persona_layers(engine_dir: Path, role: str, domain: str,
+                        project_dir: Path | None = None, project_key: str = ""):
     """The persona layers on disk for one role, base first.
 
     The flow already stores prompts this way - a craft persona in `roles/`, an
     optional domain overlay in `domains/<domain>/roles/` - it just never treated
     the two as separately addressable things. They are exactly a base layer and
     a domain layer, so they are read as such.
+
+    The third layer is the repository's own. It lives under the project
+    workspace, never inside the engine, so customising a role is adding a file
+    to your own repository rather than editing a packaged one - which is what
+    makes upgrading the package a no-op for anything you wrote.
+
+    This is the single definition of what a seat is made of. Both the prompt
+    that goes to the CLI and the provenance recorded against the attempt are
+    built from it, so the two cannot disagree about which layers were applied
+    or in what order.
     """
     layers = []
-    base = flow_dir / "roles" / f"{role}.md"
+    base = engine_dir / "roles" / f"{role}.md"
     if base.is_file():
         layers.append(("base", role, base.read_text(errors="replace"), str(base)))
     if domain:
-        overlay = flow_dir / "domains" / domain / "roles" / f"{role}.md"
+        overlay = engine_dir / "domains" / domain / "roles" / f"{role}.md"
         if overlay.is_file():
             layers.append(("domain", f"{domain}/{role}",
                            overlay.read_text(errors="replace"), str(overlay)))
+    if project_dir is not None:
+        local = Path(project_dir) / "roles" / f"{role}.md"
+        if local.is_file():
+            layers.append(("style", f"{project_key or 'local'}/{role}",
+                           local.read_text(errors="replace"), str(local)))
     return layers
 
 
 def sync(connection, flow_dir: Path, project_key: str, domain: str,
-         topology_key: str) -> dict:
-    """Read the flow directory into the store. Idempotent."""
+         topology_key: str, engine_dir: Path | None = None) -> dict:
+    """Read the flow directory into the store. Idempotent.
+
+    Two roots, because installed they are two directories: `flow_dir` is the
+    repository's project data - config.json, the project workspace, the local
+    persona overlays - and `engine_dir` is the packaged defaults. They default
+    to the same path, which is the copied layout.
+    """
     register_clis(connection)
+    engine_dir = Path(engine_dir) if engine_dir else flow_dir
 
     config_path = flow_dir / "config.json"
     config = {}
@@ -339,9 +362,11 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
     # -- agents, one row per seat
     counts = {"personas": 0, "bindings": 0, "rules": 0, "seats": 0, "edges": 0}
     roles = config.get("roles") or {}
+    project_dir = flow_dir / project_key
     for role_key, binding in sorted(roles.items()):
         seats = binding if isinstance(binding, list) else [binding]
-        layers = read_persona_layers(flow_dir, role_key, domain)
+        layers = read_persona_layers(engine_dir, role_key, domain,
+                                     project_dir, project_key)
         tier = ("write" if role_key in write_roles
                 else "scoped" if role_key in scoped_roles else "read")
 
@@ -419,10 +444,9 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
                     )
 
     # -- rules: the contract binds the project, the task procedures the topology
-    project_dir = flow_dir / project_key
     contract = project_dir / "task_contract.md"
     if not contract.is_file():
-        contract = flow_dir / "project" / "task_contract.md"
+        contract = engine_dir / "project" / "task_contract.md"
     if contract.is_file():
         rule_id = upsert_rule(
             connection, key="task_contract", title="Task contract", kind="contract",
@@ -431,9 +455,9 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
         bind_rule(connection, rule_id, "project", project_id)
         counts["rules"] += 1
 
-    task_dirs = [flow_dir / "tasks"]
+    task_dirs = [engine_dir / "tasks"]
     if domain:
-        task_dirs.insert(0, flow_dir / "domains" / domain / "tasks")
+        task_dirs.insert(0, engine_dir / "domains" / domain / "tasks")
     seen_tasks = set()
     for task_dir in task_dirs:
         if not task_dir.is_dir():
@@ -949,7 +973,7 @@ def export_markdown(connection, out_dir: Path) -> int:
 def cmd_sync(args):
     connection = store.connect(args.db)
     counts = sync(connection, Path(args.flow), args.project, args.domain,
-                  args.topology)
+                  args.topology, Path(args.engine) if args.engine else None)
     print("synced " + ", ".join(f"{value} {key}" for key, value in counts.items()))
     return 0
 
@@ -1071,7 +1095,8 @@ def main(argv):
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("sync", help="read the flow directory into the store")
-    p.add_argument("--flow", required=True)
+    p.add_argument("--flow", required=True, help="the repository's project data")
+    p.add_argument("--engine", help="the packaged defaults (default: --flow)")
     p.add_argument("--project", required=True)
     p.add_argument("--domain", default="")
     p.add_argument("--topology", default="default")

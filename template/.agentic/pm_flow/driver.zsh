@@ -630,11 +630,10 @@ assert_within_budget() {
 # Nothing here may end a run. Every call is guarded and every failure swallowed:
 # a broken recorder costs an observation, and a dead dispatch costs money.
 #
-# NOT YET CALLED. Wiring these into dispatch_role regressed the scheduling tests
-# in a way that has not been explained - the dispatch stopped producing its
-# output with no error on any stream - so the call sites were removed and the
-# helpers left in place. Re-wire them only together with a test that proves a
-# dispatch still happens, which is what `trace-commands` exists to do.
+# Called from dispatch_role, which is what makes an attempt a record of a
+# dispatch that actually happened rather than a row somebody wrote. The run row
+# is opened lazily by the first attempt, because a tick that dispatches nothing
+# has nothing to describe.
 
 TELEMETRY_TRACE_ID=""
 TELEMETRY_RUN_KEY=""
@@ -685,9 +684,13 @@ telemetry_begin_run() {
   # Re-index the definitions at the top of every run. A persona or config edit
   # between runs then belongs to the run that used it, instead of being
   # attributed to whatever the store happened to hold from last time.
+  # --flow is the repository's project data and --engine the packaged defaults.
+  # They were one argument only because the engine used to be copied into the
+  # repository; naming the engine here is what stopped the catalogue indexing a
+  # packaged config.json instead of the invoked repository's.
   python3 "$SCRIPT_DIR/catalog.py" --db "$(telemetry_store_file)" sync \
-    --flow "$SCRIPT_DIR" --project "${PROJECT_KEY:-}" --domain "$domain" \
-    --topology "$TELEMETRY_TOPOLOGY" >/dev/null 2>&1 || true
+    --flow "$FLOW_DIR" --engine "$SCRIPT_DIR" --project "${PROJECT_KEY:-}" \
+    --domain "$domain" --topology "$TELEMETRY_TOPOLOGY" >/dev/null 2>&1 || true
 
   output="$(python3 "$SCRIPT_DIR/telemetry.py" --db "$(telemetry_store_file)" \
     run-start --project "${PROJECT_KEY:-}" --topology "$TELEMETRY_TOPOLOGY" \
@@ -703,11 +706,16 @@ telemetry_begin_run() {
 }
 
 telemetry_end_run() {
-  local status="${1:-ok}"
+  # Not named `status`: zsh reserves that name for `$?`, and assigning it here
+  # aborts the function on its first line. That is not a style preference - it
+  # is why wiring these helpers into dispatch_role regressed the scheduling
+  # tests once before, with the dispatch silently losing its output and no
+  # error on any stream the test was reading.
+  local run_status="${1:-ok}"
   [[ -n "$TELEMETRY_RUN_KEY" ]] || return 0
   python3 "$SCRIPT_DIR/telemetry.py" --db "$(telemetry_store_file)" run-end \
     --run "$TELEMETRY_RUN_KEY" --span "$TELEMETRY_ROOT_SPAN" \
-    --status "$status" >/dev/null 2>&1 || true
+    --status "$run_status" >/dev/null 2>&1 || true
   telemetry_autoexport
   return 0
 }
@@ -736,6 +744,8 @@ telemetry_begin_attempt() {
   TELEMETRY_ATTEMPT_ID=""
   TELEMETRY_ATTEMPT_SPAN=""
   telemetry_enabled || return 0
+  # A dispatch is the first thing worth recording, so it is what opens the run.
+  [[ -n "$TELEMETRY_RUN_KEY" ]] || telemetry_begin_run "${PM_FLOW_COMMAND:-tick}"
   [[ -n "$TELEMETRY_RUN_KEY" ]] || return 0
 
   # sections/<key>/cycles/007/result.md carries the cycle in its path, which is
@@ -770,12 +780,13 @@ telemetry_begin_attempt() {
 # response envelope rather than passed in, so the dispatcher stays the only
 # thing that resolves a role to a binding.
 telemetry_end_attempt() {
-  local response_json="$1" output_md="$2" status="${3:-ok}"
+  # `attempt_status`, not `status`: see telemetry_end_run.
+  local response_json="$1" output_md="$2" attempt_status="${3:-ok}"
   local events="${response_json%.json}.events.jsonl"
   unset TRACEPARENT
   [[ -n "$TELEMETRY_ATTEMPT_ID" ]] || return 0
   local args=(--db "$(telemetry_store_file)" attempt-end
-              --attempt "$TELEMETRY_ATTEMPT_ID" --status "$status"
+              --attempt "$TELEMETRY_ATTEMPT_ID" --status "$attempt_status"
               --response "$response_json")
   [[ -z "$output_md" ]] || args+=(--output-file "$output_md")
   [[ ! -f "$events" ]] || args+=(--events "$events")
@@ -974,11 +985,25 @@ dispatch_role() {
   fi
 
   local dispatch_status=0
-  "$SCRIPT_DIR/agent_exec.sh" "${dispatch_args[@]}" >/dev/null || dispatch_status=$?
+  # Opened before the call and closed after it, so what is recorded is one
+  # invocation of one seat: which persona layers composed its prompt, which
+  # binding ran it, and what it cost.
+  telemetry_begin_attempt "$role" "$prompt_file" "$label" "$section_key" "$output_md"
+  # Named to zsh rather than executed. Installed from a wheel the engine's
+  # scripts arrive as ordinary package data with no execute bit, and there is
+  # nothing in the repository to chmod - which is the point.
+  #
+  # `-f` is not optional here: it is the other half of the `#!/bin/zsh -f` these
+  # scripts carry, and `zsh <file>` does not read a shebang. Without it the
+  # dispatch inherits whatever the operator's startup files do to PATH and
+  # aliases, which is exactly the ambient state a fresh, supervised process
+  # exists to be free of.
+  zsh -f "$SCRIPT_DIR/agent_exec.sh" "${dispatch_args[@]}" >/dev/null || dispatch_status=$?
   # Record the cost even when the dispatch failed: a call that errored after
   # the model had already answered still cost money.
   record_dispatch_cost "$response_json" "$section_key" "$role" "$label"
   if (( dispatch_status != 0 )); then
+    telemetry_end_attempt "$response_json" "" error
     fail "role '$role' did not produce a usable response for $label; see $response_json"
   fi
   python3 - "$response_json" "$staged" <<'PY'
@@ -996,6 +1021,7 @@ if not text:
 Path(sys.argv[2]).write_text(text + "\n")
 PY
   mv "$staged" "$output_md"
+  telemetry_end_attempt "$response_json" "$output_md" ok
 }
 
 # dispatch_role publishes over its own output path, so an assignment that hands

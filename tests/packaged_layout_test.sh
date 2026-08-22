@@ -48,6 +48,17 @@ assert_equals() {
     fail "$label: expected '$expected', got '$value'"
 }
 
+# Order matters for an overlay: a layer that lands before the one it is meant to
+# override has not overridden anything. Asserting only that both are present
+# would pass on a prompt that applies them backwards.
+assert_before() {
+  local value="$1" first="$2" second="$3" label="$4"
+  local head="${value%%"$second"*}"
+  [[ "$head" != "$value" ]] || fail "$label: '$second' is not in the value"
+  [[ "$head" == *"$first"* ]] || \
+    fail "$label: '$first' does not appear before '$second'"
+}
+
 # Runs a command that must fail, and prints its combined output for inspection.
 # A boundary violation usually shows up as an unexpected *success* - the command
 # silently falling back to a packaged file - so the assertion is on the failure
@@ -253,9 +264,10 @@ printf '%s\n' "$PROJECT_KEY" > "$FLOW/.project-key"
 /bin/cat > "$FLOW/config.json" <<'JSON'
 {
   "version": 1,
+  "isolation": { "worktrees": 0 },
   "roles": {
     "cpo": { "cli": "codex", "difficulty": "xhigh" },
-    "pm": { "cli": "codex", "difficulty": "xhigh" },
+    "pm": { "cli": "claude", "model": "fixture-pm-model", "difficulty": "high" },
     "developer": { "cli": "claude", "difficulty": "medium" },
     "consultant": [
       { "cli": "claude", "difficulty": "xhigh" },
@@ -272,6 +284,48 @@ printf 'must-have\n' > "$SECTION/priority.txt"
 printf 'Nothing handed off yet.\n' > "$SECTION/summary.txt"
 printf '2026-01-01T00:00:00Z\n' > "$SECTION/updated_at.txt"
 
+# A second project in the same flow directory, and the one the dispatch below
+# runs against. It exists to be *unlike* the first: it records a domain that the
+# package actually ships a role overlay for, and it carries a persona layer of
+# its own. Those are the two things a single-project fixture cannot show - that
+# the packaged domain layer is applied rather than replaced, and that a layer
+# the package has never heard of is applied on top of it.
+DISPATCH_KEY="salvage-desk"
+DISPATCH_WORKSPACE="$FLOW/$DISPATCH_KEY"
+DISPATCH_SECTION_KEY="asset-recovery"
+DISPATCH_SECTION="$DISPATCH_WORKSPACE/sections/$DISPATCH_SECTION_KEY"
+mkdir -p "$DISPATCH_SECTION" "$DISPATCH_WORKSPACE/runs" \
+         "$DISPATCH_WORKSPACE/project_state" "$DISPATCH_WORKSPACE/roles"
+printf '{\n  "version": 1,\n  "domain": "distressed-tech"\n}\n' \
+  > "$DISPATCH_WORKSPACE/project.json"
+printf '# Salvage Desk Task Contract\n\nOne bounded assignment at a time.\n' \
+  > "$DISPATCH_WORKSPACE/task_contract.md"
+printf 'Asset recovery\n' > "$DISPATCH_SECTION/name.txt"
+printf 'active\n' > "$DISPATCH_SECTION/status.txt"
+printf 'must-have\n' > "$DISPATCH_SECTION/priority.txt"
+printf 'Nothing handed off yet.\n' > "$DISPATCH_SECTION/summary.txt"
+printf '2026-01-01T00:00:00Z\n' > "$DISPATCH_SECTION/updated_at.txt"
+/bin/cat > "$DISPATCH_SECTION/brief.md" <<'BRIEF'
+## Objective
+
+- Recover the assets the registry cannot currently account for.
+
+## Priority
+
+- must-have
+BRIEF
+
+# The repository's own layer. Written here, inside the project workspace, never
+# into the package: this is the whole claim - customising a role is adding a
+# file to your own repository, so upgrading the package cannot touch it and
+# there is nothing to merge.
+LOCAL_LAYER_MARKER="Salvage desk house rule: every record names the document it came from."
+/bin/cat > "$DISPATCH_WORKSPACE/roles/pm.md" <<LOCAL
+## House rules for {{PROJECT_NAME}}
+
+$LOCAL_LAYER_MARKER
+LOCAL
+
 # --- the fixture holds no engine and no packaged default ---------------------
 
 for engine_file in pm_flow.sh driver.zsh agent_exec.sh heartbeat.sh cost.py \
@@ -287,7 +341,7 @@ done
 # to list here still fails: the flow directory is exactly config, the selector,
 # and the project workspace.
 flow_entries="$(/bin/ls -A "$FLOW" | sort | tr '\n' ' ')"
-assert_equals "$flow_entries" ".project-key config.json $PROJECT_KEY " \
+assert_equals "$flow_entries" ".project-key config.json $DISPATCH_KEY $PROJECT_KEY " \
   "the flow directory holds project data only"
 
 printf 'PASS: a fixture repository that holds project data and no engine\n'
@@ -379,6 +433,207 @@ assert_contains "$unknown_role" "unknown role 'archivist'" \
   "an unknown role is refused"
 
 printf 'PASS: missing project data fails against the repository, not the package\n'
+
+# --- an installed dispatch, and the stack it was composed from ---------------
+#
+# Everything above reads. This dispatches: `pm-flow tick` advances a fixture
+# section through the installed entry point, using the fixture's own config to
+# decide which backend runs the role, and the prompt that reaches the child is
+# the packaged base persona plus the packaged domain overlay plus the layer this
+# repository wrote - in that order.
+#
+# The child is a local script, not a vendor CLI. That is deliberate and it is
+# the limit of what this proves: the routing of an installed dispatch and the
+# provenance recorded against it. It says nothing about live vendor
+# compatibility, which needs a credentialed `pm-flow tick` to observe.
+
+ENGINE="$engine_line"
+PACKAGED_BASE="$ENGINE/roles/pm.md"
+PACKAGED_DOMAIN="$ENGINE/domains/distressed-tech/roles/pm.md"
+LOCAL_LAYER="$DISPATCH_WORKSPACE/roles/pm.md"
+[[ -f "$PACKAGED_BASE" ]] || fail "the package ships no base pm persona at $PACKAGED_BASE"
+[[ -f "$PACKAGED_DOMAIN" ]] || fail "the package ships no domain pm overlay at $PACKAGED_DOMAIN"
+
+# What the package holds before the run, so "unchanged" is measured rather than
+# assumed. Every persona in the package, not only the three this dispatch uses.
+packaged_persona_digests() {
+  find "$ENGINE/roles" "$ENGINE/domains" -type f -name '*.md' | sort | \
+    xargs shasum -a 256
+}
+personas_before="$(packaged_persona_digests)"
+
+# A marker per layer, taken from the shipped text rather than invented, so a
+# layer that stopped being applied cannot still match.
+BASE_MARKER="Keeping durable detail in your section's"
+DOMAIN_MARKER="Nothing enters the registry on an analyst's say-so."
+assert_contains "$(/bin/cat "$PACKAGED_BASE")" "$BASE_MARKER" \
+  "the packaged base persona still carries its marker"
+assert_contains "$(/bin/cat "$PACKAGED_DOMAIN")" "$DOMAIN_MARKER" \
+  "the packaged domain overlay still carries its marker"
+
+# The child. It records the prompt it was handed and answers with a scope
+# verdict the driver can act on - deterministic, offline, and unable to reach
+# anything. `${@[-1]}` is the prompt: every backend takes it last.
+mkdir -p "$TEST_ROOT/agent-bin"
+CAPTURED_PROMPT="$TEST_ROOT/dispatched_prompt.txt"
+/bin/cat > "$TEST_ROOT/agent-bin/claude" <<'STUB'
+#!/bin/zsh -f
+printf '%s' "${@[-1]}" > "$PM_FLOW_CAPTURED_PROMPT"
+python3 -c 'import json, sys; print(json.dumps(
+    {"is_error": False, "result": sys.argv[1], "session_id": ""}))' \
+'## Where the section stands
+
+The registry has unaccounted assets and nothing has been scoped yet.
+
+## Assignment
+
+Reconcile the registry against the source documents.
+
+## Acceptance
+
+Every registry row cites a document.
+
+## Rejection conditions
+
+Scope drift.
+
+## Decision
+
+ASSIGN - first piece'
+STUB
+chmod +x "$TEST_ROOT/agent-bin/claude"
+
+tick_output="$(cd "$FIXTURE" && \
+  PM_FLOW_CAPTURED_PROMPT="$CAPTURED_PROMPT" \
+  PATH="$TEST_ROOT/agent-bin:$PATH" \
+  "$PM_FLOW" --project "$DISPATCH_KEY" --section "$DISPATCH_SECTION_KEY" tick 2>&1)" || \
+  fail "the installed dispatch failed:"$'\n'"$tick_output"
+assert_contains "$tick_output" "section=$DISPATCH_SECTION_KEY" \
+  "the tick acted on the fixture section"
+assert_contains "$tick_output" "action=scope" "the tick scoped the section"
+assert_contains "$tick_output" "-> ASSIGN" "the dispatched child's verdict was acted on"
+[[ -f "$DISPATCH_SECTION/cycles/001/assignment.md" ]] || \
+  fail "the dispatch produced no assignment:"$'\n'"$tick_output"
+
+# The dispatch read the fixture's binding, not a packaged one. `pm` is bound to
+# claude here and to codex nowhere the package could have supplied.
+[[ -f "$CAPTURED_PROMPT" ]] || \
+  fail "no child was dispatched; nothing captured the prompt"
+dispatched_prompt="$(/bin/cat "$CAPTURED_PROMPT")"
+
+# The three layers, in order.
+assert_contains "$dispatched_prompt" "$BASE_MARKER" \
+  "the prompt carries the packaged base persona"
+assert_contains "$dispatched_prompt" "$DOMAIN_MARKER" \
+  "the prompt carries the packaged domain layer"
+assert_contains "$dispatched_prompt" "$LOCAL_LAYER_MARKER" \
+  "the prompt carries the project-local overlay"
+assert_before "$dispatched_prompt" "$BASE_MARKER" "$DOMAIN_MARKER" \
+  "base persona precedes the domain layer"
+assert_before "$dispatched_prompt" "$DOMAIN_MARKER" "$LOCAL_LAYER_MARKER" \
+  "domain layer precedes the project-local overlay"
+assert_contains "$dispatched_prompt" "Salvage Desk" \
+  "the prompt names the invoked repository's project, not the package's"
+assert_not_contains "$dispatched_prompt" "{{" "the composed prompt leaves no unrendered macro"
+
+# What the store recorded against the attempt that dispatch produced. Read from
+# the fixture's own store, and only from a completed attempt: provenance
+# attached to a row that never ran would prove nothing.
+STORE="$DISPATCH_WORKSPACE/runs/pm_flow.db"
+[[ -f "$STORE" ]] || fail "the dispatch recorded no store at $STORE"
+recorded="$(python3 - "$STORE" "$PACKAGED_BASE" "$PACKAGED_DOMAIN" "$LOCAL_LAYER" <<'PY'
+import hashlib
+import json
+import sqlite3
+import sys
+
+store, *layer_files = sys.argv[1:]
+connection = sqlite3.connect(store)
+connection.row_factory = sqlite3.Row
+
+rows = connection.execute(
+    "SELECT * FROM attempts WHERE role_key = 'pm' AND status = 'ok'"
+    " AND ended_at IS NOT NULL ORDER BY id"
+).fetchall()
+if len(rows) != 1:
+    raise SystemExit(f"expected exactly one completed pm attempt, found {len(rows)}")
+attempt = rows[0]
+
+# The digest the catalogue content-addresses a persona by: its key, its layer
+# and its exact words. Recomputed here from the files on disk rather than read
+# back out of the same table being checked.
+def digest(key, layer, path):
+    running = hashlib.sha256()
+    for part in (key, layer, open(path, encoding="utf-8").read()):
+        running.update(b"\x00")
+        running.update(part.encode("utf-8", "replace"))
+    return running.hexdigest()
+
+expected = [
+    {"key": "pm", "layer": "base", "content_hash": digest("pm", "base", layer_files[0])},
+    {"key": "distressed-tech/pm", "layer": "domain",
+     "content_hash": digest("distressed-tech/pm", "domain", layer_files[1])},
+    {"key": "salvage-desk/pm", "layer": "style",
+     "content_hash": digest("salvage-desk/pm", "style", layer_files[2])},
+]
+stack = json.loads(attempt["persona_stack"])
+if stack != expected:
+    raise SystemExit("persona_stack does not name the three layers in order:\n"
+                     f"  recorded: {json.dumps(stack, indent=2)}\n"
+                     f"  expected: {json.dumps(expected, indent=2)}")
+
+top = connection.execute(
+    "SELECT key, layer, content_hash FROM personas WHERE id = ?",
+    (attempt["persona_id"],)
+).fetchone()
+if top is None:
+    raise SystemExit("the attempt records no persona_id")
+if dict(top) != expected[-1]:
+    raise SystemExit(f"persona_id is not the effective top layer: {dict(top)}")
+
+binding = connection.execute(
+    "SELECT key, cli, model, thinking_level FROM bindings WHERE id = ?",
+    (attempt["binding_id"],)
+).fetchone()
+if binding is None:
+    raise SystemExit("the attempt records no binding_id")
+
+print(f"persona_stack={' -> '.join(entry['key'] for entry in stack)}")
+print(f"persona_id={top['key']} ({top['layer']})")
+print(f"binding={binding['key']} cli={binding['cli']} model={binding['model']} "
+      f"thinking={binding['thinking_level']}")
+PY
+)" || fail "the recorded provenance did not match the composed stack"
+
+assert_contains "$recorded" \
+  "persona_stack=pm -> distressed-tech/pm -> salvage-desk/pm" \
+  "the attempt records the three layers in application order"
+assert_contains "$recorded" "persona_id=salvage-desk/pm (style)" \
+  "the attempt's persona is the effective top layer"
+assert_contains "$recorded" \
+  "binding=pm.1 cli=claude model=fixture-pm-model thinking=high" \
+  "the attempt's binding is the fixture's, not a packaged default"
+
+# The package was read and not written. Nothing was copied into the fixture
+# either: the flow directory still holds project data, and the only persona
+# inside the repository is the one this test wrote.
+assert_equals "$(packaged_persona_digests)" "$personas_before" \
+  "the dispatch left every packaged persona byte for byte unchanged"
+for engine_file in pm_flow.sh driver.zsh agent_exec.sh catalog.py telemetry.py store.py; do
+  [[ ! -e "$FLOW/$engine_file" ]] || \
+    fail "the dispatch copied an engine file into the fixture: $engine_file"
+  [[ ! -e "$DISPATCH_WORKSPACE/$engine_file" ]] || \
+    fail "the dispatch copied an engine file into the project workspace: $engine_file"
+done
+for engine_dir in roles domains tasks project; do
+  [[ ! -e "$FLOW/$engine_dir" ]] || \
+    fail "the dispatch copied a packaged resource directory into the fixture: $engine_dir"
+done
+local_persona_entries="$(/bin/ls -A "$DISPATCH_WORKSPACE/roles" | sort | tr '\n' ' ')"
+assert_equals "$local_persona_entries" "pm.md " \
+  "no packaged persona was copied beside the project-local overlay"
+
+printf 'PASS: an installed dispatch composes base, domain and local layers and records them\n'
 
 # --- running changed nothing inside the flow directory -----------------------
 
