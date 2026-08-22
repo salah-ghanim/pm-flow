@@ -1,88 +1,107 @@
 # Resume here
 
-Rewritten 2026-08-22 evening. Read this and `plan.md`; you do not need the
+Rewritten 2026-08-22, late. Read this and `plan.md`; you do not need the
 conversation that produced them.
 
-## Where the work stands
+## The one rule for this session
 
-Shipped, verified, and pushed to `main` (through `0bbf015`):
+**Never run more than three sections at once.** Everything below assumes it.
 
-- **green-suite - done.** `zsh tests/pm_flow_test.sh` exits 0 and runs to
-  completion. Seven PASS labels, stable across repeated runs. Every brief's
-  "the suite still passes" now means something.
-- **worktree-isolation - done.** Each section dispatches in its own git
-  worktree under `.git/pm-flow/worktrees/<project>/<section>`, on branch
-  `pm-flow/<project>/<section>`. Accepted cycles merge back, rejected ones
-  never reach the main tree. Verified in a real run, not only in the suite.
-- **installer - done.** Closed on evidence from a fresh install performed for
-  the review.
-- Earlier: the store, telemetry recording and export, the catalogue,
-  manifest-driven install, and the package skeleton (`pyproject.toml`,
-  `src/pm_flow/paths.py`, `src/pm_flow/cli.py`; a wheel was built and run from
-  a clean venv with no checkout present).
+## What is running right now
 
-## Two dead hypotheses, recorded so nobody re-derives them
+`packaging`, `persona-packs`, `codex-usage`, each as its own background process:
 
-The dispatch-output guard was never defective. **It was never called.**
-Project-level work preempts section work unconditionally in `cmd_tick`, and by
-the guard fixture's tick 13 dispatches had accrued against a portfolio-review
-threshold of 12, so the tick spent itself on a review and returned before
-reaching `do_develop`. Neither the `/var` symlink theory nor the space in
-`$TEST_ROOT/driver repo` had anything to do with it. `driver.zsh` was not
-modified by green-suite.
+```bash
+./.agentic/pm_flow/pm_flow.sh --section <key> run --max-ticks 14
+```
 
-## What is running
+Watch them with `./.agentic/pm_flow/watch.py -w`. Spend so far is about $28 of a
+$100 rail, $25 per section. Spend is not billed against an API budget here, so
+the rails exist as runaway guards, not as cost control.
 
-`packaging`, through the flow, scoped with `--section packaging`. It is the
-re-baselining: the engine moves out of the repository and into the installed
-package, and MANIFEST, `upgrade.py` and the file-lifecycle machinery are either
-deleted or justified, because they exist to manage copies that will no longer
-exist.
+## The goal
 
-Budget rails are $40 total, $8 per section. Those are rails, not estimates.
+Finish every section in the registry. Not start more of them - finish them.
 
-## Do these in order
+When one of the three finishes, start the next from this queue, keeping three:
 
-1. **packaging** - in flight. If it stalls, finish it by hand; the brief records
-   what already exists so no manager rebuilds `paths.py`.
-2. **Re-cut the five blocked sections** against the packaged layout:
-   codex-usage, trace-commands, store-ledger, persona-packs, agents-md. They are
-   marked `blocked`, not `planned`, so an unscoped run cannot spend budget on a
-   scope that is already known to be wrong. Re-cut from each brief's
-   *objective*, not by editing `owned_paths.txt` - see the defect below.
-3. **Cut the two drafted sections** in `project_state/drafts/`:
-   `topology-compare` and `agent-bindings`. They are the plan's headline
-   promises and nothing owns them. Their owned paths are deliberately left open
-   until packaging has produced the layout they belong to.
+1. `agents-md` - was blocked by a harness defect that is now fixed
+2. `topology-compare` - the plan's headline promise
+3. `agent-bindings` - MCP and ACP
+4. `trace-commands` - blocked until `packaging` lands; it needs `pm_flow.sh`,
+   which packaging is rewriting. This is a real file collision, not bookkeeping
+5. `store-ledger` - waits on `trace-commands`
+
+## Done
+
+`green-suite`, `installer`, `worktree-isolation`. All three were finished by
+hand, not by the flow.
+
+`codex-usage` was closed by the flow on its own - the first section to do that -
+and then reopened, because it passed an acceptance that a stub satisfied while
+the feature did not work. That reopening is the most important thing in this
+file; see below.
+
+## What was learned today, and must not be re-learned
+
+**Acceptance criteria must state an outcome in the running system.** Not a
+mechanism, not an artifact appearing. `codex-usage` asked for "a Codex dispatch
+writes a non-empty .events.jsonl" and got exactly that from a fake codex
+emitting a key real codex never sends, while the code that would carry those
+tokens into the store was never called. Every criterion passed; the feature did
+not exist. The standard is now written into `tasks/project_decomposition.md`,
+`tasks/section_scope.md`, `tasks/section_review.md` and the contract. Hold new
+briefs to it.
+
+**Every escalation so far was the harness, not the work.** Four of them: a
+sandbox denying `~/.cache/uv`, a flaky test, worktrees placed under `.git`
+where write controls refuse them, and a commit obligation no codex-bound role
+could discharge. A consultant panel could not have fixed any of them, and a
+person rescued each one by hand.
+
+That is now automatic. Every review classifies its rejection as `NONE`,
+`HARNESS` or `TASK`. `HARNESS` routes to a single **maintenance engineer** that
+repairs the plumbing and hands the section straight back with its failure
+streak wiped; `TASK` convenes the panel. Maintenance is bounded by
+`escalation.max_maintenance_attempts`; an unclassified rejection is read as
+`TASK`, the conservative and expensive answer. **This has not yet fired on a
+real run.** Watch for the first one and check it behaves.
 
 ## Known defects
 
+- **`install.sh` overwrites `project_state/resume.md`.** It treats this file as
+  engine prose alongside `task_contract.md`. Reinstalling destroys it; restore
+  from git afterwards. It leaves a misleadingly named `resume.pre-sections.md`.
 - **Editing `brief.md` does not re-derive `owned_paths.txt`.** Scope is captured
-  at `init-section` and never refreshed, so a brief and the scope actually
-  enforced can disagree silently. Both green-suite and worktree-isolation hit
-  this; both files were corrected by hand. A real pm-flow bug, found by using it.
-- **`install.sh` overwrites `project_state/resume.md`.** It treats resume.md as
-  engine-provided prose alongside `task_contract.md` and `start.md`, and this
-  file is authored project state. It leaves a backup named
-  `resume.pre-sections.md`, which is misleading. Reinstalling this repository
-  destroys this file unless it is restored from git afterwards.
-- **An unparseable portfolio review starves sections for up to four ticks.** It
-  self-heals - the claim ceiling gives up, `run_portfolio_review` advances the
-  baseline and the run continues - so it is not a livelock, but it is four cpo
-  dispatches spent on nothing. Bounding the re-ask explicitly belongs to
-  whoever owns driver.zsh scheduling.
-- **Telemetry is recorded but not wired into dispatch.** The helpers in
-  driver.zsh are deliberately uncalled: wiring them regressed the scheduling
-  tests with no error on any stream, and the cause is unexplained. Re-wire only
-  with a test proving a dispatch still happens.
+  at `init-section` and never refreshed, so a brief and the enforced scope can
+  disagree silently. Correct both by hand.
+- **Killing a run can orphan its model dispatch.** Two `claude -p` processes
+  were found alive 38 minutes after their driver was killed, burning quota. The
+  suite tests orphan cleanup on a *stall*, not on an external kill of the
+  driver. Check with `ps -eo pid,etime,command | grep -E "claude -p |codex exec"`
+  after stopping anything.
+- **`packaging`'s worktree copy of `tests/packaged_layout_test.sh` makes a real
+  codex dispatch.** A test that spends money and minutes. Judge it when that
+  cycle comes up for review; it should use a double.
+- **Telemetry is still not wired into dispatch.** `telemetry_begin_attempt` and
+  `telemetry_end_attempt` are defined in `driver.zsh` and never called, so no
+  attempt is recorded and no tokens reach the store. This is now named in
+  `codex-usage`'s brief as its own blocker.
 
 ## Traps that fail silently
 
-Both cost real time; both are commented where they bite.
-
-- `local path` in zsh is tied to `PATH` and empties it for the rest of the
-  function, so `git` stops being findable and the code reports success while
-  doing nothing.
+- `local path` in zsh is tied to `PATH` and empties it, so `git` stops being
+  findable and the code reports success while doing nothing.
 - `git rev-parse --is-inside-work-tree` prints `false` and exits **zero** from
-  inside a `.git` directory, so testing the exit status alone calls a bare
-  directory a worktree.
+  inside a `.git` directory.
+- A glob closure like `<->(.<->)#` needs `EXTENDED_GLOB`, which the engine does
+  not set. Without it the pattern matches nothing and every value is refused.
+- `python3 - <<'PY'` feeds the *script* on stdin, so `sys.stdin.read()` inside
+  returns nothing. A hook written that way logs empty records and looks fine.
+
+## The suite
+
+`zsh tests/pm_flow_test.sh` - 10 PASS groups, exit 0, about 2m45. It runs the
+real driver against real installs, which is why it caught the defects above. Do
+not mock it and do not trim it to go faster; the last speed-up came from the
+engine, not from the tests.

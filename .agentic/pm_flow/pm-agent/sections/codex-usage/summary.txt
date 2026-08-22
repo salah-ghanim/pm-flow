@@ -1,1 +1,1 @@
-Reopened: passed a mechanism-shaped acceptance while delivering no tokens to the store.
+Cycle 004; last action scope.
