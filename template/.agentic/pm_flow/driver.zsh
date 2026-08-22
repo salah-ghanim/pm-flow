@@ -1926,16 +1926,46 @@ ensure_section_worktree() {
   printf '%s\n' "$tree_path"
 }
 
-# Bring the section's branch up to the base before it is worked on again, so a
-# section is never rebuilding against a tree three merges old. Only a
-# fast-forward is taken: a real merge here could conflict, and a conflict in the
-# section's own worktree at the start of a cycle is a worse place to discover it
-# than at the merge back, where there is a manager to tell.
+# Bring the section's branch up to the base before it is worked on again.
+#
+# This used to fast-forward only, which meant a section that had committed
+# anything never picked up the base again - including fixes to the acceptance
+# check every section is judged on. A shared suite is a shared failure domain:
+# one section breaking it rejects every other section's work, and the reviewer
+# cannot tell the difference. persona-packs lost two cycles and reached the
+# escalation threshold on a racy test it did not own and could not have fixed,
+# because its branch was pinned to the base as it stood before the fix landed.
+#
+# So a real merge is attempted, and it is conflict-checked first: on a conflict
+# the branch is left exactly as it was and the reason is written next to the
+# section, because a worktree full of conflict markers at the start of a cycle
+# is a worse place to discover this than a note a manager can read.
 sync_section_worktree() {
   local tree_path="$1"
+  local section_dir="${2:-}"
   local base
   base="$(driver_base_branch)" || return 0
-  git -C "$tree_path" merge --ff-only "$base" >/dev/null 2>&1 || true
+  git -C "$tree_path" merge --ff-only "$base" >/dev/null 2>&1 && return 0
+  if ! git -C "$tree_path" merge-tree --write-tree HEAD "$base" >/dev/null 2>&1; then
+    [[ -z "$section_dir" ]] || {
+      printf 'this section cannot be brought up to %s without a conflict, so it is
+' "$base"
+      printf 'still being built against an older base. Resolve it in the worktree:
+
+'
+      printf '  git -C %s merge %s
+' "$tree_path" "$base"
+    } > "$section_dir/sync_blocked.txt"
+    return 0
+  fi
+  [[ -z "$section_dir" ]] || rm -f "$section_dir/sync_blocked.txt"
+  git -C "$tree_path" \
+    -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
+    -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
+    merge --no-edit -m "sync: bring the section up to $base" "$base" >/dev/null 2>&1 || {
+      git -C "$tree_path" merge --abort >/dev/null 2>&1 || true
+    }
+  return 0
 }
 
 # Everything the role changed, on the section's own branch. Returns 1 when there
@@ -2055,7 +2085,7 @@ begin_worktree_dispatch() {
   local tree_path
   tree_path="$(ensure_section_worktree "$section_key")" || return 0
   [[ -n "$tree_path" ]] || return 0
-  sync_section_worktree "$tree_path"
+  sync_section_worktree "$tree_path" "${SECTIONS_DIR}/${section_key%%-rescue-*}"
   DISPATCH_WORK_ROOT="$tree_path"
   DISPATCH_EXTRA_DIRS=("$@")
   CONTEXT_PATH_STYLE="absolute"
