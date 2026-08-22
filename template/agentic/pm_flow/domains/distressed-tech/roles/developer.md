@@ -65,6 +65,10 @@ you finish reading the existing records, after each fetch, and when you commit a
 record to disk. A stalled run with no heartbeat is treated as failed and will be
 retried, so keep it current.
 
+Write each line with `./agentic/pm_flow/heartbeat.sh <file> "<message>"`, which
+timestamps it for you. Building the timestamp inline with `$(date ...)` is shell
+the permission layer refuses, and a refused heartbeat reads as a silent run.
+
 ## Honesty rules
 
 - **Unknown is a finding, and a good one.** "The administrator is not named in

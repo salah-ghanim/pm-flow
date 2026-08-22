@@ -14,6 +14,11 @@ you finish reading the existing code, when you start implementing a component,
 and when tests first pass. A run that goes silent is treated as hung and is
 terminated, so keep it current.
 
+Write it with the wrapper, which timestamps the line for you:
+`./agentic/pm_flow/heartbeat.sh {{HEARTBEAT_FILE}} "<what you just did>"`.
+Do not build the timestamp inline with `$(date ...)`; that is shell the
+permission layer refuses, and a refused heartbeat reads as a silent run.
+
 Stay inside the owned paths named in the assignment. If the work genuinely
 requires touching something outside them, stop and report that instead of doing
 it quietly.

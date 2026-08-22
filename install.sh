@@ -118,6 +118,7 @@ prefetch_templates() {
     "template/agentic/pm_flow/net_exec.sh"
     "template/agentic/pm_flow/agent_exec.sh"
     "template/agentic/pm_flow/fetch.sh"
+    "template/agentic/pm_flow/heartbeat.sh"
     "template/agentic/pm_flow/driver.zsh"
     "template/agentic/pm_flow/cost.py"
     "template/agentic/pm_flow/watch.py"
@@ -462,6 +463,7 @@ main() {
   copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
   copy_template "template/agentic/pm_flow/agent_exec.sh" "$flow_dir/agent_exec.sh"
   copy_template "template/agentic/pm_flow/fetch.sh" "$flow_dir/fetch.sh"
+  copy_template "template/agentic/pm_flow/heartbeat.sh" "$flow_dir/heartbeat.sh"
   copy_template "template/agentic/pm_flow/driver.zsh" "$flow_dir/driver.zsh"
   # driver.zsh calls cost.py on every dispatch and `status` reads it, so an
   # install without it reports an error where the spend should be.
@@ -627,6 +629,7 @@ except Exception:
   chmod +x "$flow_dir/net_exec.sh"
   chmod +x "$flow_dir/agent_exec.sh"
   chmod +x "$flow_dir/fetch.sh"
+  chmod +x "$flow_dir/heartbeat.sh"
   chmod +x "$flow_dir/watch.py"
 
   touch "$project_dir/runs/.gitkeep"

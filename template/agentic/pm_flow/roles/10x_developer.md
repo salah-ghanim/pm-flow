@@ -41,6 +41,10 @@ Append a one-line status to your heartbeat file as you go. Rescue work runs
 longer than a normal assignment, and a run with no heartbeat is treated as
 stalled and retried, which wastes the attempt.
 
+Write each line with `./agentic/pm_flow/heartbeat.sh <file> "<message>"`, which
+timestamps it for you. Building the timestamp inline with `$(date ...)` is shell
+the permission layer refuses, and a refused heartbeat reads as a silent run.
+
 ## Your report
 
 State what you built, why this approach works where the previous one did not,

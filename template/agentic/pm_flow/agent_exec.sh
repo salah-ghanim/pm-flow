@@ -198,6 +198,24 @@ DEFAULT_SCOPED_BASH = [
     "agentic/pm_flow/pm_flow.sh status:*",
 ]
 
+# The two wrappers every role needs whatever tier it runs in.
+#
+# heartbeat.sh is not a convenience. Keeping the heartbeat current is what stops
+# a working dispatch being killed as stalled, and the obvious inline form,
+# `printf '%s ...' "$(date -u ...)" >> heartbeat.txt`, is shell the permission
+# layer cannot analyse statically and therefore refuses. A refused heartbeat is
+# a silent role, and a silent role is terminated and retried while it is working
+# perfectly well. The wrapper exists so the timestamp needs no substitution, and
+# it is allowlisted here so the call itself is not what gets refused.
+#
+# fetch.sh is the only way any role reads the outside world.
+FLOW_WRAPPERS = [
+    "./agentic/pm_flow/heartbeat.sh:*",
+    "agentic/pm_flow/heartbeat.sh:*",
+    "./agentic/pm_flow/fetch.sh:*",
+    "agentic/pm_flow/fetch.sh:*",
+]
+
 # The audit trail. A role that can rewrite the record of what it decided cannot
 # be checked against it, so the officer is denied the cycle artifacts outright.
 # The section manager is not: its persona says its cycle records are its own,
@@ -225,6 +243,9 @@ if scoped_bash is None:
     scoped_bash = DEFAULT_SCOPED_BASH
 if not isinstance(scoped_bash, list):
     raise SystemExit("config.access.scoped_bash must be a list of command prefixes")
+scoped_bash = list(scoped_bash) + [
+    entry for entry in FLOW_WRAPPERS if entry not in scoped_bash
+]
 
 audit_deny_roles = access_config.get("audit_deny_roles")
 if audit_deny_roles is None:
@@ -418,7 +439,16 @@ build_command() {
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(--model "$AGENT_MODEL")
       case "$AGENT_ACCESS" in
         write)
-          AGENT_ARGV+=(--permission-mode acceptEdits)
+          # acceptEdits auto-accepts file edits, not Bash. An unrecognised
+          # local script still prompts, and a prompt in a headless run is a
+          # denial, so the wrappers are named explicitly or the role cannot
+          # heartbeat and cannot read a page.
+          AGENT_ARGV+=(--permission-mode acceptEdits
+                       --allowedTools
+                       "Bash(./agentic/pm_flow/heartbeat.sh:*)"
+                       "Bash(agentic/pm_flow/heartbeat.sh:*)"
+                       "Bash(./agentic/pm_flow/fetch.sh:*)"
+                       "Bash(agentic/pm_flow/fetch.sh:*)")
           ;;
         scoped)
           settings_path="$WORK_DIR/scoped_settings.json"
