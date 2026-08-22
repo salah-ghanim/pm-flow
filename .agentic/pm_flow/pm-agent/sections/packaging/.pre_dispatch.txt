@@ -1,0 +1,9 @@
+head 3a281958b63788b6f0e66877f5fa2e502ed33ed8
+ M .agentic/pm_flow/pm-agent/project_state/sections.md
+ M .agentic/pm_flow/pm-agent/sections/packaging/state.md
+ M .agentic/pm_flow/pm-agent/sections/packaging/status.txt
+ M .agentic/pm_flow/pm-agent/sections/packaging/summary.txt
+ M .agentic/pm_flow/pm-agent/sections/packaging/updated_at.txt
+?? .agentic/pm_flow/pm-agent/sections/packaging/.last_error.txt
+?? .agentic/pm_flow/pm-agent/sections/packaging/.pre_dispatch.txt
+?? .agentic/pm_flow/pm-agent/sections/packaging/last_dispatch.txt
