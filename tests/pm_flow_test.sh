@@ -1224,6 +1224,58 @@ PM_STUB_REVIEW=NO_GO wt_run 4 > /dev/null
 
 printf 'PASS: per-section git worktrees, merge-back, and cleanup\n'
 
+# Two section-scoped runs at once. Worktrees made this safe; the project lock
+# still made it impossible, because it was exclusive for every run. A
+# section-scoped run now takes the project lock shared and its own section
+# exclusively, so two sections proceed and a project-wide run is still refused
+# while either is in flight.
+wt_init_section delta
+wt_init_section epsilon
+git -C "$WT_REPO" add -A
+git -C "$WT_REPO" -c user.name="pm-flow test" -c user.email="pm-flow-test@localhost" \
+  commit -q -m "add the concurrent sections"
+
+wt_parallel_section() {
+  PM_STUB_STATE="$TEST_ROOT/wt-state" PM_STUB_REVIEW=GO \
+  PATH="$TEST_ROOT/wt-bin:$PATH" "$WT_PM" --section "$1" run --max-ticks 8 \
+    > "$TEST_ROOT/wt-$1.log" 2>&1
+}
+wt_parallel_section delta &
+wt_delta_pid=$!
+wt_parallel_section epsilon &
+wt_epsilon_pid=$!
+wait "$wt_delta_pid" || fail "the delta section run failed: $(/bin/cat "$TEST_ROOT/wt-delta.log")"
+wait "$wt_epsilon_pid" || fail "the epsilon section run failed: $(/bin/cat "$TEST_ROOT/wt-epsilon.log")"
+
+assert_contains "$(/bin/cat "$TEST_ROOT/wt-delta.log")" "complete -> section done" \
+  "a section completes while another section is running"
+assert_contains "$(/bin/cat "$TEST_ROOT/wt-epsilon.log")" "complete -> section done" \
+  "the concurrent section completes too"
+assert_file_contains "$WT_REPO/src/delta.txt" "written by delta" \
+  "one concurrent section merged back"
+assert_file_contains "$WT_REPO/src/epsilon.txt" "written by epsilon" \
+  "the other concurrent section merged back without losing the first"
+[[ -z "$(git -C "$WT_REPO" status --porcelain -- src)" ]] || \
+  fail "concurrent merges left the main working tree dirty"
+
+# A section run holds the project lock in shared mode, so a project-wide run is
+# refused rather than allowed to schedule across sections at the same time.
+wt_init_section zeta
+PM_STUB_STATE="$TEST_ROOT/wt-state" PATH="$TEST_ROOT/wt-bin:$PATH" \
+  "$WT_PM" --section zeta run --max-ticks 1 > /dev/null 2>&1 &
+wt_zeta_pid=$!
+wt_project_refusal=0
+PM_STUB_STATE="$TEST_ROOT/wt-state" PATH="$TEST_ROOT/wt-bin:$PATH" \
+  "$WT_PM" run --max-ticks 1 > "$TEST_ROOT/wt-project.log" 2>&1 || wt_project_refusal=$?
+wait "$wt_zeta_pid" || true
+(( wt_project_refusal != 0 )) || \
+  fail "a project-wide run was allowed while a section run held the project lock"
+assert_contains "$(/bin/cat "$TEST_ROOT/wt-project.log")" "already running" \
+  "the refusal says which lock stopped it"
+
+printf 'PASS: concurrent section runs, serialised merges, and lock exclusion\n'
+
+
 # The product officer cuts the product into sections before any section exists,
 # and a run started from an empty project drives them all to completion.
 DECOMP_REPO="$TEST_ROOT/decomp repo"
