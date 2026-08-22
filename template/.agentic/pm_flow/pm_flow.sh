@@ -1,8 +1,21 @@
 #!/bin/zsh -f
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
-PROJECT_ROOT="$(cd -P -- "$SCRIPT_DIR/../.." && pwd -P)"
+SELF_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
+# The engine and the project data were the same directory only because the
+# engine was copied into every repository. Installed, they are not: the engine
+# comes from the package, the data from the repository `pm-flow` was invoked in.
+# The `pm-flow` command resolves all three roots once - see paths.py - and
+# exports them, so this script consumes them instead of deriving anything from
+# its own location. Each falls back to the copied layout, where all three
+# answers coincide, so an existing install keeps working unchanged.
+#
+# SCRIPT_DIR keeps its name and becomes the engine root, because driver.zsh is
+# sourced into this shell and reads it for agent_exec.sh, cost.py, telemetry.py,
+# the task files and the domain overlays.
+SCRIPT_DIR="${PM_FLOW_ENGINE_ROOT:-$SELF_DIR}"
+FLOW_DIR="${PM_FLOW_FLOW_DIR:-$SELF_DIR}"
+PROJECT_ROOT="${PM_FLOW_REPO_ROOT:-$(cd -P -- "$SELF_DIR/../.." && pwd -P)}"
 PM_SYSTEM_PROMPT="You are a section-scoped project management reviewer for another software agent. You are not the acting PM and you have no sub-agents: your entire output is a written review that the calling section PM will act on. Reason only about the assigned project section. Review the proposed engineering step or completion report, critique the reasoning, detect mission drift, suggest improvements, approve or reject the path forward, and name the next bounded assignment. Do not write code, do not edit files, and do not attempt to launch agents or run the flow's commands yourself. Recommend that each implementation assignment go to a fresh developer sub-agent with no inherited conversation, seeded only with the bounded assignment and explicitly allowlisted files. Focus on scope control, validation, sequencing, risks, interfaces, and drift management. Be direct and concrete, and answer only with the requested sections."
 PROJECT_OVERRIDE="${PM_FLOW_PROJECT:-}"
 SECTION_OVERRIDE="${PM_FLOW_SECTION:-}"
@@ -135,24 +148,24 @@ resolve_project_key() {
     printf '%s\n' "$(slugify "$PROJECT_OVERRIDE")"
     return
   fi
-  local key_file="$SCRIPT_DIR/.project-key"
+  local key_file="$FLOW_DIR/.project-key"
   if [[ -f "$key_file" ]]; then
     local persisted_project
     persisted_project="$(/usr/bin/head -n 1 "$key_file" | tr -d '\r')"
     [[ -n "$persisted_project" && "$persisted_project" == "$(slugify "$persisted_project")" ]] || \
       fail "invalid persisted project key: $key_file"
-    [[ -d "$SCRIPT_DIR/$persisted_project" ]] || \
-      fail "persisted project workspace does not exist: $SCRIPT_DIR/$persisted_project"
+    [[ -d "$FLOW_DIR/$persisted_project" ]] || \
+      fail "persisted project workspace does not exist: $FLOW_DIR/$persisted_project"
     printf '%s\n' "$persisted_project"
     return
   fi
   local default_project
   default_project="$(slugify "$(basename "$PROJECT_ROOT")")"
-  if [[ -d "$SCRIPT_DIR/$default_project" ]]; then
+  if [[ -d "$FLOW_DIR/$default_project" ]]; then
     printf '%s\n' "$default_project"
     return
   fi
-  fail "could not resolve project under $SCRIPT_DIR; use --project <name>"
+  fail "could not resolve project under $FLOW_DIR; use --project <name>"
 }
 
 AGENT_CONFIG_FILE=""
@@ -458,10 +471,10 @@ PY
 
 initialize_project_paths() {
   PROJECT_KEY="$(resolve_project_key)"
-  PROJECT_DIR="$SCRIPT_DIR/$PROJECT_KEY"
+  PROJECT_DIR="$FLOW_DIR/$PROJECT_KEY"
   # Dispatched roles resolve the same project, so they read the same domain.
   export PM_FLOW_PROJECT="$PROJECT_KEY"
-  AGENT_CONFIG_FILE="$SCRIPT_DIR/config.json"
+  AGENT_CONFIG_FILE="$FLOW_DIR/config.json"
   PROJECT_CONFIG_FILE="$PROJECT_DIR/project.json"
   ROLES_DIR="$SCRIPT_DIR/roles"
   DOMAINS_DIR="$SCRIPT_DIR/domains"
