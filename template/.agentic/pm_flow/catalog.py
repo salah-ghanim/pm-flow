@@ -28,10 +28,14 @@ Standard library only.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -637,6 +641,9 @@ def read_pack(path) -> dict:
             "body": body.strip(),
             "tags": tags,
             "source_path": str(file_path),
+            # Where the file sits inside the pack, which stays true however the
+            # pack itself was obtained.
+            "relative_path": str(file_path.relative_to(root)),
         })
 
     return {
@@ -645,6 +652,106 @@ def read_pack(path) -> dict:
         "description": _optional_text(manifest.get("description")),
         "manifest": manifest, "personas": personas,
     }
+
+
+# ------------------------------------------------------- packs from a git URL
+#
+# A pack is a git repository, so installing from a URL is a clone followed by
+# exactly the local install above. The clone is scaffolding: it is validated,
+# installed and then deleted, and what is kept is the URL the caller gave plus
+# the commit that was installed. The checkout path is never provenance - it does
+# not exist by the time anyone reads the store back.
+#
+# Nothing from the repository is executed. Git runs as a real argv and never
+# through a shell, so nothing in a URL is interpolated; the transports that can
+# spawn a command are refused; hooks are pointed away; and the only thing read
+# afterwards is the text the manifest names.
+
+GIT_URL_SCHEMES = ("https://", "http://", "ssh://", "git://", "git+ssh://",
+                   "file://")
+
+# scp-like remotes (git@host:owner/pack.git) carry no scheme at all.
+SCP_LIKE_URL = re.compile(r"\A[\w.+-]+@[\w.-]+:[^\s:]+\Z")
+
+# ext:: runs an arbitrary command as a transport, so the allowed set is the
+# transports that only move bytes.
+GIT_TRANSPORTS = "file:git:http:https:ssh"
+
+
+def looks_like_git_url(spec) -> bool:
+    """Whether to clone this or read it off disk.
+
+    An existing path wins: a directory named like a URL is not a remote, and
+    local installation must keep behaving exactly as it did.
+    """
+    text = str(spec).strip()
+    if Path(text).expanduser().exists():
+        return False
+    return text.startswith(GIT_URL_SCHEMES) or bool(SCP_LIKE_URL.match(text))
+
+
+def run_git(arguments, cwd=None) -> str:
+    """Git as a real process with a real argv.
+
+    No shell, so a URL is an argument rather than a fragment of a command line.
+    The clone also cannot stop to ask a question it would then hang on.
+    """
+    environment = dict(os.environ)
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    environment["GIT_ALLOW_PROTOCOL"] = GIT_TRANSPORTS
+    try:
+        done = subprocess.run(
+            ["git", "-c", "protocol.ext.allow=never",
+             "-c", "core.hooksPath=/dev/null", *arguments],
+            cwd=cwd, env=environment, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+    except OSError as error:
+        raise PackError(f"could not run git: {error}")
+    if done.returncode != 0:
+        raise PackError(done.stderr.strip() or done.stdout.strip()
+                        or f"git exited {done.returncode}")
+    return done.stdout.strip()
+
+
+@contextlib.contextmanager
+def git_checkout(url: str):
+    """Clone a pack repository into a checkout that outlives nothing.
+
+    Shallow, because installing a pack needs the tree at one commit and not the
+    history behind it, and this is not a cache: the directory goes away on the
+    way out whether the install succeeded or failed.
+    """
+    directory = tempfile.mkdtemp(prefix="pm-flow-pack-")
+    try:
+        try:
+            run_git(["clone", "--quiet", "--depth", "1", "--no-tags",
+                     "--", url, directory])
+            commit = run_git(["rev-parse", "HEAD"], cwd=directory)
+        except PackError as error:
+            # Git names the checkout it failed in. That path is about to stop
+            # existing, so it is noise in the message rather than information.
+            raise PackError(f"could not fetch {url}: "
+                            + str(error).replace(directory, "<checkout>"))
+        yield Path(directory).resolve(), commit
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def read_pack_from_url(url: str, directory: Path, commit: str) -> dict:
+    """The validated pack, carrying the caller's URL and the exact commit.
+
+    read_pack is untouched and remains the only thing that decides whether a
+    pack is acceptable. This records where it came from, and rewrites each
+    persona's source path to its place inside the pack, so that no part of the
+    temporary checkout survives into the store.
+    """
+    pack = read_pack(directory)
+    pack["source_url"] = url.strip()
+    pack["ref"] = commit
+    for spec in pack["personas"]:
+        spec["source_path"] = spec["relative_path"]
+    return pack
 
 
 PACK_PROVENANCE = ("pack_id", "author", "license", "source_url", "version",
@@ -726,7 +833,11 @@ def install_pack(connection, pack: dict) -> dict:
     there later. The personas themselves are content-addressed as always, which
     is what makes re-adding an unchanged pack a no-op.
     """
-    source = str(pack["root"])
+    # A pack fetched from a URL is provenance in the caller's terms: the URL
+    # they gave and the commit that was installed. A local pack keeps the path
+    # it was read from, and has no ref to record.
+    source = pack.get("source_url") or str(pack["root"])
+    ref = pack.get("ref")
     installed, adopted, unchanged = [], [], []
     if connection.in_transaction:
         connection.commit()
@@ -735,11 +846,12 @@ def install_pack(connection, pack: dict) -> dict:
         connection.execute(
             "INSERT INTO persona_packs (name, source_url, ref, author, license,"
             " description, manifest, installed_at)"
-            " VALUES (?, ?, NULL, ?, ?, ?, ?, ?)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(name) DO UPDATE SET source_url = excluded.source_url,"
+            " ref = excluded.ref,"
             " author = excluded.author, license = excluded.license,"
             " description = excluded.description, manifest = excluded.manifest",
-            (pack["name"], source, pack["author"], pack["license"],
+            (pack["name"], source, ref, pack["author"], pack["license"],
              pack["description"], store.dumps(pack["manifest"]), store.now()),
         )
         pack_id = connection.execute(
@@ -995,20 +1107,37 @@ def cmd_show(args):
 
 
 def cmd_persona_add(args):
-    # Validate before opening the store: a rejected pack must not so much as
-    # create the database file it was refused from.
+    # Validate before opening the store, whichever way the pack arrived: a pack
+    # that cannot be fetched or cannot be read must not so much as create the
+    # database file it was refused from.
+    if looks_like_git_url(args.source):
+        try:
+            with git_checkout(args.source) as (directory, commit):
+                pack = read_pack_from_url(args.source, directory, commit)
+                # Installed while the checkout still exists, because the persona
+                # bodies are read out of it; nothing of it is stored.
+                return install_and_report(args.db, pack)
+        except PackError as error:
+            raise SystemExit(f"persona add: {error}")
     try:
-        pack = read_pack(args.path)
+        pack = read_pack(args.source)
     except PackError as error:
         raise SystemExit(f"persona add: {error}")
-    connection = store.connect(args.db)
+    return install_and_report(args.db, pack)
+
+
+def install_and_report(db, pack: dict) -> int:
+    connection = store.connect(db)
     try:
         result = install_pack(connection, pack)
     except PackError as error:
         # install_pack has already rolled back, so the store is exactly as it
         # was; the only thing left to do is say why, without a traceback.
         raise SystemExit(f"persona add: {error}")
-    print(f"pack {pack['name']} {pack['version']} from {pack['root']}")
+    print(f"pack {pack['name']} {pack['version']} from "
+          f"{pack.get('source_url') or pack['root']}")
+    if pack.get("ref"):
+        print(f"  commit {pack['ref']}")
     print(f"  author {pack['author']} | license {pack['license']} | "
           f"tags {', '.join(pack['tags']) or '-'}")
     for key in result["installed"]:
@@ -1086,8 +1215,10 @@ def main(argv):
 
     p = sub.add_parser("persona", help="install and inspect persona packs")
     persona_sub = p.add_subparsers(dest="persona_command", required=True)
-    q = persona_sub.add_parser("add", help="install a persona pack from a local path")
-    q.add_argument("path", help="pack directory, or its persona-pack.json")
+    q = persona_sub.add_parser(
+        "add", help="install a persona pack from a local path or a git URL")
+    q.add_argument("source", metavar="path-or-url",
+                   help="pack directory, its persona-pack.json, or a git URL")
     q.set_defaults(func=cmd_persona_add)
     q = persona_sub.add_parser("list", help="installed personas and their provenance")
     q.set_defaults(func=cmd_persona_list)
