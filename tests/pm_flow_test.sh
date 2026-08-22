@@ -1227,6 +1227,18 @@ assert_contains "$wt_cwds" "/pm-flow/worktrees/worktree-repo/beta" \
 assert_not_contains "$wt_cwds" "$WT_REPO
 " "no developer dispatch ran in the main working tree"
 
+# Tool caches must land somewhere the dispatch is allowed to write. codex runs
+# reviewers under --sandbox workspace-write, which refuses $HOME/.cache, so an
+# acceptance check that builds anything failed with "Failed to initialize cache
+# ... Operation not permitted" - and the section was rejected for not passing a
+# check that could not be executed at all. Two cycles and an escalation went to
+# that before anyone looked.
+wt_env="$(/bin/cat "$TEST_ROOT/wt-state/develop_env.log")"
+assert_contains "$wt_env" "$WT_PROJECT/runs/.cache" \
+  "tool caches are pointed inside the project, where every sandbox can write"
+assert_not_contains "$wt_env" "unset" \
+  "every cache variable a build tool reads for is set, not merely one of them"
+
 # An accepted cycle merges back. Both sections wrote a file, each in its own
 # tree, and both files are in the main tree afterwards without either having
 # collided with the other.
@@ -1298,20 +1310,27 @@ assert_file_contains "$WT_REPO/src/epsilon.txt" "written by epsilon" \
 [[ -z "$(git -C "$WT_REPO" status --porcelain -- src)" ]] || \
   fail "concurrent merges left the main working tree dirty"
 
-# A section run holds the project lock in shared mode, so a project-wide run is
-# refused rather than allowed to schedule across sections at the same time.
-wt_init_section zeta
-PM_STUB_STATE="$TEST_ROOT/wt-state" PATH="$TEST_ROOT/wt-bin:$PATH" \
-  "$WT_PM" --section zeta run --max-ticks 1 > /dev/null 2>&1 &
-wt_zeta_pid=$!
+# A section run holds the project lock in shared mode, so a project-wide run,
+# which schedules across every section, must be refused rather than allowed to
+# race it. Asserted by holding the shared lock directly rather than by starting
+# a second run and hoping it is still alive: that version passed or failed
+# depending on which process won, which is a coin toss dressed up as a test.
+zmodload zsh/system
+: >> "$WT_PROJECT/.driver.lock"
+zsystem flock -t 0 -r -f WT_SHARED_LOCK "$WT_PROJECT/.driver.lock" || \
+  fail "could not take the project lock in shared mode; two section runs could never coexist"
 wt_project_refusal=0
 PM_STUB_STATE="$TEST_ROOT/wt-state" PATH="$TEST_ROOT/wt-bin:$PATH" \
   "$WT_PM" run --max-ticks 1 > "$TEST_ROOT/wt-project.log" 2>&1 || wt_project_refusal=$?
-wait "$wt_zeta_pid" || true
 (( wt_project_refusal != 0 )) || \
   fail "a project-wide run was allowed while a section run held the project lock"
 assert_contains "$(/bin/cat "$TEST_ROOT/wt-project.log")" "already running" \
   "the refusal says which lock stopped it"
+# And a second shared holder is admitted, which is the other half of the claim.
+zsystem flock -t 0 -r -f WT_SHARED_LOCK_2 "$WT_PROJECT/.driver.lock" || \
+  fail "a second section run could not take the shared lock; concurrency is not real"
+zsystem flock -u "$WT_SHARED_LOCK_2"
+zsystem flock -u "$WT_SHARED_LOCK"
 
 printf 'PASS: concurrent section runs, serialised merges, and lock exclusion\n'
 
