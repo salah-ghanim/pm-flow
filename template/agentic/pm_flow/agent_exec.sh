@@ -443,8 +443,15 @@ build_command() {
           # local script still prompts, and a prompt in a headless run is a
           # denial, so the wrappers are named explicitly or the role cannot
           # heartbeat and cannot read a page.
+          # Bare `Bash` first, because naming only the wrappers turns the grant
+          # into the whole allow-list and takes away everything else: a
+          # developer that cannot run its own test command, or an analyst that
+          # cannot validate the file it just wrote, is worse off than before
+          # the wrappers existed. The wrapper rules stay because a rule that
+          # names the script survives a stricter default later.
           AGENT_ARGV+=(--permission-mode acceptEdits
                        --allowedTools
+                       "Bash"
                        "Bash(./agentic/pm_flow/heartbeat.sh:*)"
                        "Bash(agentic/pm_flow/heartbeat.sh:*)"
                        "Bash(./agentic/pm_flow/fetch.sh:*)"
