@@ -421,9 +421,9 @@ if not logs:
     print("as `<response>.access.jsonl`, from the next dispatch onwards.")
     raise SystemExit(0)
 
-by_role = defaultdict(lambda: {"calls": 0, "outside": 0, "tools": Counter()})
-outside_paths = Counter()
-outside_examples = {}
+by_role = defaultdict(lambda: {"calls": 0, "outside": 0, "user": 0, "tools": Counter()})
+buckets = {"other": Counter(), "system": Counter(), "temp": Counter()}
+examples = {}
 total = 0
 partial_roles = set()
 
@@ -445,41 +445,57 @@ for log in logs:
             partial_roles.add(role)
         if record.get("outside"):
             entry["outside"] += 1
-            for target in record.get("targets") or []:
-                if not target.get("outside"):
-                    continue
-                path = target.get("path") or "?"
-                # Grouped by the directory two levels up, so a hundred reads of
-                # one tree read as one fact rather than a hundred.
-                parts = Path(path).parts
-                key = str(Path(*parts[:4])) if len(parts) > 4 else path
-                outside_paths[key] += 1
-                outside_examples.setdefault(key, path)
+        if record.get("reaches_user_files"):
+            entry["user"] += 1
+        for target in record.get("targets") or []:
+            kind = target.get("kind") or ("other" if target.get("outside") else "repo")
+            if kind == "repo":
+                continue
+            path = target.get("path") or "?"
+            # Grouped by the directory a few levels up, so a hundred reads of
+            # one tree read as one fact rather than a hundred.
+            parts = Path(path).parts
+            key = str(Path(*parts[:4])) if len(parts) > 4 else path
+            buckets[kind][key] += 1
+            examples.setdefault(key, path)
 
 print(f"{total} recorded tool call(s) across {len(logs)} dispatch(es)\n")
-print(f"{'ROLE':<18}{'CALLS':>8}{'OUTSIDE':>9}   TOP TOOLS")
+print(f"{'ROLE':<18}{'CALLS':>8}{'OUTSIDE':>9}{'USER FILES':>12}   TOP TOOLS")
 for role in sorted(by_role):
     entry = by_role[role]
     tools = ", ".join(f"{name} {count}" for name, count in entry["tools"].most_common(3))
     mark = " *" if role in partial_roles else ""
-    print(f"{role + mark:<18}{entry['calls']:>8}{entry['outside']:>9}   {tools}")
+    print(f"{role + mark:<18}{entry['calls']:>8}{entry['outside']:>9}"
+          f"{entry['user']:>12}   {tools}")
+print("\nOUTSIDE counts anything not under the repository or the section worktree,")
+print("which includes /bin/zsh and scratch directories. USER FILES is the column")
+print("that matters: paths that are neither ours, nor a system binary, nor temp.")
 
 if partial_roles:
     print("\n* reconstructed from codex's event stream after the dispatch, not")
     print("  observed as it happened. Shell commands only; direct file reads by")
     print("  the model are not in that stream, so this is a floor, not a total.")
 
-if outside_paths:
-    print(f"\nReached outside {repo_root}:\n")
-    limit = None if show_all else 15
-    for key, count in outside_paths.most_common(limit):
+limit = None if show_all else 15
+titles = {
+    "other": "Reached outside the project, and not a system path or scratch",
+    "system": "System paths (binaries and configuration)",
+    "temp": "Scratch and temporary directories",
+}
+for kind in ("other", "system", "temp"):
+    counts = buckets[kind]
+    if not counts:
+        if kind == "other":
+            print("\nNothing recorded outside the project that was not a system")
+            print("path or a temporary directory.")
+        continue
+    print(f"\n{titles[kind]}:\n")
+    for key, count in counts.most_common(limit):
         print(f"  {count:>5}  {key}")
-        if key != outside_examples[key]:
-            print(f"         e.g. {outside_examples[key]}")
-    if limit and len(outside_paths) > limit:
-        print(f"\n  ... and {len(outside_paths) - limit} more; pass --all to see them.")
-else:
-    print(f"\nNothing recorded outside {repo_root}.")
+        if key != examples[key]:
+            print(f"         e.g. {examples[key]}")
+    if limit and len(counts) > limit:
+        print(f"\n  ... and {len(counts) - limit} more; pass --all to see them.")
 PY_ACCESS
 }
 
@@ -846,6 +862,13 @@ dispatch_role() {
   local staged="${output_md}.staging"
 
   assert_within_budget "$section_key"
+
+  # The real repository, named before the dispatch can confuse it for one.
+  # agent_exec.sh falls back to its own PROJECT_ROOT, and under --work-root that
+  # *is* the worktree - so without this the access log calls every read of the
+  # main tree "outside the repository", which is both wrong and the majority of
+  # what it reports.
+  export PM_FLOW_REPO_ROOT="$PROJECT_ROOT"
 
   local dispatch_args=("$role" --prompt-file "$prompt_file" --output "$response_json" --label "$label")
   [[ -z "$heartbeat" ]] || dispatch_args+=(--heartbeat "$heartbeat")

@@ -49,8 +49,17 @@ if not isinstance(tool_input, dict):
 roots = [Path(p).resolve() for p in (work_root, repo_root) if p]
 
 
+# Not everything outside the repository is equally interesting. A role invoking
+# /bin/zsh is not reading your files; a role reading somewhere under your home
+# directory is. Keeping them in one bucket buries the signal under the noise,
+# and the whole point of this log is to answer one question honestly.
+SYSTEM_PREFIXES = ("/bin", "/sbin", "/usr", "/opt", "/System", "/Library", "/etc",
+                   "/dev", "/proc", "/nix", "/opt/homebrew")
+TEMP_PREFIXES = ("/tmp", "/var/tmp", "/private/tmp", "/private/var", "/var/folders")
+
+
 def classify(raw):
-    """Absolute path, and whether it falls inside a root we expected."""
+    """Absolute path, plus where it sits relative to the roots we expected."""
     if not raw:
         return None
     try:
@@ -61,13 +70,20 @@ def classify(raw):
         resolved = Path(os.path.normpath(str(resolved)))
     except (OSError, ValueError):
         return None
+    text = str(resolved)
     for root in roots:
         try:
             resolved.relative_to(root)
-            return {"path": str(resolved), "outside": False}
+            return {"path": text, "outside": False, "kind": "repo"}
         except ValueError:
             continue
-    return {"path": str(resolved), "outside": True}
+    for prefix in TEMP_PREFIXES:
+        if text == prefix or text.startswith(prefix + "/"):
+            return {"path": text, "outside": True, "kind": "temp"}
+    for prefix in SYSTEM_PREFIXES:
+        if text == prefix or text.startswith(prefix + "/"):
+            return {"path": text, "outside": True, "kind": "system"}
+    return {"path": text, "outside": True, "kind": "other"}
 
 
 targets = []
@@ -94,6 +110,9 @@ record = {
     "tool": tool,
     "targets": targets,
     "outside": any(t["outside"] for t in targets),
+    # The one that matters: a path that is neither ours, nor a system binary,
+    # nor scratch.
+    "reaches_user_files": any(t.get("kind") == "other" for t in targets),
 }
 if isinstance(command, str) and command:
     record["command"] = command[:600]
