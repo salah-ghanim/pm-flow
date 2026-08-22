@@ -1,0 +1,722 @@
+#!/usr/bin/env python3
+"""Index the definitions, and project them back out as markdown.
+
+Definitions - who an agent is, what rules bind it, how a topology is arranged -
+are markdown and JSON on disk. This module reads them into the store so they can
+be queried and joined against the record of what actually happened, and writes
+them back out as a linked markdown vault so they can be read and edited in a
+graph editor.
+
+Two directions, and they are not symmetrical:
+
+    sync       disk -> store.  The files are the truth. Definitions are
+                              content-addressed, so re-syncing an unchanged file
+                              is a no-op and editing one produces a new version
+                              rather than mutating the old, which is what makes
+                              a result attributable to an exact definition.
+
+    export-md  store -> vault. A rendering, safe to delete and regenerate,
+                              carrying [[wikilinks]] so the arrangement is a
+                              graph rather than a pile of documents.
+
+The vault is where a visual editor would eventually read and write. Nothing here
+assumes one exists; the markdown is useful on its own.
+
+Standard library only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import store  # noqa: E402
+
+# The shape of the flow as the driver actually runs it. Seeded so a fresh
+# topology is the real arrangement rather than an empty graph waiting to be
+# drawn; once it is in the store it is data, and editing it is the point.
+DEFAULT_EDGES = [
+    ("cpo", "pm", "assigns"),
+    ("pm", "developer", "assigns"),
+    ("pm", "developer", "reviews"),
+    ("developer", "consultant", "escalates_to"),
+    ("consultant", "cpo", "adjudicates"),
+    ("cpo", "10x_developer", "assigns"),
+    ("pm", "10x_developer", "reviews"),
+    ("pm", "cpo", "escalates_to"),
+]
+
+FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.S)
+
+
+def split_frontmatter(text: str):
+    """A very small YAML-ish frontmatter reader.
+
+    Deliberately not a YAML parser: the frontmatter this writes and reads is
+    flat scalars and simple lists, and taking a dependency to parse six keys
+    would be a poor trade.
+    """
+    match = FRONTMATTER.match(text or "")
+    if not match:
+        return {}, text or ""
+    meta = {}
+    for line in match.group(1).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        value = value.strip().strip('"').strip("'")
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            meta[key.strip()] = [
+                item.strip().strip('"').strip("'")
+                for item in inner.split(",") if item.strip()
+            ] if inner else []
+        else:
+            meta[key.strip()] = value
+    return meta, text[match.end():]
+
+
+def yaml_scalar(value) -> str:
+    if isinstance(value, bool):
+        # Python's True/False are not YAML's, and a graph editor reading the
+        # frontmatter would see a string where it expected a boolean.
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return "[" + ", ".join(f'"{item}"' for item in value) + "]"
+    if value is None:
+        return '""'
+    text = str(value)
+    if text == "" or any(ch in text for ch in ':#"\n'):
+        return json.dumps(text)
+    return text
+
+
+def frontmatter_block(meta: dict) -> str:
+    lines = ["---"]
+    for key, value in meta.items():
+        if value is None or value == "":
+            continue
+        lines.append(f"{key}: {yaml_scalar(value)}")
+    lines.append("---")
+    return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------- disk -> store
+
+def upsert_persona(connection, *, key, title, summary, body, layer,
+                   source_path, author=None, license=None, source_url=None,
+                   version=None, tags=None, extends_id=None) -> int:
+    """A persona, identified by its content.
+
+    Re-reading an unchanged prompt returns the same row; editing one produces a
+    new version rather than mutating the old. That is what makes a measured
+    result attributable to exact wording.
+    """
+    digest = store.content_hash(key, layer, body)
+    row = connection.execute(
+        "SELECT id FROM personas WHERE key = ? AND content_hash = ?", (key, digest)
+    ).fetchone()
+    if row:
+        return row["id"]
+    with connection:
+        cursor = connection.execute(
+            "INSERT INTO personas (key, title, summary, body, layer, extends_id,"
+            " author, license, source_url, version, tags, content_hash,"
+            " source_path, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (key, title, summary, body, layer, extends_id, author, license,
+             source_url, version, store.dumps(tags or []), digest, source_path,
+             store.now()),
+        )
+        return cursor.lastrowid
+
+
+def upsert_binding(connection, *, key, cli, model, thinking, access,
+                   cli_params) -> int:
+    """The local half: which backend actually runs a persona."""
+    digest = store.content_hash(key, cli, model, thinking, access,
+                                store.dumps(cli_params))
+    row = connection.execute(
+        "SELECT id FROM bindings WHERE key = ? AND content_hash = ?", (key, digest)
+    ).fetchone()
+    if row:
+        return row["id"]
+    with connection:
+        cursor = connection.execute(
+            "INSERT INTO bindings (key, cli, model, thinking_level, access_tier,"
+            " cli_params, content_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (key, cli, model, thinking, access, store.dumps(cli_params), digest,
+             store.now()),
+        )
+        return cursor.lastrowid
+
+
+def upsert_rule(connection, *, key, title, kind, body, source_path) -> int:
+    digest = store.content_hash(key, kind, body)
+    row = connection.execute(
+        "SELECT id FROM rules WHERE key = ? AND content_hash = ?", (key, digest)
+    ).fetchone()
+    if row:
+        return row["id"]
+    with connection:
+        cursor = connection.execute(
+            "INSERT INTO rules (key, title, kind, body, metadata, content_hash,"
+            " source_path, created_at) VALUES (?, ?, ?, ?, '{}', ?, ?, ?)",
+            (key, title, kind, body, digest, source_path, store.now()),
+        )
+        return cursor.lastrowid
+
+
+def bind_rule(connection, rule_id, scope_type, scope_id, ordering=0):
+    with connection:
+        connection.execute(
+            "INSERT OR IGNORE INTO rule_bindings (rule_id, scope_type, scope_id, ordering)"
+            " VALUES (?, ?, ?, ?)",
+            (rule_id, scope_type, scope_id, ordering),
+        )
+
+
+def register_clis(connection):
+    """What each backend can do, as data.
+
+    These are not preferences. They are the observed differences the exporter
+    and the recorder have to compensate for: where token counts can be read
+    from, whether an inbound traceparent is honoured, and whether the CLI's own
+    telemetry says anything a GenAI-aware backend can use.
+    """
+    known = {
+        "claude": {
+            "display_name": "Claude Code",
+            "thinking_levels": {"low": "low", "medium": "medium", "high": "high",
+                                "xhigh": "xhigh", "max": "max"},
+            "capabilities": {
+                "usage_source": "response_envelope",
+                "reports_cost": True,
+                "accepts_traceparent": True,
+                "emits_gen_ai_semconv": True,
+                "scoped_write": True,
+            },
+        },
+        "codex": {
+            "display_name": "Codex CLI",
+            # codex exposes three levels, so the top two collapse.
+            "thinking_levels": {"low": "low", "medium": "medium", "high": "high",
+                                "xhigh": "high", "max": "high"},
+            "capabilities": {
+                # Its response file holds only the last message, so usage has to
+                # come out of the JSONL event stream instead.
+                "usage_source": "jsonl_events",
+                "reports_cost": False,
+                "accepts_traceparent": True,
+                # Emits OTLP under a private codex.* schema with no gen_ai.*
+                # attributes, much of it log-only. pm-flow describes the call.
+                "emits_gen_ai_semconv": False,
+                "scoped_write": False,
+            },
+        },
+        "copilot": {
+            "display_name": "GitHub Copilot CLI",
+            "thinking_levels": {"low": "low", "medium": "medium", "high": "high",
+                                "xhigh": "xhigh", "max": "max"},
+            "capabilities": {
+                "usage_source": None,
+                "reports_cost": False,
+                "accepts_traceparent": False,
+                "emits_gen_ai_semconv": False,
+                "scoped_write": False,
+            },
+        },
+    }
+    with connection:
+        for key, spec in known.items():
+            connection.execute(
+                "INSERT OR REPLACE INTO clis"
+                " (key, display_name, exec_name, thinking_levels, capabilities, default_params)"
+                " VALUES (?, ?, ?, ?, ?, COALESCE((SELECT default_params FROM clis WHERE key = ?), '{}'))",
+                (key, spec["display_name"], key,
+                 store.dumps(spec["thinking_levels"]),
+                 store.dumps(spec["capabilities"]), key),
+            )
+
+
+def read_persona_layers(flow_dir: Path, role: str, domain: str):
+    """The persona layers on disk for one role, base first.
+
+    The flow already stores prompts this way - a craft persona in `roles/`, an
+    optional domain overlay in `domains/<domain>/roles/` - it just never treated
+    the two as separately addressable things. They are exactly a base layer and
+    a domain layer, so they are read as such.
+    """
+    layers = []
+    base = flow_dir / "roles" / f"{role}.md"
+    if base.is_file():
+        layers.append(("base", role, base.read_text(errors="replace"), str(base)))
+    if domain:
+        overlay = flow_dir / "domains" / domain / "roles" / f"{role}.md"
+        if overlay.is_file():
+            layers.append(("domain", f"{domain}/{role}",
+                           overlay.read_text(errors="replace"), str(overlay)))
+    return layers
+
+
+def sync(connection, flow_dir: Path, project_key: str, domain: str,
+         topology_key: str) -> dict:
+    """Read the flow directory into the store. Idempotent."""
+    register_clis(connection)
+
+    config_path = flow_dir / "config.json"
+    config = {}
+    if config_path.is_file():
+        try:
+            config = json.loads(config_path.read_text())
+        except ValueError:
+            config = {}
+
+    access = config.get("access") or {}
+    write_roles = set(access.get("write_roles") or ["developer", "10x_developer"])
+    scoped_roles = set(access.get("scoped_roles") or ["pm", "cpo"])
+
+    # -- project
+    with connection:
+        connection.execute(
+            "INSERT OR IGNORE INTO projects (key, name, domain, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (project_key, project_key, domain, store.now()),
+        )
+        connection.execute(
+            "UPDATE projects SET domain = COALESCE(?, domain) WHERE key = ?",
+            (domain, project_key),
+        )
+    project_id = connection.execute(
+        "SELECT id FROM projects WHERE key = ?", (project_key,)
+    ).fetchone()["id"]
+
+    # -- topology
+    with connection:
+        connection.execute(
+            "INSERT OR IGNORE INTO topologies (key, name, project_id, domain, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (topology_key, topology_key, project_id, domain, store.now()),
+        )
+    topology_id = connection.execute(
+        "SELECT id FROM topologies WHERE key = ? AND project_id IS ?",
+        (topology_key, project_id),
+    ).fetchone()["id"]
+
+    # -- agents, one row per seat
+    counts = {"personas": 0, "bindings": 0, "rules": 0, "seats": 0, "edges": 0}
+    roles = config.get("roles") or {}
+    for role_key, binding in sorted(roles.items()):
+        seats = binding if isinstance(binding, list) else [binding]
+        layers = read_persona_layers(flow_dir, role_key, domain)
+        tier = ("write" if role_key in write_roles
+                else "scoped" if role_key in scoped_roles else "read")
+
+        persona_ids = []
+        extends = None
+        for layer, layer_key, body, path in layers:
+            persona_id = upsert_persona(
+                connection, key=layer_key,
+                title=role_key.replace("_", " ").title(),
+                summary=f"{layer} persona for {role_key}",
+                body=body, layer=layer, source_path=path, extends_id=extends,
+                tags=[role_key] + ([domain] if layer == "domain" else []),
+            )
+            persona_ids.append(persona_id)
+            extends = persona_id
+            counts["personas"] += 1
+
+        for index, seat_binding in enumerate(seats, start=1):
+            if not isinstance(seat_binding, dict):
+                continue
+            cli_params = {
+                key: value for key, value in seat_binding.items()
+                if key not in ("cli", "model", "difficulty")
+            }
+            binding_id = upsert_binding(
+                connection, key=f"{role_key}.{index}",
+                cli=seat_binding.get("cli"), model=seat_binding.get("model"),
+                thinking=seat_binding.get("difficulty"), access=tier,
+                cli_params=cli_params,
+            )
+            counts["bindings"] += 1
+            with connection:
+                connection.execute(
+                    "INSERT OR REPLACE INTO topology_agents"
+                    " (topology_id, role_key, persona_id, binding_id, seat, ordering, overrides)"
+                    " VALUES (?, ?, ?, ?, ?, ?, '{}')",
+                    (topology_id, role_key, persona_ids[-1] if persona_ids else None,
+                     binding_id, index, index),
+                )
+            seat_row = connection.execute(
+                "SELECT id FROM topology_agents WHERE topology_id = ? AND role_key = ?"
+                " AND seat = ?", (topology_id, role_key, index),
+            ).fetchone()
+            if seat_row:
+                with connection:
+                    for order, persona_id in enumerate(persona_ids):
+                        connection.execute(
+                            "INSERT OR IGNORE INTO seat_personas"
+                            " (topology_agent_id, persona_id, ordering) VALUES (?, ?, ?)",
+                            (seat_row["id"], persona_id, order),
+                        )
+            counts["seats"] += 1
+
+            # The access tier as tool grants, so what an agent may reach for is
+            # queryable rather than buried in the dispatcher.
+            grants = []
+            if tier == "write":
+                grants = [("Edit", "**", "allow"), ("Write", "**", "allow"),
+                          ("Bash", "*", "allow")]
+            elif tier == "scoped":
+                grants = [("Edit", "<project>/**", "allow")]
+                grants += [("Bash", prefix, "allow")
+                           for prefix in (access.get("scoped_bash") or [])[:64]]
+                for pattern in access.get("audit_deny_paths") or []:
+                    if role_key in set(access.get("audit_deny_roles") or ["cpo"]):
+                        grants.append(("Edit", pattern, "deny"))
+            else:
+                grants = [("Read", "**", "allow")]
+            with connection:
+                for tool, pattern, mode in grants:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO tool_grants"
+                        " (binding_id, tool, pattern, mode) VALUES (?, ?, ?, ?)",
+                        (binding_id, tool, pattern, mode),
+                    )
+
+    # -- rules: the contract binds the project, the task procedures the topology
+    project_dir = flow_dir / project_key
+    contract = project_dir / "task_contract.md"
+    if not contract.is_file():
+        contract = flow_dir / "project" / "task_contract.md"
+    if contract.is_file():
+        rule_id = upsert_rule(
+            connection, key="task_contract", title="Task contract", kind="contract",
+            body=contract.read_text(errors="replace"), source_path=str(contract),
+        )
+        bind_rule(connection, rule_id, "project", project_id)
+        counts["rules"] += 1
+
+    task_dirs = [flow_dir / "tasks"]
+    if domain:
+        task_dirs.insert(0, flow_dir / "domains" / domain / "tasks")
+    seen_tasks = set()
+    for task_dir in task_dirs:
+        if not task_dir.is_dir():
+            continue
+        for path in sorted(task_dir.glob("*.md")):
+            if path.stem in seen_tasks:
+                continue
+            seen_tasks.add(path.stem)
+            rule_id = upsert_rule(
+                connection, key=path.stem,
+                title=path.stem.replace("_", " ").title(), kind="procedure",
+                body=path.read_text(errors="replace"), source_path=str(path),
+            )
+            bind_rule(connection, rule_id, "topology", topology_id)
+            counts["rules"] += 1
+
+    # -- edges, only between roles this topology actually has
+    present = {
+        row["role_key"] for row in connection.execute(
+            "SELECT DISTINCT role_key FROM topology_agents WHERE topology_id = ?",
+            (topology_id,),
+        )
+    }
+    with connection:
+        for from_role, to_role, kind in DEFAULT_EDGES:
+            if from_role in present and to_role in present:
+                connection.execute(
+                    "INSERT OR IGNORE INTO topology_edges"
+                    " (topology_id, from_role, to_role, kind) VALUES (?, ?, ?, ?)",
+                    (topology_id, from_role, to_role, kind),
+                )
+                counts["edges"] += 1
+
+    return counts
+
+
+# --------------------------------------------------------------- store -> vault
+
+def write_note(path: Path, parts) -> None:
+    """Join a note and collapse the blank-line noise that accumulates from
+    building it out of fragments. These are meant to be read, not just parsed."""
+    text = "\n".join(part for part in parts if part is not None)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    path.write_text(text + "\n")
+
+
+def slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-") or "unnamed"
+
+
+def export_markdown(connection, out_dir: Path) -> int:
+    """Render the catalogue as a linked vault.
+
+    Every cross-reference is a [[wikilink]], because that is what turns a folder
+    of documents into a graph an editor can draw and walk.
+    """
+    written = 0
+    for sub in ("personas", "rules", "topologies", "projects"):
+        (out_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    # Personas: newest version of each key. These are the shareable half, so
+    # each note is written to be readable on its own and installable elsewhere.
+    personas = connection.execute(
+        "SELECT * FROM personas a WHERE a.id ="
+        " (SELECT MAX(id) FROM personas b WHERE b.key = a.key) ORDER BY a.layer, a.key"
+    ).fetchall()
+    for persona in personas:
+        used_by = connection.execute(
+            "SELECT DISTINCT t.key AS topology, ta.role_key FROM seat_personas sp"
+            " JOIN topology_agents ta ON ta.id = sp.topology_agent_id"
+            " JOIN topologies t ON t.id = ta.topology_id"
+            " WHERE sp.persona_id = ? ORDER BY t.key", (persona["id"],)
+        ).fetchall()
+        meta = {
+            "type": "persona", "key": persona["key"], "title": persona["title"],
+            "layer": persona["layer"],
+            "tags": store.loads(persona["tags"]) or None,
+            "author": persona["author"], "license": persona["license"],
+            "version": persona["version"], "source_url": persona["source_url"],
+            "content_hash": (persona["content_hash"] or "")[:12],
+        }
+        body = [frontmatter_block(meta),
+                f"\n# {persona['title'] or persona['key']}\n",
+                f"\n`{persona['layer']}` layer\n"]
+        if persona["summary"]:
+            body.append(f"\n{persona['summary']}\n")
+        if used_by:
+            body.append("\n## Used by\n")
+            body.extend(f"- [[topology-{slug(row['topology'])}]] as **{row['role_key']}**"
+                        for row in used_by)
+        body.append("\n## Prompt\n")
+        body.append((persona["body"] or "").rstrip())
+        path = out_dir / "personas" / f"persona-{slug(persona['key'])}.md"
+        write_note(path, body)
+        written += 1
+
+    # Rules.
+    rules = connection.execute(
+        "SELECT * FROM rules r WHERE r.id ="
+        " (SELECT MAX(id) FROM rules b WHERE b.key = r.key) ORDER BY r.key"
+    ).fetchall()
+    for rule in rules:
+        meta = {"type": "rule", "key": rule["key"], "title": rule["title"],
+                "kind": rule["kind"],
+                "content_hash": (rule["content_hash"] or "")[:12],
+                "source": rule["source_path"]}
+        body = [frontmatter_block(meta), f"\n# {rule['title'] or rule['key']}\n",
+                f"\nKind: `{rule['kind']}`\n", "\n---\n",
+                (rule["body"] or "").rstrip()]
+        path = out_dir / "rules" / f"rule-{slug(rule['key'])}.md"
+        write_note(path, body)
+        written += 1
+
+    # Topologies: the graph itself.
+    topologies = connection.execute(
+        "SELECT t.*, p.key AS project_key FROM topologies t"
+        " LEFT JOIN projects p ON p.id = t.project_id ORDER BY t.key"
+    ).fetchall()
+    for topology in topologies:
+        seats = connection.execute(
+            "SELECT ta.id, ta.role_key, ta.seat, p.key AS persona_key,"
+            " b.cli, b.model, b.thinking_level FROM topology_agents ta"
+            " LEFT JOIN personas p ON p.id = ta.persona_id"
+            " LEFT JOIN bindings b ON b.id = ta.binding_id"
+            " WHERE ta.topology_id = ? ORDER BY ta.ordering, ta.role_key, ta.seat",
+            (topology["id"],),
+        ).fetchall()
+        edges = connection.execute(
+            "SELECT from_role, to_role, kind FROM topology_edges"
+            " WHERE topology_id = ? ORDER BY from_role, kind", (topology["id"],)
+        ).fetchall()
+        bound = connection.execute(
+            "SELECT r.key FROM rules r JOIN rule_bindings b ON b.rule_id = r.id"
+            " WHERE b.scope_type = 'topology' AND b.scope_id = ? ORDER BY r.key",
+            (topology["id"],),
+        ).fetchall()
+        meta = {"type": "topology", "key": topology["key"],
+                "project": topology["project_key"], "domain": topology["domain"],
+                "is_template": bool(topology["is_template"])}
+        body = [frontmatter_block(meta), f"\n# {topology['name'] or topology['key']}\n"]
+        if topology["project_key"]:
+            body.append(f"\nProject: [[project-{slug(topology['project_key'])}]]\n")
+        body.append("\n## Seats\n")
+        for seat in seats:
+            stack = connection.execute(
+                "SELECT p.key FROM seat_personas sp JOIN personas p ON p.id = sp.persona_id"
+                " WHERE sp.topology_agent_id = ? ORDER BY sp.ordering", (seat["id"],)
+            ).fetchall()
+            layered = " + ".join(f"[[persona-{slug(r['key'])}]]" for r in stack) or "-"
+            body.append(
+                f"- **{seat['role_key']}** seat {seat['seat']} → {layered} "
+                f"on `{seat['cli']}` / `{seat['model']}` / `{seat['thinking_level']}`"
+            )
+        if edges:
+            body.append("\n## Wiring\n")
+            body.append("```mermaid")
+            body.append("graph TD")
+            for edge in edges:
+                body.append(f"  {slug(edge['from_role'])}[{edge['from_role']}] "
+                            f"-->|{edge['kind']}| {slug(edge['to_role'])}[{edge['to_role']}]")
+            body.append("```")
+        if bound:
+            body.append("\n## Rules\n")
+            body.extend(f"- [[rule-{slug(rule['key'])}]]" for rule in bound)
+        path = out_dir / "topologies" / f"topology-{slug(topology['key'])}.md"
+        write_note(path, body)
+        written += 1
+
+    # Projects, with the comparison table that is the reason topologies are
+    # addressable in the first place.
+    projects = connection.execute("SELECT * FROM projects ORDER BY key").fetchall()
+    for project in projects:
+        runs = connection.execute(
+            "SELECT * FROM topology_comparison WHERE project = ? ORDER BY run",
+            (project["key"],),
+        ).fetchall()
+        meta = {"type": "project", "key": project["key"],
+                "domain": project["domain"]}
+        body = [frontmatter_block(meta), f"\n# {project['name'] or project['key']}\n"]
+        tops = connection.execute(
+            "SELECT key FROM topologies WHERE project_id = ? ORDER BY key",
+            (project["id"],),
+        ).fetchall()
+        if tops:
+            body.append("\n## Topologies\n")
+            body.extend(f"- [[topology-{slug(row['key'])}]]" for row in tops)
+        if runs:
+            body.append("\n## Runs\n")
+            body.append("| run | topology | status | attempts | failed | cost usd | tokens | duration s |")
+            body.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+            for run in runs:
+                duration = run["duration_s"]
+                body.append(
+                    f"| `{run['run']}` | {run['topology'] or '-'} | {run['run_status'] or '-'} "
+                    f"| {run['attempts']} | {run['failed_attempts']} "
+                    f"| {run['cost_usd']:.4f} | {run['total_tokens']} "
+                    f"| {duration:.1f} |" if duration is not None else
+                    f"| `{run['run']}` | {run['topology'] or '-'} | {run['run_status'] or '-'} "
+                    f"| {run['attempts']} | {run['failed_attempts']} "
+                    f"| {run['cost_usd']:.4f} | {run['total_tokens']} | - |"
+                )
+        path = out_dir / "projects" / f"project-{slug(project['key'])}.md"
+        write_note(path, body)
+        written += 1
+
+    return written
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_sync(args):
+    connection = store.connect(args.db)
+    counts = sync(connection, Path(args.flow), args.project, args.domain,
+                  args.topology)
+    print("synced " + ", ".join(f"{value} {key}" for key, value in counts.items()))
+    return 0
+
+
+def cmd_export_md(args):
+    connection = store.connect(args.db)
+    written = export_markdown(connection, Path(args.out))
+    print(f"wrote {written} note(s) to {args.out}")
+    return 0
+
+
+def cmd_show(args):
+    connection = store.connect(args.db)
+    print("PERSONAS")
+    for row in connection.execute(
+        "SELECT key, layer, substr(content_hash,1,8) h FROM personas a"
+        " WHERE a.id = (SELECT MAX(id) FROM personas b WHERE b.key = a.key)"
+        " ORDER BY layer, key"
+    ):
+        print(f"  {row['key']:<30} {row['layer']:<8} {row['h']}")
+    print("BINDINGS")
+    for row in connection.execute(
+        "SELECT key, cli, model, thinking_level, access_tier FROM bindings a"
+        " WHERE a.id = (SELECT MAX(id) FROM bindings b WHERE b.key = a.key) ORDER BY key"
+    ):
+        print(f"  {row['key']:<16} {row['cli']:<8} {row['model']:<18} "
+              f"{row['thinking_level']:<7} {row['access_tier']}")
+    print("RULES")
+    for row in connection.execute(
+        "SELECT key, kind FROM rules r WHERE r.id ="
+        " (SELECT MAX(id) FROM rules b WHERE b.key = r.key) ORDER BY kind, key"
+    ):
+        print(f"  {row['key']:<28} {row['kind']}")
+    print("TOPOLOGIES")
+    for row in connection.execute(
+        "SELECT t.key, p.key project, COUNT(ta.id) seats FROM topologies t"
+        " LEFT JOIN projects p ON p.id = t.project_id"
+        " LEFT JOIN topology_agents ta ON ta.topology_id = t.id"
+        " GROUP BY t.id ORDER BY t.key"
+    ):
+        print(f"  {row['key']:<20} project={row['project'] or '-':<16} seats={row['seats']}")
+    return 0
+
+
+def cmd_compare(args):
+    connection = store.connect(args.db)
+    rows = connection.execute(
+        "SELECT * FROM topology_comparison"
+        + (" WHERE project = ?" if args.project else "")
+        + " ORDER BY project, topology, run",
+        (args.project,) if args.project else (),
+    ).fetchall()
+    if not rows:
+        print("no runs recorded yet")
+        return 0
+    print(f"{'PROJECT':<16} {'TOPOLOGY':<14} {'RUN':<26} {'STATUS':<9} "
+          f"{'ATTEMPTS':>8} {'FAILED':>6} {'USD':>9} {'TOKENS':>9} {'SECONDS':>8}")
+    for row in rows:
+        duration = f"{row['duration_s']:.1f}" if row["duration_s"] is not None else "-"
+        print(f"{row['project'] or '-':<16} {row['topology'] or '-':<14} "
+              f"{row['run']:<26} {row['run_status'] or '-':<9} "
+              f"{row['attempts']:>8} {row['failed_attempts']:>6} "
+              f"{row['cost_usd']:>9.4f} {row['total_tokens']:>9} {duration:>8}")
+    return 0
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--db", help="path to the store (or $PM_FLOW_STORE)")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("sync", help="read the flow directory into the store")
+    p.add_argument("--flow", required=True)
+    p.add_argument("--project", required=True)
+    p.add_argument("--domain", default="")
+    p.add_argument("--topology", default="default")
+    p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("export-md", help="render the catalogue as a linked vault")
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=cmd_export_md)
+
+    p = sub.add_parser("show", help="what the store knows")
+    p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("compare", help="runs side by side, by topology")
+    p.add_argument("--project")
+    p.set_defaults(func=cmd_compare)
+
+    args = parser.parse_args(argv[1:])
+    args.db = args.db or os.environ.get("PM_FLOW_STORE", "")
+    if not args.db:
+        raise SystemExit("no store: pass --db or set PM_FLOW_STORE")
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

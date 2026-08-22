@@ -2,3 +2,21 @@
 .idea/
 template/agentic/pm_flow/project/runs/*
 !template/agentic/pm_flow/project/runs/.gitkeep
+
+# Python bytecode from the flow's own modules.
+__pycache__/
+*.pyc
+
+# The self-hosting instance. pm-flow is installed into its own repository as the
+# `pm-agent` project so it can work on itself, but only its *definitions* belong
+# in git: the plan, the section briefs, and the dependency graph. Everything the
+# flow writes while running is a record, and records live in the store.
+agentic/pm_flow/*/runs/*
+!agentic/pm_flow/*/runs/.gitkeep
+agentic/pm_flow/*/runs/pm_flow.db*
+
+# The store is local by construction. Committing it recreates exactly the churn
+# it exists to remove.
+**/pm_flow.db
+**/pm_flow.db-wal
+**/pm_flow.db-shm
