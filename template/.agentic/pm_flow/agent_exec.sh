@@ -27,6 +27,12 @@
 #   3  supervision gave up (see the reason in the response envelope)
 
 set -euo pipefail
+# Every dispatch runs its child as a background job, and zsh's BG_NICE default
+# re-nices those jobs. Where the sandbox denies setpriority, the shell reports
+# `nice(5) failed: operation not permitted` on this supervisor's own stderr -
+# the stream callers read as the dispatch's diagnostics. Turning the option off
+# removes the nice(2) call, so there is no warning to filter.
+unsetopt BG_NICE
 
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
 PROJECT_ROOT="$(cd -P -- "$SCRIPT_DIR/../.." && pwd -P)"
@@ -369,7 +375,10 @@ terminate_group() {
 run_attempt() {
   STALLED="0"
   local child last_activity heartbeat_seen output_seen log_seen now_epoch
-  local started_at stall_budget
+  # events_seen is declared here rather than in the poll loop: in zsh a repeated
+  # `local` on a name already local to the scope *prints* it, so re-declaring it
+  # each second wrote `events_seen=<mtime>` to this script's own stdout.
+  local started_at stall_budget events_seen
   if [[ "$AGENT_CLI" == "codex" ]]; then
     # stdout is the event stream and stderr is the diagnostics. They used to be
     # merged, which meant classify_failure read the role's own narration: a
@@ -403,7 +412,6 @@ run_attempt() {
     # On codex the response file is written once at the end and stderr may stay
     # empty for minutes, so the event stream is the only thing that moves while
     # the role is working.
-    local events_seen
     events_seen="$(file_mtime "$EVENTS_FILE")"
     (( events_seen <= log_seen )) || log_seen="$events_seen"
     heartbeat_seen=0
