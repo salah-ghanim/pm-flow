@@ -481,6 +481,12 @@ text = "\n".join(
     for path in sys.argv[1:]
     if Path(path).is_file()
 ).lower()
+# A CLI envelope carries telemetry whose *key names* read like failures:
+# `"refused":{"depth_limit":0,...}` with every counter at zero says nothing was
+# refused, but the bare substring is enough to condemn a dispatch as permanent
+# and skip the retry it needed. Strip JSON keys before matching; a real error
+# states itself in a value or on stderr, never in a key.
+text = re.sub(r'\\?"[a-z_][a-z0-9_]*\\?"\s*:', " ", text)
 usage = [
     r"usage limit", r"rate limit", r"rate.?limited", r"quota", r"429",
     r"too many requests", r"insufficient.{0,20}credit",
@@ -489,6 +495,9 @@ network = [
     r"econnreset", r"etimedout", r"enotfound", r"econnrefused", r"eai_again",
     r"network error", r"fetch failed", r"socket hang up", r"connection reset",
     r"\b50[2349]\b", r"overloaded", r"timed? ?out",
+    # The host slept or was suspended mid-call. The work is interrupted, not
+    # refused, and the next attempt usually succeeds.
+    r"went to sleep", r"response above may be incomplete",
     # A connection that dies mid-stream is transport-level by definition, and
     # the work is already paid for by the time it happens.
     r"connection closed", r"closed mid-response", r"premature close",
