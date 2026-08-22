@@ -80,6 +80,16 @@ VENV="$TEST_ROOT/venv"
 DIST="$TEST_ROOT/dist"
 mkdir -p "$DIST"
 
+# Everything the build writes lands under TEST_ROOT, which the trap removes, so
+# the caller prepares nothing: no `env -u`, no cache override, no PATH edit. An
+# inherited VIRTUAL_ENV or PYTHONPATH would be worse than untidy - it would let
+# a different interpreter, or a pm_flow already on sys.path, answer for the
+# artifact this test claims to be proving.
+unset VIRTUAL_ENV PYTHONPATH PYTHONHOME PYTHONSTARTUP
+export UV_CACHE_DIR="$TEST_ROOT/uv-cache"
+export PIP_CACHE_DIR="$TEST_ROOT/pip-cache"
+export XDG_CACHE_HOME="$TEST_ROOT/xdg-cache"
+
 if command -v uv >/dev/null 2>&1; then
   uv build --wheel --out-dir "$DIST" "$REPO_ROOT" > "$TEST_ROOT/build.log" 2>&1 || {
     /bin/cat "$TEST_ROOT/build.log" >&2
@@ -101,6 +111,12 @@ fi
 
 PM_FLOW="$VENV/bin/pm-flow"
 [[ -x "$PM_FLOW" ]] || fail "the install produced no pm-flow entry point at $PM_FLOW"
+
+# The build actually used the redirected cache rather than the caller's: if the
+# directory is missing, the exports above stopped working and this run is
+# quietly writing into whatever cache the caller had configured.
+[[ -d "$UV_CACHE_DIR" || -d "$PIP_CACHE_DIR" ]] || \
+  fail "the build wrote no cache inside the test workspace, so it used the caller's"
 VENV_REAL="$(cd -P "$VENV" && pwd -P)"
 
 # --- a fixture repository holding project data and nothing else --------------

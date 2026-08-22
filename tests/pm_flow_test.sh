@@ -2,6 +2,22 @@
 set -euo pipefail
 unsetopt BG_NICE
 
+# --- no inherited selector may reach the fixture -----------------------------
+#
+# PM_FLOW_PROJECT and PM_FLOW_ROOT are legitimate overrides, and a pm-flow run
+# that dispatches this suite exports both. Inherited, they point the fixture's
+# commands at the *caller's* project workspace, which does not exist inside the
+# temporary repository, so the suite dies before its first PASS group. The
+# fixture is written here in full; nothing it needs may come from outside it.
+for name in ${(k)parameters[(I)PM_FLOW_*]}; do
+  unset "$name"
+done
+# `fail` is defined further down, once TEST_ROOT exists; this check runs first.
+[[ -z "${PM_FLOW_PROJECT:-}${PM_FLOW_ROOT:-}${PM_FLOW_ENGINE_ROOT:-}${PM_FLOW_REPO_ROOT:-}${PM_FLOW_FLOW_DIR:-}" ]] || {
+  printf 'FAIL: a PM_FLOW_* override survived into the test environment\n' >&2
+  exit 1
+}
+
 REPO_ROOT="$(cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-test.XXXXXX")"
 TEST_ROOT="$(cd -P "$TEST_ROOT" && pwd -P)"
