@@ -19,7 +19,7 @@ the problem are real, not noise to skip past. Append a one-line status to
 terminated as hung.
 
 Write it with the wrapper, which timestamps the line for you:
-`./.agentic/pm_flow/heartbeat.sh {{HEARTBEAT_FILE}} "<what you just did>"`.
+`{{HEARTBEAT_SCRIPT}} {{HEARTBEAT_FILE}} "<what you just did>"`.
 Do not build the timestamp inline with `$(date ...)`; that is shell the
 permission layer refuses, and a refused heartbeat reads as a silent run.
 

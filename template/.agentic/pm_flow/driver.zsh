@@ -324,6 +324,17 @@ context_bullet_list() {
   done
 }
 
+# How a role should invoke the heartbeat script.
+#
+# It used to be written into the task files as `./.agentic/pm_flow/heartbeat.sh`,
+# relative to the repository root. That is wrong twice over now: a dispatch in a
+# section worktree has a different root, and once the engine is an installed
+# package there is no copy at that path at all. The installed script's own
+# location is right in every case.
+heartbeat_command() {
+  printf '%s/heartbeat.sh\n' "$SCRIPT_DIR"
+}
+
 # The same choice for a single path, for the prompt substitutions that name one
 # file rather than a list.
 dispatch_path() {
@@ -1098,13 +1109,17 @@ do_develop() {
   # the section's worktree. The cycle directory travels with it as a grant: the
   # assignment has to be readable and the heartbeat writable, and both live with
   # the run records rather than with the code.
-  begin_worktree_dispatch "$(basename "$section_dir")" "$cycle_dir"
+  # The section directory, not just the cycle: the assignment lives in the cycle
+  # but the brief and the section state are its parents, and a role that cannot
+  # read its own brief is worse off inside a worktree than it was outside one.
+  begin_worktree_dispatch "$(basename "$section_dir")" "$section_dir"
   context="$(context_bullet_list "$cycle_dir/assignment.md" "$section_dir/brief.md" "$section_dir/state.md")"
   prompt="$cycle_dir/develop_prompt.md"
   compose_role_task developer "$(task_file developer_assignment)" \
     "SECTION_KEY=$(basename "$section_dir")" \
     "CYCLE=$cycle_number" \
     "CONTEXT_FILES=$context" \
+    "HEARTBEAT_SCRIPT=$(heartbeat_command)" \
     "HEARTBEAT_FILE=$(dispatch_path "$heartbeat")" > "$prompt"
 
   dispatch_role developer "$prompt" "$cycle_dir/result.md" "$heartbeat" \
@@ -1344,7 +1359,7 @@ do_rescue() {
     local attempt_dir="$escalation_dir/rescue_$index"
     mkdir -p "$attempt_dir"
     (
-      begin_worktree_dispatch "$(basename "$section_dir")-rescue-$index" "$attempt_dir"
+      begin_worktree_dispatch "$(basename "$section_dir")-rescue-$index" "$section_dir"
       context="$(context_bullet_list "$section_dir/brief.md" \
         "$escalation_dir/failure_brief.md" "$escalation_dir/adjudication.md")"
       prompt="$attempt_dir/prompt.md"
@@ -1352,6 +1367,7 @@ do_rescue() {
         "SECTION_KEY=$(basename "$section_dir")" \
         "CONTEXT_FILES=$context" \
         "CHOSEN_PATH=$(printf '%s\n' "$paths" | sed -n "${index}p")" \
+        "HEARTBEAT_SCRIPT=$(heartbeat_command)" \
         "HEARTBEAT_FILE=$(dispatch_path "$attempt_dir/heartbeat.txt")" > "$prompt"
       dispatch_role 10x_developer "$prompt" "$attempt_dir/result.md" \
         "$attempt_dir/heartbeat.txt" "rescue $(basename "$section_dir") path $index" \

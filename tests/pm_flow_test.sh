@@ -972,6 +972,11 @@ assert_contains "$success_run" "scope 001 -> ASSIGN" "driver scopes the first as
 assert_contains "$success_run" "develop 001 -> result" "driver dispatches the developer"
 assert_contains "$success_run" "review 001 -> GO" "driver reviews the result"
 assert_contains "$success_run" "complete -> section done" "driver completes the section"
+# A task file gained {{HEARTBEAT_SCRIPT}} and the driver had to learn to fill
+# it. An unrendered placeholder reaches the role as literal braces and it does
+# whatever it likes with them, so the dispatched prompt is checked directly.
+assert_not_contains "$(/bin/cat "$DRIVER_SECTION/cycles/001/develop_prompt.md")" "{{" \
+  "the dispatched developer prompt has no unrendered placeholders"
 assert_contains "$success_run" "no section has actionable work" "the run terminates on its own"
 assert_contains "$("$DRIVER_PM" status)" "done" "a completed section is done"
 assert_file_contains "$DRIVER_SECTION/handoff.md" "Widget works." "the driver publishes the pm's handoff"

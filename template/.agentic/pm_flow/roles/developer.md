@@ -34,7 +34,7 @@ example when you finish reading the existing code, when you start implementing a
 component, and when tests first pass. A stalled run with no heartbeat is treated
 as failed and will be retried, so keep it current.
 
-Write each line with `./.agentic/pm_flow/heartbeat.sh <file> "<message>"`, which
+Write each line with the heartbeat command your assignment names, which
 timestamps it for you. Building the timestamp inline with `$(date ...)` is shell
 the permission layer refuses, and a refused heartbeat reads as a silent run.
 
