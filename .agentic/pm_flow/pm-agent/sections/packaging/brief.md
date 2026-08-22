@@ -1,7 +1,8 @@
 ### Objective
 Make the engine an installed Python package with a per-project version, so that
 upgrading is `pip install -U` and not a file-copying protocol we maintain
-ourselves.
+ourselves. Then move the engine into it, and delete the machinery that existed
+only to manage the copies.
 
 ### Scope
 Everything pm-flow currently does about versioning exists for one reason: the
@@ -32,6 +33,21 @@ packaged default, which is what removes the need to merge anything on upgrade.
 A console entry point (`pm-flow`) locates the packaged engine through
 `importlib.resources` and runs it against the repository it was invoked in.
 
+**What is already built.** `pyproject.toml`, `src/pm_flow/paths.py` and
+`src/pm_flow/cli.py` exist and a wheel has been built and run from a clean venv
+with no checkout present. `paths.py` holds the layout for both languages, with
+`$PROJECT$`-style macros so persisted paths survive a move, and it already
+distinguishes `engine_root` from `repo_root`, `flow_dir` and `project_dir`. The
+remaining work is the move itself and the deletions that follow it.
+
+**What changed since this brief was first written.** It was originally scoped to
+`pyproject.toml` and `src/**` only, because a wider scope overlapped three
+sections that were themselves scoped against the layout this section replaces.
+That refusal was correct at the time. It is no longer: `installer` is closed,
+and the sections that overlapped are blocked pending a re-cut *against this
+section's result*, which cannot be written until this lands. Packaging is not a
+peer of those sections; it is the re-baselining they will be re-cut against.
+
 ### Priority
 - must-have. Every other section is cheaper after this and some become
   unnecessary; doing them first means doing them twice.
@@ -39,21 +55,16 @@ A console entry point (`pm-flow`) locates the packaged engine through
 ### Owned paths
 - pyproject.toml
 - src/**
-
-Deliberately narrow, and the reason matters. The flow refused a wider scope: this
-section's natural boundary overlaps `installer` on install.sh, `codex-usage` on
-agent_exec.sh, and `agents-md` on CLAUDE.md. That refusal is correct and is the
-most useful thing the section registry has said so far - packaging is not a peer
-of those sections, it is a re-baselining that invalidates the layout they were
-scoped against.
-
-So build the package here, in new paths that collide with nothing. Moving the
-existing engine into it is a second step, taken once those sections have landed
-or been re-cut against the new layout, and coordinated through handoffs rather
-than by widening this brief.
+- install.sh
+- MANIFEST
+- template/**
+- tests/**
+- .gitignore
+- README.md
 
 ### Dependencies
 - green-suite
+- worktree-isolation
 
 ### Acceptance
 - `pip install pm-flow` (or `uv tool install`) into a project venv provides a
@@ -75,3 +86,5 @@ than by widening this brief.
 - MANIFEST, upgrade.py or the file-lifecycle machinery survive without being
   either deleted or justified in the handoff. They exist to solve the problem
   this section removes.
+- The suite is weakened, skipped, or made to exit zero without running to
+  completion. It is the only mechanical evidence any of the above is true.

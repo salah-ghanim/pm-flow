@@ -1,1 +1,1 @@
-Section created; its PM sub-agent has not been launched yet.
+Blocked: scoped against a layout packaging replaces; re-cut once packaging lands.

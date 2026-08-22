@@ -1,2 +1,8 @@
 pyproject.toml
 src/**
+install.sh
+MANIFEST
+template/**
+tests/**
+.gitignore
+README.md
