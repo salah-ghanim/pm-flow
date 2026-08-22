@@ -389,6 +389,186 @@ assert_within_budget() {
   fi
 }
 
+# --- telemetry --------------------------------------------------------------
+#
+# The flow is the only thing that knows what a project, a topology, a section
+# and a role are, so it is the thing that has to describe the work. Neither
+# agent CLI can: one of them emits no GenAI semantic conventions at all, and
+# neither has any concept of the section it is working on.
+#
+# Spans are recorded to the store as work happens and shipped to a backend
+# afterwards, because an unattended run outlives whatever was listening when it
+# started. `pm_flow.sh trace export` is what ships them.
+#
+# Nothing here may end a run. Every call is guarded and every failure swallowed:
+# a broken recorder costs an observation, and a dead dispatch costs money.
+#
+# NOT YET CALLED. Wiring these into dispatch_role regressed the scheduling tests
+# in a way that has not been explained - the dispatch stopped producing its
+# output with no error on any stream - so the call sites were removed and the
+# helpers left in place. Re-wire them only together with a test that proves a
+# dispatch still happens, which is what `trace-commands` exists to do.
+
+TELEMETRY_TRACE_ID=""
+TELEMETRY_RUN_KEY=""
+TELEMETRY_ROOT_SPAN=""
+TELEMETRY_TOPOLOGY=""
+TELEMETRY_ATTEMPT_ID=""
+TELEMETRY_ATTEMPT_SPAN=""
+
+telemetry_store_file() {
+  printf '%s/pm_flow.db\n' "${RUNS_DIR:-}"
+}
+
+# Every variable this touches is read through `${x:-}`. Under `set -u` a bare
+# reference to an unset name is fatal, and telemetry reaching a dispatch before
+# the project paths are resolved would then kill the run it was only supposed to
+# describe. Nothing here may be the reason a dispatch does not happen.
+config_setting() {
+  local config_file="${AGENT_CONFIG_FILE:-}"
+  [[ -f "$config_file" ]] || { printf '%s\n' "$3"; return 0; }
+  python3 - "$config_file" "$1" "$2" "$3" <<'PY_CONFIG' 2>/dev/null || printf '%s\n' "$3"
+import json
+import sys
+from pathlib import Path
+
+config_path, section, key, default = sys.argv[1:]
+try:
+    config = json.loads(Path(config_path).read_text())
+except (OSError, ValueError):
+    config = {}
+value = config.get(section, {}).get(key, default)
+if isinstance(value, bool):
+    value = "1" if value else "0"
+print("" if value is None else value)
+PY_CONFIG
+}
+
+telemetry_enabled() {
+  [[ -n "${SCRIPT_DIR:-}" && -f "$SCRIPT_DIR/telemetry.py" ]] || return 1
+  # Without a resolved project there is nowhere to record to, and asking anyway
+  # would dereference paths that do not exist yet.
+  [[ -n "${RUNS_DIR:-}" && -n "${PROJECT_KEY:-}" ]] || return 1
+  [[ "$(config_setting telemetry enabled 1)" != "0" ]]
+}
+
+# Read one `key=value` line out of a telemetry.py result.
+telemetry_field() {
+  printf '%s\n' "$1" | sed -n "s/^$2=//p" | /usr/bin/head -n 1
+}
+
+telemetry_begin_run() {
+  local command="${1:-run}" output domain
+  telemetry_enabled || return 0
+  resolve_domain 2>/dev/null || true
+  domain="${DOMAIN:-generic}"
+  TELEMETRY_TOPOLOGY="${PM_FLOW_TOPOLOGY:-$(config_setting telemetry topology default)}"
+  [[ -n "$TELEMETRY_TOPOLOGY" ]] || TELEMETRY_TOPOLOGY="default"
+  mkdir -p "$RUNS_DIR" 2>/dev/null || true
+
+  # Re-index the definitions at the top of every run. A persona or config edit
+  # between runs then belongs to the run that used it, instead of being
+  # attributed to whatever the store happened to hold from last time.
+  python3 "$SCRIPT_DIR/catalog.py" --db "$(telemetry_store_file)" sync \
+    --flow "$SCRIPT_DIR" --project "${PROJECT_KEY:-}" --domain "$domain" \
+    --topology "$TELEMETRY_TOPOLOGY" >/dev/null 2>&1 || true
+
+  output="$(python3 "$SCRIPT_DIR/telemetry.py" --db "$(telemetry_store_file)" \
+    run-start --project "${PROJECT_KEY:-}" --topology "$TELEMETRY_TOPOLOGY" \
+    --domain "$domain" --command "$command" 2>/dev/null)" || return 0
+  TELEMETRY_RUN_KEY="$(telemetry_field "$output" run_key)"
+  TELEMETRY_TRACE_ID="$(telemetry_field "$output" trace_id)"
+  TELEMETRY_ROOT_SPAN="$(telemetry_field "$output" span_id)"
+  [[ -n "$TELEMETRY_RUN_KEY" ]] || return 0
+  export PM_FLOW_STORE="$(telemetry_store_file)"
+  export PM_FLOW_RUN_KEY="$TELEMETRY_RUN_KEY"
+  export PM_FLOW_TRACE_ID="$TELEMETRY_TRACE_ID"
+  return 0
+}
+
+telemetry_end_run() {
+  local status="${1:-ok}"
+  [[ -n "$TELEMETRY_RUN_KEY" ]] || return 0
+  python3 "$SCRIPT_DIR/telemetry.py" --db "$(telemetry_store_file)" run-end \
+    --run "$TELEMETRY_RUN_KEY" --span "$TELEMETRY_ROOT_SPAN" \
+    --status "$status" >/dev/null 2>&1 || true
+  telemetry_autoexport
+  return 0
+}
+
+# Ship on the way out, when an endpoint is configured. A run that finishes with
+# a live collector should not need a second command to appear in it.
+telemetry_autoexport() {
+  local endpoint
+  endpoint="$(config_setting telemetry otlp_endpoint '')"
+  [[ -n "$endpoint" ]] || return 0
+  python3 "$SCRIPT_DIR/trace_export.py" --db "$(telemetry_store_file)" \
+    --otlp "$endpoint" >/dev/null 2>&1 || true
+  return 0
+}
+
+# Open a span for one dispatch, and hand the child CLI a traceparent so a
+# backend that honours W3C context nests its own spans under this one instead of
+# starting a disconnected trace.
+#
+# Arguments are assembled into an array rather than interpolated: zsh does not
+# word-split a parameter expansion, so `${key:+--task "$key"}` would arrive as a
+# single argument spelled `--task mysection`.
+telemetry_begin_attempt() {
+  local role="$1" prompt_file="$2" label="$3" section_key="$4" output_md="$5"
+  local cycle="" output parent
+  TELEMETRY_ATTEMPT_ID=""
+  TELEMETRY_ATTEMPT_SPAN=""
+  telemetry_enabled || return 0
+  [[ -n "$TELEMETRY_RUN_KEY" ]] || return 0
+
+  # sections/<key>/cycles/007/result.md carries the cycle in its path, which is
+  # the only place it exists: the driver derives state from paths rather than
+  # holding it anywhere.
+  if [[ "$output_md" == */cycles/* ]]; then
+    cycle="${output_md##*/cycles/}"
+    cycle="${cycle%%/*}"
+    if [[ "$cycle" == <-> ]]; then
+      cycle=$(( 10#$cycle ))
+    else
+      cycle=""
+    fi
+  fi
+
+  local args=(--db "$(telemetry_store_file)" attempt-start
+              --run "$TELEMETRY_RUN_KEY" --parent-span "$TELEMETRY_ROOT_SPAN"
+              --role "$role" --label "$label" --name "$role: $label"
+              --prompt-file "$prompt_file")
+  [[ -z "$section_key" ]] || args+=(--task "$section_key")
+  [[ -z "$cycle" ]] || args+=(--cycle "$cycle")
+
+  output="$(python3 "$SCRIPT_DIR/telemetry.py" "${args[@]}" 2>/dev/null)" || return 0
+  TELEMETRY_ATTEMPT_ID="$(telemetry_field "$output" attempt_id)"
+  TELEMETRY_ATTEMPT_SPAN="$(telemetry_field "$output" span_id)"
+  parent="$(telemetry_field "$output" traceparent)"
+  [[ -z "$parent" ]] || export TRACEPARENT="$parent"
+  return 0
+}
+
+# Close it. The backend, model and token counts are read back out of the
+# response envelope rather than passed in, so the dispatcher stays the only
+# thing that resolves a role to a binding.
+telemetry_end_attempt() {
+  local response_json="$1" output_md="$2" status="${3:-ok}"
+  local events="${response_json%.json}.events.jsonl"
+  unset TRACEPARENT
+  [[ -n "$TELEMETRY_ATTEMPT_ID" ]] || return 0
+  local args=(--db "$(telemetry_store_file)" attempt-end
+              --attempt "$TELEMETRY_ATTEMPT_ID" --status "$status"
+              --response "$response_json")
+  [[ -z "$output_md" ]] || args+=(--output-file "$output_md")
+  [[ ! -f "$events" ]] || args+=(--events "$events")
+  python3 "$SCRIPT_DIR/telemetry.py" "${args[@]}" >/dev/null 2>&1 || true
+  TELEMETRY_ATTEMPT_ID=""
+  TELEMETRY_ATTEMPT_SPAN=""
+  return 0
+}
+
 # --- governance -------------------------------------------------------------
 #
 # The product officer used to have three dispatch points and two of them were
@@ -549,6 +729,7 @@ dispatch_role() {
     fail "role '$role' did not produce a usable response for $label; see $response_json"
   fi
   python3 - "$response_json" "$staged" <<'PY'
+
 import json
 import sys
 from pathlib import Path
