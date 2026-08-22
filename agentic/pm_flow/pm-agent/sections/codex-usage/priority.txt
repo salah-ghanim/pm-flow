@@ -1,0 +1,2 @@
+must-have
+Without this, half the roles in a default install report no tokens

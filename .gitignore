@@ -8,15 +8,35 @@ __pycache__/
 *.pyc
 
 # The self-hosting instance. pm-flow is installed into its own repository as the
-# `pm-agent` project so it can work on itself, but only its *definitions* belong
-# in git: the plan, the section briefs, and the dependency graph. Everything the
-# flow writes while running is a record, and records live in the store.
-agentic/pm_flow/*/runs/*
-!agentic/pm_flow/*/runs/.gitkeep
-agentic/pm_flow/*/runs/pm_flow.db*
+# `pm-agent` project so it can work on itself. Almost none of it belongs in git:
+# the scripts, roles, domains and tasks under agentic/ are copies that install.sh
+# renders from template/, and committing a second copy of the engine guarantees
+# the two drift. Reproduce it with:
+#
+#   ./install.sh . --name "pm-flow self-hosting" --project-key pm_agent
+#
+# What is kept is the part that was authored rather than generated: the plan, the
+# section briefs, and the dependency graph between them.
+agentic/*
+!agentic/pm_flow/
+agentic/pm_flow/*
+!agentic/pm_flow/pm-agent/
+agentic/pm_flow/pm-agent/*
+!agentic/pm_flow/pm-agent/project_state/
+!agentic/pm_flow/pm-agent/sections/
+agentic/pm_flow/pm-agent/sections/*/cycles/
+agentic/pm_flow/pm-agent/sections/*/runs/
+
+# The rendered agent-instructions file is generated from template/CLAUDE.md at
+# install time. The template is the source; a rendered copy only drifts from it.
+/CLAUDE.md
 
 # The store is local by construction. Committing it recreates exactly the churn
 # it exists to remove.
 **/pm_flow.db
 **/pm_flow.db-wal
 **/pm_flow.db-shm
+
+# Runtime locks, not state.
+agentic/pm_flow/*/sections/.*.lock
+agentic/pm_flow/*/sections/*.lock
