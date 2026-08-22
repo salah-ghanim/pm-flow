@@ -516,14 +516,6 @@ def cmd_attempt_start(args):
         ).fetchone()
         task_id = row["id"] if row else None
 
-    agent_definition_id = None
-    if args.agent_hash:
-        row = connection.execute(
-            "SELECT id FROM agent_definitions WHERE content_hash = ?",
-            (args.agent_hash,),
-        ).fetchone()
-        agent_definition_id = row["id"] if row else None
-
     input_artifact_id = None
     input_text = None
     if args.prompt_file and capture_content():
@@ -533,18 +525,47 @@ def cmd_attempt_start(args):
                 connection, input_text, max_bytes=max_content_bytes()
             )
 
+    # Which persona layers this seat is made of, and which backend runs it.
+    # Read off the seat the catalogue already indexed rather than passed in by
+    # the caller: the composed prompt and this record then come from one
+    # definition of the stack, so they cannot disagree about order.
+    persona_id = None
+    binding_id = None
+    persona_stack = []
+    if topology_id:
+        seat_row = connection.execute(
+            "SELECT id, persona_id, binding_id FROM topology_agents"
+            " WHERE topology_id = ? AND role_key = ? AND seat = ?",
+            (topology_id, args.role, args.seat),
+        ).fetchone()
+        if seat_row is not None:
+            persona_id = seat_row["persona_id"]
+            binding_id = seat_row["binding_id"]
+            persona_stack = [
+                {"key": row["key"], "layer": row["layer"],
+                 "content_hash": row["content_hash"]}
+                for row in connection.execute(
+                    "SELECT p.key, p.layer, p.content_hash FROM seat_personas sp"
+                    " JOIN personas p ON p.id = sp.persona_id"
+                    " WHERE sp.topology_agent_id = ? ORDER BY sp.ordering",
+                    (seat_row["id"],),
+                )
+            ]
+
     started = store.now()
     with connection:
         cursor = connection.execute(
             "INSERT INTO attempts"
-            " (run_id, project_id, task_id, agent_definition_id, role_key, seat,"
+            " (run_id, project_id, task_id, role_key, seat,"
             "  cycle, attempt_no, label, step, trace_id, span_id, cli, model,"
-            "  thinking_level, access_tier, started_at, status, input_artifact_id)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)",
-            (run_id, project_id, task_id, agent_definition_id, args.role, args.seat,
+            "  thinking_level, access_tier, started_at, status, input_artifact_id,"
+            "  persona_id, binding_id, persona_stack)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running',"
+            "  ?, ?, ?, ?)",
+            (run_id, project_id, task_id, args.role, args.seat,
              args.cycle, args.attempt_no, args.label, args.step, trace_id, span_id,
              args.cli, args.model, args.thinking, args.access, started,
-             input_artifact_id),
+             input_artifact_id, persona_id, binding_id, store.dumps(persona_stack)),
         )
         attempt_id = cursor.lastrowid
 
@@ -736,7 +757,7 @@ def build_parser():
     p.add_argument("--attempt-no", type=int, default=1)
     p.add_argument("--label"); p.add_argument("--step"); p.add_argument("--name")
     p.add_argument("--cli"); p.add_argument("--model"); p.add_argument("--thinking")
-    p.add_argument("--access"); p.add_argument("--agent-hash")
+    p.add_argument("--access")
     p.add_argument("--prompt-file"); p.add_argument("--span-kind", default="AGENT")
     p.set_defaults(func=cmd_attempt_start)
 

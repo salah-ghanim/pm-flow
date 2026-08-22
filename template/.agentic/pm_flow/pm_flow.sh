@@ -225,26 +225,37 @@ compose_role_prompt() {
   local role="$1"
   [[ -f "$AGENT_CONFIG_FILE" ]] || fail "missing agent config: $AGENT_CONFIG_FILE"
   resolve_domain
-  # A domain may replace a persona outright, not merely retitle it. Research
-  # work and build work do not differ by an adjective: one delivers code and
-  # tests, the other delivers sourced findings, and one persona cannot describe
-  # both. An overlay file wins; a domain with nothing to say about a role falls
-  # through to the generic persona and is retitled as before.
-  local role_file="$DOMAINS_DIR/$DOMAIN/roles/$role.md"
-  [[ -f "$role_file" ]] || role_file="$ROLES_DIR/$role.md"
-  [[ -f "$role_file" ]] || fail "unknown role '$role'; no persona at $role_file"
+  # Three layers, applied in order: the packaged craft persona, the packaged
+  # domain overlay, then the repository's own. A domain may say something a
+  # generic persona cannot - research work and build work do not differ by an
+  # adjective - and a repository may say something no package could know, and
+  # neither has to edit the layer beneath it to say it. That is what makes
+  # upgrading the package leave a customised role alone: the customisation is a
+  # file in the project workspace that the package has never heard of.
+  #
+  # The layer set is resolved by catalog.read_persona_layers, which is also what
+  # the catalogue records against the seat. One definition, so the prompt a role
+  # receives and the stack recorded against its attempt cannot disagree.
+  local base_file="$ROLES_DIR/$role.md"
+  [[ -f "$base_file" || -f "$DOMAINS_DIR/$DOMAIN/roles/$role.md" || \
+     -f "$PROJECT_DIR/roles/$role.md" ]] || \
+    fail "unknown role '$role'; no persona at $base_file"
   local project_name="$PROJECT_KEY"
   if [[ -f "$CONTRACT_FILE" ]]; then
     local contract_heading
     contract_heading="$(/usr/bin/head -n 1 "$CONTRACT_FILE" | sed -E 's/^#[[:space:]]*//; s/[[:space:]]+Task Contract[[:space:]]*$//')"
     [[ -z "$contract_heading" ]] || project_name="$contract_heading"
   fi
-  python3 - "$DOMAIN" "$DOMAINS_DIR" "$role_file" "$role" "$project_name" <<'PY'
+  python3 - "$DOMAIN" "$DOMAINS_DIR" "$SCRIPT_DIR" "$PROJECT_DIR" "$PROJECT_KEY" \
+      "$role" "$project_name" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-domain, domains_dir, role_path, role, project_name = sys.argv[1:]
+domain, domains_dir, engine_dir, project_dir, project_key, role, project_name = sys.argv[1:]
+sys.path.insert(0, engine_dir)
+import catalog  # noqa: E402
+
 domain_file = Path(domains_dir) / f"{domain}.json"
 if not domain_file.is_file():
     raise SystemExit(f"unknown domain {domain!r}; no definition at {domain_file}")
@@ -253,12 +264,19 @@ titles = definition.get("titles", {})
 if role not in titles:
     raise SystemExit(f"domain {domain!r} does not define a title for role {role!r}")
 context = definition.get("context", [])
-rendered = Path(role_path).read_text()
-rendered = rendered.replace("{{ROLE_TITLE}}", titles[role])
-rendered = rendered.replace("{{DOMAIN_LABEL}}", definition.get("label", "software project"))
-rendered = rendered.replace("{{DOMAIN_CONTEXT}}", "\n".join(f"- {line}" for line in context))
-rendered = rendered.replace("{{PROJECT_NAME}}", project_name)
-sys.stdout.write(rendered)
+layers = catalog.read_persona_layers(Path(engine_dir), role, domain,
+                                     Path(project_dir), project_key)
+if not layers:
+    raise SystemExit(f"unknown role {role!r}; no persona layer on disk")
+for index, (_layer, _key, body, _path) in enumerate(layers):
+    rendered = body
+    rendered = rendered.replace("{{ROLE_TITLE}}", titles[role])
+    rendered = rendered.replace("{{DOMAIN_LABEL}}", definition.get("label", "software project"))
+    rendered = rendered.replace("{{DOMAIN_CONTEXT}}", "\n".join(f"- {line}" for line in context))
+    rendered = rendered.replace("{{PROJECT_NAME}}", project_name)
+    if index:
+        sys.stdout.write("\n")
+    sys.stdout.write(rendered)
 PY
 }
 
@@ -323,7 +341,7 @@ run_panel_seats() {
   local seat pids=()
   for seat in {1..$PANEL_SEATS}; do
     (
-      "$SCRIPT_DIR/agent_exec.sh" consultant \
+      zsh -f "$SCRIPT_DIR/agent_exec.sh" consultant \
         --seat "$seat" \
         --prompt-file "$persona_file" \
         --output "$panel_dir/proposal_${seat}.json" \

@@ -34,9 +34,20 @@ set -euo pipefail
 # removes the nice(2) call, so there is no warning to filter.
 unsetopt BG_NICE
 
-SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
-PROJECT_ROOT="$(cd -P -- "$SCRIPT_DIR/../.." && pwd -P)"
-CONFIG_FILE="$SCRIPT_DIR/config.json"
+SELF_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
+# Installed, this script does not sit inside the repository it is working on, so
+# nothing here may be derived from its own location. `pm-flow` resolves the
+# engine, the repository and the flow directory once - see paths.py - and
+# exports them; each falls back to the copied layout, where all three answers
+# coincide, so an existing install behaves exactly as before.
+#
+# SCRIPT_DIR keeps its name and is the engine: access_hook.sh and the personas.
+# FLOW_DIR is project data: config.json, the project selector, the project
+# workspace and the repository's own local_env.sh.
+SCRIPT_DIR="${PM_FLOW_ENGINE_ROOT:-$SELF_DIR}"
+FLOW_DIR="${PM_FLOW_FLOW_DIR:-$SELF_DIR}"
+PROJECT_ROOT="${PM_FLOW_REPO_ROOT:-$(cd -P -- "$SELF_DIR/../.." && pwd -P)}"
+CONFIG_FILE="$FLOW_DIR/config.json"
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -118,27 +129,27 @@ if [[ -d "$PROJECT_ROOT/.venv" && -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
   export VIRTUAL_ENV="$PROJECT_ROOT/.venv"
   export PATH="$PROJECT_ROOT/.venv/bin:$PATH"
 fi
-if [[ -f "$SCRIPT_DIR/local_env.sh" ]]; then
+if [[ -f "$FLOW_DIR/local_env.sh" ]]; then
   # shellcheck disable=SC1091
-  source "$SCRIPT_DIR/local_env.sh"
+  source "$FLOW_DIR/local_env.sh"
 fi
 
 # The flow directory hosts several projects and each records its own domain, so
 # resolve the calling project before falling back to the flow-wide default.
 PROJECT_CONFIG_FILE=""
 agent_project_key="${PM_FLOW_PROJECT:-}"
-if [[ -z "$agent_project_key" && -f "$SCRIPT_DIR/.project-key" ]]; then
-  agent_project_key="$(/usr/bin/head -n 1 "$SCRIPT_DIR/.project-key" | tr -d '\r')"
+if [[ -z "$agent_project_key" && -f "$FLOW_DIR/.project-key" ]]; then
+  agent_project_key="$(/usr/bin/head -n 1 "$FLOW_DIR/.project-key" | tr -d '\r')"
 fi
-if [[ -n "$agent_project_key" && -f "$SCRIPT_DIR/$agent_project_key/project.json" ]]; then
-  PROJECT_CONFIG_FILE="$SCRIPT_DIR/$agent_project_key/project.json"
+if [[ -n "$agent_project_key" && -f "$FLOW_DIR/$agent_project_key/project.json" ]]; then
+  PROJECT_CONFIG_FILE="$FLOW_DIR/$agent_project_key/project.json"
 fi
 
 # Resolve the role binding once, up front, so a misconfigured role fails before
 # any model is called.
 AGENT_PROJECT_DIR=""
-if [[ -n "$agent_project_key" && -d "$SCRIPT_DIR/$agent_project_key" ]]; then
-  AGENT_PROJECT_DIR="$SCRIPT_DIR/$agent_project_key"
+if [[ -n "$agent_project_key" && -d "$FLOW_DIR/$agent_project_key" ]]; then
+  AGENT_PROJECT_DIR="$FLOW_DIR/$agent_project_key"
 fi
 
 role_binding="$(python3 - "$CONFIG_FILE" "$ROLE" "$SEAT" "$PROJECT_CONFIG_FILE" \
