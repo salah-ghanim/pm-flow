@@ -1410,12 +1410,12 @@ cmd_upgrade() {
   done
   [[ -f "$SCRIPT_DIR/upgrade.py" ]] || fail "upgrade.py is not installed; reinstall first"
   [[ -n "$source_dir" ]] || fail "upgrade needs --source <path to a pm-flow checkout>"
-  local manifest="$source_dir/template/manifest.json"
+  local manifest="$source_dir/MANIFEST"
   [[ -f "$manifest" ]] || fail "no manifest at $manifest; is that a pm-flow checkout?"
 
   local -a args
   if (( apply )); then
-    args=(apply --new "$manifest" --source "$source_dir/template")
+    args=(apply --new "$manifest" --source "$source_dir")
     (( force )) && args+=(--force)
   else
     args=(check --new "$manifest")

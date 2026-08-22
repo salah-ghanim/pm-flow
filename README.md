@@ -58,9 +58,10 @@ distinction is the whole point:
 - **edited** — anything you changed after installing. Never overwritten without
   `--force`. Losing a persona you tuned is worse than running a version behind.
 
-The file list is generated from the template rather than maintained by hand
-(`python3 tools/manifest.py --write`), so adding a file to the template is all it
-takes for the installer to ship it.
+The file list is generated rather than maintained by hand. `manifest.json` sits
+at the repository root beside `VERSION`, records the directory its paths are
+relative to, and is rebuilt with `python3 tools/manifest.py --write` — so adding
+a file to the template is all it takes for the installer to ship it.
 
 Reinstalling refreshes the scripts, prompts, and contract while preserving
 `config.json`, each project's recorded domain, the project plan, section
@@ -139,7 +140,7 @@ whole process group and retried.
 ## Repository contents
 
 - `install.sh` installs or upgrades the scaffold.
-- `VERSION` and `template/manifest.json` — what a release is, and what it ships.
+- `VERSION` and `manifest.json` — what a release is, and what it ships.
 - `tools/manifest.py` regenerates the manifest from the template.
 - `template/.agentic/pm_flow/upgrade.py` — what is installed, and what an
   upgrade would change.

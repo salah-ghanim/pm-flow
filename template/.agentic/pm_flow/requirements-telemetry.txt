@@ -1,0 +1,19 @@
+# Optional. Only `trace_export.py --otlp` needs these; nothing else in pm-flow
+# imports anything outside the standard library, and a flow with none of this
+# installed still records every span to the store.
+#
+#   pip install -r .agentic/pm_flow/requirements-telemetry.txt
+#
+# Exporting to a file needs nothing at all:
+#
+#   ./.agentic/pm_flow/pm_flow.sh trace export --file traces.otlp.jsonl
+#
+# That asymmetry is deliberate. Recording must never depend on a package being
+# present, because a missing import would then cost you a dispatch rather than
+# an observation.
+
+opentelemetry-sdk>=1.30
+opentelemetry-exporter-otlp-proto-http>=1.30
+
+# For --protocol grpc instead of the default http:
+# opentelemetry-exporter-otlp-proto-grpc>=1.30

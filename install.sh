@@ -133,7 +133,7 @@ prefetch_templates() {
     "template/.agentic/pm_flow/project/project.json"
     "template/.agentic/pm_flow/project/task_contract.md"
     "template/CLAUDE.md"
-    "template/manifest.json"
+    "MANIFEST"
   )
   local name
   for name in "${ROLE_NAMES[@]}"; do
@@ -163,24 +163,20 @@ prefetch_templates() {
   local manifest_raw
   if [[ -n "${REPO_RAW_BASE:-}" ]]; then
     manifest_raw="$(curl --fail --silent --show-error --location \
-      "${REPO_RAW_BASE%/}/template/manifest.json" 2>/dev/null || printf '')"
+      "${REPO_RAW_BASE%/}/MANIFEST" 2>/dev/null || printf '')"
   else
-    manifest_raw="$(/bin/cat "$SCRIPT_DIR/template/manifest.json" 2>/dev/null || printf '')"
+    manifest_raw="$(/bin/cat "$SCRIPT_DIR/MANIFEST" 2>/dev/null || printf '')"
   fi
   if [[ -n "$manifest_raw" ]]; then
+    # The manifest is line-oriented, so awk reads it directly: `root <dir>` in
+    # the header, then `<class> <exec> <sha256> <path>` per file.
     local extra
-    for extra in ${(f)"$(printf '%s' "$manifest_raw" | python3 -c '
-import json
-import sys
-
-try:
-    manifest = json.load(sys.stdin)
-except ValueError:
-    raise SystemExit(0)
-for entry in manifest.get("files", []):
-    if entry.get("class") == "engine":
-        print("template/" + entry["path"])
-' 2>/dev/null)"}; do
+    for extra in ${(f)"$(printf '%s' "$manifest_raw" | awk '
+      /^#/ || /^[[:space:]]*$/ { next }
+      $1 == "root" { root = $2; next }
+      $1 == "version" { next }
+      $1 == "engine" { print root "/" $4 }
+    ' 2>/dev/null)"}; do
       [[ -n "$extra" ]] || continue
       # `:-` matters: under `set -u` a subscript search that finds nothing is an
       # unset parameter, not an empty string, and would abort the install.
@@ -285,37 +281,30 @@ migrate_legacy_flow_dir() {
 sync_manifest_engine() {
   local flow_dir="$1"
   local repo_root="$2"
-  local manifest_json rel
-  manifest_json="$(fetch_template "template/manifest.json" 2>/dev/null || printf '')"
+  local manifest_json rel manifest_root
+  manifest_json="$(fetch_template "MANIFEST" 2>/dev/null || printf '')"
   [[ -n "$manifest_json" ]] || return 0
+  # The manifest names the directory its paths are relative to, so this does not
+  # have to assume the layout.
+  manifest_root="$(printf '%s' "$manifest_json" | awk '$1 == "root" { print $2; exit }')"
+  [[ -n "$manifest_root" ]] || manifest_root="template"
 
   local -a wanted
-  wanted=(${(f)"$(printf '%s' "$manifest_json" | python3 -c '
-import json
-import sys
-
-try:
-    manifest = json.load(sys.stdin)
-except ValueError:
-    raise SystemExit(0)
-for entry in manifest.get("files", []):
-    if entry.get("class") == "engine":
-        print(entry["path"])
-' 2>/dev/null)"})
+  wanted=(${(f)"$(printf '%s' "$manifest_json" | awk '$1 == "engine" { print $4 }')"})
 
   for rel in "${wanted[@]}"; do
     [[ -n "$rel" ]] || continue
-    copy_template "template/$rel" "$repo_root/$rel"
+    copy_template "$manifest_root/$rel" "$repo_root/$rel"
   done
 
   # Stamp the install so `pm_flow.sh version` and `upgrade` have a baseline to
   # compare against. Without it an upgrade cannot tell a shipped change from
   # something you edited.
   if [[ -f "$flow_dir/upgrade.py" ]]; then
-    printf '%s' "$manifest_json" > "$flow_dir/.pm-flow-new-manifest.json"
+    printf '%s' "$manifest_json" > "$flow_dir/.pm-flow-new-MANIFEST"
     python3 "$flow_dir/upgrade.py" record \
-      --new "$flow_dir/.pm-flow-new-manifest.json" >/dev/null 2>&1 || true
-    rm -f "$flow_dir/.pm-flow-new-manifest.json"
+      --new "$flow_dir/.pm-flow-new-MANIFEST" >/dev/null 2>&1 || true
+    rm -f "$flow_dir/.pm-flow-new-MANIFEST"
   fi
 }
 

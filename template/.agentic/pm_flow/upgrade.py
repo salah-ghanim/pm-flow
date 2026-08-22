@@ -20,7 +20,7 @@ persona is worse than running a version behind.
 
     upgrade.py status                    what is installed
     upgrade.py check  --new <manifest>   what an upgrade would do
-    upgrade.py apply  --new <manifest> --source <dir>
+    upgrade.py apply  --new <manifest> --source <pm-flow checkout>
     upgrade.py record --new <manifest>   stamp an install (the installer calls this)
 
 Standard library only.
@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import shutil
 import sys
@@ -38,7 +37,7 @@ import time
 from pathlib import Path
 
 FLOW = Path(__file__).resolve().parent
-INSTALLED = FLOW / ".pm-flow" / "manifest.json"
+INSTALLED = FLOW / ".pm-flow" / "MANIFEST"
 
 
 def sha256(path: Path) -> str:
@@ -52,10 +51,59 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def parse(text: str) -> dict:
+    """Read the line-oriented manifest.
+
+    Kept deliberately tolerant: an unreadable manifest should mean "I do not
+    know what is installed", never a traceback in the middle of an upgrade.
+    """
+    manifest = {"version": "", "root": "template", "installed_at": None, "files": []}
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        head = line.split(None, 1)
+        if head[0] == "version" and len(head) > 1:
+            manifest["version"] = head[1]
+            continue
+        if head[0] == "root" and len(head) > 1:
+            manifest["root"] = head[1]
+            continue
+        if head[0] == "installed_at" and len(head) > 1:
+            try:
+                manifest["installed_at"] = float(head[1])
+            except ValueError:
+                pass
+            continue
+        parts = line.split(None, 3)
+        if len(parts) != 4:
+            continue
+        kind, executable, digest, path = parts
+        manifest["files"].append({"class": kind, "executable": executable == "x",
+                                  "sha256": digest, "path": path})
+    return manifest
+
+
+def render_manifest(manifest: dict) -> str:
+    """Serialise an install record. Named apart from render(), which prints the
+    upgrade report - two very different jobs that briefly shared a name."""
+    lines = ["# pm-flow install record - generated. Do not edit.",
+             f"version {manifest.get('version', '')}",
+             f"root {manifest.get('root', 'template')}"]
+    if manifest.get("installed_at") is not None:
+        lines.append(f"installed_at {manifest['installed_at']:.0f}")
+    lines.append("")
+    for entry in manifest.get("files", []):
+        lines.append(" ".join((entry["class"],
+                               "x" if entry.get("executable") else "-",
+                               entry.get("sha256", ""), entry["path"])))
+    return "\n".join(lines) + "\n"
+
+
 def load(path) -> dict:
     try:
-        return json.loads(Path(path).read_text())
-    except (OSError, ValueError):
+        return parse(Path(path).read_text())
+    except OSError:
         return {}
 
 
@@ -206,7 +254,12 @@ def cmd_apply(args) -> int:
     if not new:
         print(f"could not read manifest: {args.new}", file=sys.stderr)
         return 2
+    # The manifest names the directory its paths are relative to, so --source is
+    # a checkout rather than some subdirectory the caller has to know about.
     source = Path(args.source)
+    root = new.get("root", "template")
+    if source.name != root and (source / root).is_dir():
+        source = source / root
     if not source.is_dir():
         print(f"not a directory: {source}", file=sys.stderr)
         return 2
@@ -254,12 +307,15 @@ def record(new: dict) -> None:
     files = []
     for entry in new.get("files", []):
         target = target_for(entry["path"])
+        # Recorded as installed, not as shipped: a file the installer rendered
+        # or appended to differs from the template, and recording the template's
+        # hash would make every healthy install look modified.
         files.append({**entry, "sha256": sha256(target) if target.is_file()
                       else entry.get("sha256", "")})
     stamped["files"] = files
     INSTALLED.parent.mkdir(parents=True, exist_ok=True)
     tmp = INSTALLED.with_name(f".{INSTALLED.name}.{os.getpid()}")
-    tmp.write_text(json.dumps(stamped, indent=2, sort_keys=True) + "\n")
+    tmp.write_text(render_manifest(stamped))
     os.replace(tmp, INSTALLED)
 
 
