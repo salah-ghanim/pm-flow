@@ -38,7 +38,7 @@ Usage:
 Installs the generic Claude PM flow template into the target repository.
 
 Default reinstall behavior:
-- refresh generic `agentic/pm_flow/*` scripts and docs
+- refresh generic `.agentic/pm_flow/*` scripts and docs
 - refresh per-project `task_contract.md`, `start.md`, and `resume.md`
 - back up pre-section start/resume prompts once with a `.pre-sections.md` suffix
 - preserve the project plan, section workspaces, generated registry, and run history
@@ -113,47 +113,82 @@ trap cleanup_template_cache EXIT HUP INT TERM
 
 prefetch_templates() {
   local template_paths=(
-    "template/agentic/pm_flow/README.md"
-    "template/agentic/pm_flow/pm_flow.sh"
-    "template/agentic/pm_flow/net_exec.sh"
-    "template/agentic/pm_flow/agent_exec.sh"
-    "template/agentic/pm_flow/fetch.sh"
-    "template/agentic/pm_flow/heartbeat.sh"
-    "template/agentic/pm_flow/driver.zsh"
-    "template/agentic/pm_flow/cost.py"
-    "template/agentic/pm_flow/watch.py"
-    "template/agentic/pm_flow/config.json"
-    "template/agentic/pm_flow/local_env.sh.example"
-    "template/agentic/pm_flow/projects.md"
-    "template/agentic/pm_flow/project/project_state/README.md"
-    "template/agentic/pm_flow/project/project_state/plan.md"
-    "template/agentic/pm_flow/project/project_state/start.md"
-    "template/agentic/pm_flow/project/project_state/resume.md"
-    "template/agentic/pm_flow/project/project_state/sections.md"
-    "template/agentic/pm_flow/project/project.json"
-    "template/agentic/pm_flow/project/task_contract.md"
+    "template/.agentic/pm_flow/README.md"
+    "template/.agentic/pm_flow/pm_flow.sh"
+    "template/.agentic/pm_flow/net_exec.sh"
+    "template/.agentic/pm_flow/agent_exec.sh"
+    "template/.agentic/pm_flow/fetch.sh"
+    "template/.agentic/pm_flow/heartbeat.sh"
+    "template/.agentic/pm_flow/driver.zsh"
+    "template/.agentic/pm_flow/cost.py"
+    "template/.agentic/pm_flow/watch.py"
+    "template/.agentic/pm_flow/config.json"
+    "template/.agentic/pm_flow/local_env.sh.example"
+    "template/.agentic/pm_flow/projects.md"
+    "template/.agentic/pm_flow/project/project_state/README.md"
+    "template/.agentic/pm_flow/project/project_state/plan.md"
+    "template/.agentic/pm_flow/project/project_state/start.md"
+    "template/.agentic/pm_flow/project/project_state/resume.md"
+    "template/.agentic/pm_flow/project/project_state/sections.md"
+    "template/.agentic/pm_flow/project/project.json"
+    "template/.agentic/pm_flow/project/task_contract.md"
     "template/CLAUDE.md"
+    "template/manifest.json"
   )
   local name
   for name in "${ROLE_NAMES[@]}"; do
-    template_paths+=("template/agentic/pm_flow/roles/$name.md")
+    template_paths+=("template/.agentic/pm_flow/roles/$name.md")
   done
   for name in "${DOMAIN_NAMES[@]}"; do
-    template_paths+=("template/agentic/pm_flow/domains/$name.json")
+    template_paths+=("template/.agentic/pm_flow/domains/$name.json")
   done
   for name in "${TASK_NAMES[@]}"; do
-    template_paths+=("template/agentic/pm_flow/tasks/$name.md")
+    template_paths+=("template/.agentic/pm_flow/tasks/$name.md")
   done
   local overlay
   for overlay in "${OVERLAY_DOMAINS[@]}"; do
-    template_paths+=("template/agentic/pm_flow/domains/$overlay/task_contract.md")
+    template_paths+=("template/.agentic/pm_flow/domains/$overlay/task_contract.md")
     for name in "${ROLE_NAMES[@]}"; do
-      template_paths+=("template/agentic/pm_flow/domains/$overlay/roles/$name.md")
+      template_paths+=("template/.agentic/pm_flow/domains/$overlay/roles/$name.md")
     done
     for name in "${TASK_NAMES[@]}"; do
-      template_paths+=("template/agentic/pm_flow/domains/$overlay/tasks/$name.md")
+      template_paths+=("template/.agentic/pm_flow/domains/$overlay/tasks/$name.md")
     done
   done
+
+  # Everything else the manifest ships. The lists above are kept because they
+  # decide what gets *rendered* and what a reinstall preserves, but they are no
+  # longer the definition of what exists - the manifest is, and it is generated
+  # from the template rather than maintained by hand.
+  local manifest_raw
+  if [[ -n "${REPO_RAW_BASE:-}" ]]; then
+    manifest_raw="$(curl --fail --silent --show-error --location \
+      "${REPO_RAW_BASE%/}/template/manifest.json" 2>/dev/null || printf '')"
+  else
+    manifest_raw="$(/bin/cat "$SCRIPT_DIR/template/manifest.json" 2>/dev/null || printf '')"
+  fi
+  if [[ -n "$manifest_raw" ]]; then
+    local extra
+    for extra in ${(f)"$(printf '%s' "$manifest_raw" | python3 -c '
+import json
+import sys
+
+try:
+    manifest = json.load(sys.stdin)
+except ValueError:
+    raise SystemExit(0)
+for entry in manifest.get("files", []):
+    if entry.get("class") == "engine":
+        print("template/" + entry["path"])
+' 2>/dev/null)"}; do
+      [[ -n "$extra" ]] || continue
+      # `:-` matters: under `set -u` a subscript search that finds nothing is an
+      # unset parameter, not an empty string, and would abort the install.
+      if [[ -z "${template_paths[(r)$extra]:-}" ]]; then
+        template_paths+=("$extra")
+      fi
+    done
+  fi
 
   TEMPLATE_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-install.XXXXXX")"
   local rel_path source_path cached_path
@@ -204,6 +239,84 @@ render_template() {
     fail "could not render template: $rel_path"
   fi
   mv "$tmp_path" "$dst"
+}
+
+# Ship every `engine` file the manifest names that is not already in place or is
+# out of date. Reads the manifest through fetch_template, so a remote install
+# works the same way a local one does.
+# pm-flow used to install to `agentic/`. It installs to `.agentic/` now, for the
+# same reason `.idea` and `.vscode` are hidden: the flow is workspace machinery,
+# not part of the product, and it should not be the first thing in a listing of
+# somebody's repository.
+#
+# An existing install is moved rather than orphaned. Doing nothing would leave a
+# repository with two flow directories, the old one still holding the project
+# state and the new one empty - and the old one still on PATH in every persona,
+# task file and permission rule that names it.
+migrate_legacy_flow_dir() {
+  local repo_root="$1"
+  local legacy="$repo_root/agentic"
+  local current="$repo_root/.agentic"
+
+  [[ -d "$legacy/pm_flow" ]] || return 0
+  if [[ -d "$current/pm_flow" ]]; then
+    printf 'WARNING: both agentic/ and .agentic/ exist; leaving agentic/ alone.\n' >&2
+    printf 'WARNING: move any project workspaces you still want by hand, then delete it.\n' >&2
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$current")"
+  # `git mv` where possible, so the rename is recorded as a rename and the
+  # project history survives it.
+  if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
+     git -C "$repo_root" ls-files --error-unmatch agentic >/dev/null 2>&1; then
+    git -C "$repo_root" mv agentic .agentic >/dev/null 2>&1 || mv "$legacy" "$current"
+  else
+    mv "$legacy" "$current"
+  fi
+
+  if [[ -d "$current/pm_flow" ]]; then
+    printf 'migrated=agentic -> .agentic\n'
+    printf 'NOTE: paths that name agentic/ elsewhere - CI, editor config, your own\n' >&2
+    printf 'NOTE: scripts - need updating; the flow'"'"'s own files were rewritten.\n' >&2
+  fi
+}
+
+sync_manifest_engine() {
+  local flow_dir="$1"
+  local repo_root="$2"
+  local manifest_json rel
+  manifest_json="$(fetch_template "template/manifest.json" 2>/dev/null || printf '')"
+  [[ -n "$manifest_json" ]] || return 0
+
+  local -a wanted
+  wanted=(${(f)"$(printf '%s' "$manifest_json" | python3 -c '
+import json
+import sys
+
+try:
+    manifest = json.load(sys.stdin)
+except ValueError:
+    raise SystemExit(0)
+for entry in manifest.get("files", []):
+    if entry.get("class") == "engine":
+        print(entry["path"])
+' 2>/dev/null)"})
+
+  for rel in "${wanted[@]}"; do
+    [[ -n "$rel" ]] || continue
+    copy_template "template/$rel" "$repo_root/$rel"
+  done
+
+  # Stamp the install so `pm_flow.sh version` and `upgrade` have a baseline to
+  # compare against. Without it an upgrade cannot tell a shipped change from
+  # something you edited.
+  if [[ -f "$flow_dir/upgrade.py" ]]; then
+    printf '%s' "$manifest_json" > "$flow_dir/.pm-flow-new-manifest.json"
+    python3 "$flow_dir/upgrade.py" record \
+      --new "$flow_dir/.pm-flow-new-manifest.json" >/dev/null 2>&1 || true
+    rm -f "$flow_dir/.pm-flow-new-manifest.json"
+  fi
 }
 
 copy_template() {
@@ -426,7 +539,12 @@ main() {
     project_name="$(basename "$abs_target")"
   fi
 
-  local flow_dir="$abs_target/agentic/pm_flow"
+  # Before anything is resolved or written: an install that still lives at the
+  # old path is moved, so the project key, domain and history below are read
+  # from the workspace that already exists rather than from an empty one.
+  migrate_legacy_flow_dir "$abs_target"
+
+  local flow_dir="$abs_target/.agentic/pm_flow"
   local project_key
   project_key="$(resolve_install_project_key \
     "$flow_dir" \
@@ -452,57 +570,57 @@ main() {
   mkdir -p "$project_dir/sections"
 
   render_template \
-    "template/agentic/pm_flow/README.md" \
+    "template/.agentic/pm_flow/README.md" \
     "$flow_dir/README.md" \
     "$project_name" \
     "$abs_target" \
     "$primary_mission" \
     "$baseline_name" \
     "$project_key"
-  copy_template "template/agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
-  copy_template "template/agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
-  copy_template "template/agentic/pm_flow/agent_exec.sh" "$flow_dir/agent_exec.sh"
-  copy_template "template/agentic/pm_flow/fetch.sh" "$flow_dir/fetch.sh"
-  copy_template "template/agentic/pm_flow/heartbeat.sh" "$flow_dir/heartbeat.sh"
-  copy_template "template/agentic/pm_flow/driver.zsh" "$flow_dir/driver.zsh"
+  copy_template "template/.agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
+  copy_template "template/.agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
+  copy_template "template/.agentic/pm_flow/agent_exec.sh" "$flow_dir/agent_exec.sh"
+  copy_template "template/.agentic/pm_flow/fetch.sh" "$flow_dir/fetch.sh"
+  copy_template "template/.agentic/pm_flow/heartbeat.sh" "$flow_dir/heartbeat.sh"
+  copy_template "template/.agentic/pm_flow/driver.zsh" "$flow_dir/driver.zsh"
   # driver.zsh calls cost.py on every dispatch and `status` reads it, so an
   # install without it reports an error where the spend should be.
-  copy_template "template/agentic/pm_flow/cost.py" "$flow_dir/cost.py"
-  copy_template "template/agentic/pm_flow/watch.py" "$flow_dir/watch.py"
+  copy_template "template/.agentic/pm_flow/cost.py" "$flow_dir/cost.py"
+  copy_template "template/.agentic/pm_flow/watch.py" "$flow_dir/watch.py"
   local template_name
   for template_name in "${ROLE_NAMES[@]}"; do
-    copy_template "template/agentic/pm_flow/roles/$template_name.md" "$flow_dir/roles/$template_name.md"
+    copy_template "template/.agentic/pm_flow/roles/$template_name.md" "$flow_dir/roles/$template_name.md"
   done
   for template_name in "${DOMAIN_NAMES[@]}"; do
-    copy_template "template/agentic/pm_flow/domains/$template_name.json" "$flow_dir/domains/$template_name.json"
+    copy_template "template/.agentic/pm_flow/domains/$template_name.json" "$flow_dir/domains/$template_name.json"
   done
   for template_name in "${TASK_NAMES[@]}"; do
-    copy_template "template/agentic/pm_flow/tasks/$template_name.md" "$flow_dir/tasks/$template_name.md"
+    copy_template "template/.agentic/pm_flow/tasks/$template_name.md" "$flow_dir/tasks/$template_name.md"
   done
   local overlay_domain
   for overlay_domain in "${OVERLAY_DOMAINS[@]}"; do
     for template_name in "${ROLE_NAMES[@]}"; do
       copy_template \
-        "template/agentic/pm_flow/domains/$overlay_domain/roles/$template_name.md" \
+        "template/.agentic/pm_flow/domains/$overlay_domain/roles/$template_name.md" \
         "$flow_dir/domains/$overlay_domain/roles/$template_name.md"
     done
     for template_name in "${TASK_NAMES[@]}"; do
       copy_template \
-        "template/agentic/pm_flow/domains/$overlay_domain/tasks/$template_name.md" \
+        "template/.agentic/pm_flow/domains/$overlay_domain/tasks/$template_name.md" \
         "$flow_dir/domains/$overlay_domain/tasks/$template_name.md"
     done
   done
   # config.json carries the operator's cli/model/difficulty choices, so a
   # reinstall must never overwrite it.
   if [[ ! -f "$flow_dir/config.json" || "$force" == "1" ]]; then
-    fetch_template "template/agentic/pm_flow/config.json" \
+    fetch_template "template/.agentic/pm_flow/config.json" \
       | sed -e "s|{{DOMAIN}}|$(escape_sed_replacement "$domain")|g" > "$flow_dir/.config.json.tmp"
     mv "$flow_dir/.config.json.tmp" "$flow_dir/config.json"
   fi
-  copy_template "template/agentic/pm_flow/local_env.sh.example" "$flow_dir/local_env.sh.example"
+  copy_template "template/.agentic/pm_flow/local_env.sh.example" "$flow_dir/local_env.sh.example"
   if [[ ! -f "$flow_dir/projects.md" || "$force" == "1" ]]; then
     render_template \
-      "template/agentic/pm_flow/projects.md" \
+      "template/.agentic/pm_flow/projects.md" \
       "$flow_dir/projects.md" \
       "$project_name" \
       "$abs_target" \
@@ -512,11 +630,11 @@ main() {
   fi
 
   if [[ ! -f "$flow_dir/pm_flow.sh" || ! -f "$flow_dir/net_exec.sh" || ! -f "$flow_dir/projects.md" ]]; then
-    fail "agentic/pm_flow exists but is missing required generic files; rerun with --force to repair"
+    fail ".agentic/pm_flow exists but is missing required generic files; rerun with --force to repair"
   fi
 
   render_template \
-    "template/agentic/pm_flow/project/project_state/README.md" \
+    "template/.agentic/pm_flow/project/project_state/README.md" \
     "$project_dir/project_state/README.md" \
     "$project_name" \
     "$abs_target" \
@@ -525,7 +643,7 @@ main() {
     "$project_key"
   if [[ ! -f "$project_dir/project_state/plan.md" || "$force" == "1" ]]; then
     render_template \
-      "template/agentic/pm_flow/project/project_state/plan.md" \
+      "template/.agentic/pm_flow/project/project_state/plan.md" \
       "$project_dir/project_state/plan.md" \
       "$project_name" \
       "$abs_target" \
@@ -542,7 +660,7 @@ main() {
       "^# Resuming "
   fi
   render_template \
-    "template/agentic/pm_flow/project/project_state/start.md" \
+    "template/.agentic/pm_flow/project/project_state/start.md" \
     "$project_dir/project_state/start.md" \
     "$project_name" \
     "$abs_target" \
@@ -550,7 +668,7 @@ main() {
     "$baseline_name" \
     "$project_key"
   render_template \
-    "template/agentic/pm_flow/project/project_state/resume.md" \
+    "template/.agentic/pm_flow/project/project_state/resume.md" \
     "$project_dir/project_state/resume.md" \
     "$project_name" \
     "$abs_target" \
@@ -559,14 +677,14 @@ main() {
     "$project_key"
   if [[ ! -f "$project_dir/project_state/sections.md" || "$force" == "1" ]]; then
     copy_template \
-      "template/agentic/pm_flow/project/project_state/sections.md" \
+      "template/.agentic/pm_flow/project/project_state/sections.md" \
       "$project_dir/project_state/sections.md"
   fi
   # The domain belongs to the project, not the flow directory, so one repository
   # can run an infrastructure project and a migration project side by side. An
   # existing project keeps its recorded domain unless --domain says otherwise.
   if [[ ! -f "$project_dir/project.json" || "$domain_explicit" == "1" || "$force" == "1" ]]; then
-    fetch_template "template/agentic/pm_flow/project/project.json" \
+    fetch_template "template/.agentic/pm_flow/project/project.json" \
       | sed -e "s|{{DOMAIN}}|$(escape_sed_replacement "$domain")|g" > "$project_dir/.project.json.tmp"
     mv "$project_dir/.project.json.tmp" "$project_dir/project.json"
   fi
@@ -585,9 +703,9 @@ except Exception:
     print("")' "$project_dir/project.json")"
     [[ -z "$recorded_domain" ]] || effective_domain="$recorded_domain"
   fi
-  local contract_template="template/agentic/pm_flow/project/task_contract.md"
+  local contract_template="template/.agentic/pm_flow/project/task_contract.md"
   if (( ${OVERLAY_DOMAINS[(Ie)$effective_domain]} )); then
-    contract_template="template/agentic/pm_flow/domains/$effective_domain/task_contract.md"
+    contract_template="template/.agentic/pm_flow/domains/$effective_domain/task_contract.md"
   fi
 
   render_template \
@@ -625,12 +743,28 @@ except Exception:
       "$project_key"
   fi
 
+  # Everything the manifest ships that the hand-written lists above do not.
+  #
+  # Those lists were wrong the moment anything was added to the template: four
+  # modules shipped, the installer did not know about them, and a stock install
+  # got a driver that called files which were not there. The manifest is
+  # generated from the template, so adding a file is all it takes to ship it.
+  #
+  # This runs after the explicit copies rather than replacing them, so the
+  # careful preservation logic above still decides what a reinstall keeps. Only
+  # `engine` files are synced here; `seed` and `project` files are yours.
+  sync_manifest_engine "$flow_dir" "$abs_target"
+
   chmod +x "$flow_dir/pm_flow.sh"
   chmod +x "$flow_dir/net_exec.sh"
   chmod +x "$flow_dir/agent_exec.sh"
   chmod +x "$flow_dir/fetch.sh"
   chmod +x "$flow_dir/heartbeat.sh"
   chmod +x "$flow_dir/watch.py"
+  [[ ! -f "$flow_dir/upgrade.py" ]] || chmod +x "$flow_dir/upgrade.py"
+  [[ ! -f "$flow_dir/catalog.py" ]] || chmod +x "$flow_dir/catalog.py"
+  [[ ! -f "$flow_dir/telemetry.py" ]] || chmod +x "$flow_dir/telemetry.py"
+  [[ ! -f "$flow_dir/trace_export.py" ]] || chmod +x "$flow_dir/trace_export.py"
 
   touch "$project_dir/runs/.gitkeep"
   touch "$project_dir/sections/.gitkeep"

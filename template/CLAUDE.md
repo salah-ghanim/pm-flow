@@ -26,7 +26,7 @@ real model budget.
 
 ## Repo-wide invariants
 
-`agentic/pm_flow/{{PROJECT_KEY}}/task_contract.md` is the single source of truth
+`.agentic/pm_flow/{{PROJECT_KEY}}/task_contract.md` is the single source of truth
 for the flow's rules. These are the few that hold for every role:
 
 - Context crosses role boundaries only through files: `project_state/plan.md`,
@@ -44,6 +44,6 @@ for the flow's rules. These are the few that hold for every role:
   the product officer commits plan, registry and brief changes. Uncommitted work
   does not survive the next fresh process.
 
-Command reference lives in `agentic/pm_flow/README.md`. Roles bind to a CLI,
-a model, and a difficulty in `agentic/pm_flow/config.json`.
+Command reference lives in `.agentic/pm_flow/README.md`. Roles bind to a CLI,
+a model, and a difficulty in `.agentic/pm_flow/config.json`.
 <!-- pm-flow:end -->

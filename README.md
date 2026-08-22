@@ -30,8 +30,37 @@ migration that replaces it can share a flow directory without sharing personas:
 ```bash
 ./install.sh /path/to/repo --project-key platform  --domain infrastructure
 ./install.sh /path/to/repo --project-key migration --domain migration --add-project
-./agentic/pm_flow/pm_flow.sh --project migration run
+./.agentic/pm_flow/pm_flow.sh --project migration run
 ```
+
+The flow installs to `.agentic/`, hidden like `.idea` or `.vscode`: it is
+workspace machinery rather than part of your product, and it ships its own
+`.gitignore` so the repository stays clean with no edits of your own. An install
+that predates this is moved to the new path automatically, as a recorded rename.
+
+## Versions and upgrades
+
+An install records the manifest it was made from, so it knows what it is and what
+you have changed since.
+
+```bash
+./.agentic/pm_flow/pm_flow.sh version
+./.agentic/pm_flow/pm_flow.sh upgrade --source /path/to/pm-flow
+./.agentic/pm_flow/pm_flow.sh upgrade --source /path/to/pm-flow --apply
+```
+
+`upgrade` reports before it acts. Files fall into three lifecycles, and the
+distinction is the whole point:
+
+- **engine** — the flow itself. Replaced on upgrade.
+- **seed** — `config.json` and friends. Written once and never touched again,
+  because they hold your model bindings, budgets and thresholds.
+- **edited** — anything you changed after installing. Never overwritten without
+  `--force`. Losing a persona you tuned is worse than running a version behind.
+
+The file list is generated from the template rather than maintained by hand
+(`python3 tools/manifest.py --write`), so adding a file to the template is all it
+takes for the installer to ship it.
 
 Reinstalling refreshes the scripts, prompts, and contract while preserving
 `config.json`, each project's recorded domain, the project plan, section
@@ -41,8 +70,8 @@ workspaces, and run history.
 
 ```bash
 cd /path/to/repo
-$EDITOR agentic/pm_flow/<project>/project_state/plan.md   # what you want built
-./agentic/pm_flow/pm_flow.sh run
+$EDITOR .agentic/pm_flow/<project>/project_state/plan.md   # what you want built
+./.agentic/pm_flow/pm_flow.sh run
 ```
 
 `run` repeats `tick` until nothing is actionable. Each tick observes the files
@@ -50,13 +79,13 @@ on disk, derives the single next action, performs it, and exits — so an
 interrupted run resumes by being run again, with nothing to clean up first.
 
 ```bash
-./agentic/pm_flow/pm_flow.sh status   # what each section will do next
-./agentic/pm_flow/pm_flow.sh tick     # one transition, then stop
+./.agentic/pm_flow/pm_flow.sh status   # what each section will do next
+./.agentic/pm_flow/pm_flow.sh tick     # one transition, then stop
 ```
 
 ## Roles are named, not vendors
 
-`agentic/pm_flow/config.json` binds each role to a CLI, a model, and a
+`.agentic/pm_flow/config.json` binds each role to a CLI, a model, and a
 difficulty. Nothing in the flow's prompts or files names a vendor:
 
 ```json
@@ -110,10 +139,14 @@ whole process group and retried.
 ## Repository contents
 
 - `install.sh` installs or upgrades the scaffold.
-- `template/agentic/pm_flow/pm_flow.sh` — commands.
-- `template/agentic/pm_flow/driver.zsh` — the run loop.
-- `template/agentic/pm_flow/agent_exec.sh` — dispatches one role, supervised.
-- `template/agentic/pm_flow/roles/` — who each role is.
-- `template/agentic/pm_flow/domains/` — how roles specialise per domain.
-- `template/agentic/pm_flow/tasks/` — what a role is asked to do on a call.
+- `VERSION` and `template/manifest.json` — what a release is, and what it ships.
+- `tools/manifest.py` regenerates the manifest from the template.
+- `template/.agentic/pm_flow/upgrade.py` — what is installed, and what an
+  upgrade would change.
+- `template/.agentic/pm_flow/pm_flow.sh` — commands.
+- `template/.agentic/pm_flow/driver.zsh` — the run loop.
+- `template/.agentic/pm_flow/agent_exec.sh` — dispatches one role, supervised.
+- `template/.agentic/pm_flow/roles/` — who each role is.
+- `template/.agentic/pm_flow/domains/` — how roles specialise per domain.
+- `template/.agentic/pm_flow/tasks/` — what a role is asked to do on a call.
 - `tests/pm_flow_test.sh` — the suite, run with `zsh tests/pm_flow_test.sh`.

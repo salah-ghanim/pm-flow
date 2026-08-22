@@ -94,13 +94,13 @@ mkdir "$FIXTURE_REPO"
 printf '# Existing repository rules\n\n- Preserve this custom rule.\n' > "$FIXTURE_REPO/CLAUDE.md"
 "$REPO_ROOT/install.sh" "$FIXTURE_REPO" --name "Fixture Project" > "$TEST_ROOT/install.out"
 
-PM="$FIXTURE_REPO/agentic/pm_flow/pm_flow.sh"
-PROJECT_DIR="$FIXTURE_REPO/agentic/pm_flow/fixture-repo"
+PM="$FIXTURE_REPO/.agentic/pm_flow/pm_flow.sh"
+PROJECT_DIR="$FIXTURE_REPO/.agentic/pm_flow/fixture-repo"
 
 [[ -x "$PM" ]] || fail "installer did not create executable pm_flow.sh"
 assert_file_contains \
   "$FIXTURE_REPO/CLAUDE.md" \
-  "agentic/pm_flow/fixture-repo/task_contract.md" \
+  ".agentic/pm_flow/fixture-repo/task_contract.md" \
   "installer renders the actual project key"
 assert_file_contains "$FIXTURE_REPO/CLAUDE.md" "Preserve this custom rule." "installer preserves existing CLAUDE rules"
 assert_file_contains "$FIXTURE_REPO/CLAUDE.md" "<!-- pm-flow:begin -->" "installer activates managed CLAUDE rules"
@@ -188,7 +188,7 @@ assert_file_contains "$PROJECT_DIR/sections/alpha/brief.md" "Implement alpha." "
 assert_file_contains "$PROJECT_DIR/sections/alpha/owned_paths.txt" "src/alpha/**" "owned paths are persisted"
 assert_file_contains \
   "$PROJECT_DIR/sections/beta/dependency_handoffs.txt" \
-  "agentic/pm_flow/fixture-repo/sections/alpha/handoff.md" \
+  ".agentic/pm_flow/fixture-repo/sections/alpha/handoff.md" \
   "dependency handoff allowlist"
 
 {
@@ -308,8 +308,8 @@ assert_file_contains \
   "reinstall backs up legacy coordinator prompt"
 
 
-readme_before_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/agentic/pm_flow/README.md")"
-pm_script_before_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/agentic/pm_flow/pm_flow.sh")"
+readme_before_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/.agentic/pm_flow/README.md")"
+pm_script_before_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/.agentic/pm_flow/pm_flow.sh")"
 partial_remote_source="$TEST_ROOT/partial-remote"
 mkdir "$partial_remote_source"
 cp -R "$REPO_ROOT/template" "$partial_remote_source/template"
@@ -320,8 +320,8 @@ expect_failure \
   "$FIXTURE_REPO" \
   --name "Fixture Project" \
   --repo-raw-base "file://$partial_remote_source"
-readme_after_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/agentic/pm_flow/README.md")"
-pm_script_after_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/agentic/pm_flow/pm_flow.sh")"
+readme_after_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/.agentic/pm_flow/README.md")"
+pm_script_after_failed_upgrade="$(/bin/cat "$FIXTURE_REPO/.agentic/pm_flow/pm_flow.sh")"
 [[ "$readme_before_failed_upgrade" == "$readme_after_failed_upgrade" ]] || \
   fail "failed template fetch truncated a live installed file"
 [[ "$pm_script_before_failed_upgrade" == "$pm_script_after_failed_upgrade" ]] || \
@@ -331,7 +331,7 @@ MOVE_SOURCE="$TEST_ROOT/move source"
 MOVE_DESTINATION="$TEST_ROOT/move destination"
 mkdir "$MOVE_SOURCE"
 "$REPO_ROOT/install.sh" "$MOVE_SOURCE" --name "Movable Project" > "$TEST_ROOT/move-install.out"
-MOVE_PM="$MOVE_SOURCE/agentic/pm_flow/pm_flow.sh"
+MOVE_PM="$MOVE_SOURCE/.agentic/pm_flow/pm_flow.sh"
 "$MOVE_PM" init-section mover <<'EOF' > "$TEST_ROOT/mover-init.out"
 ## Objective
 
@@ -362,11 +362,11 @@ MOVE_PM="$MOVE_SOURCE/agentic/pm_flow/pm_flow.sh"
 - A second blank project workspace appears.
 EOF
 mv "$MOVE_SOURCE" "$MOVE_DESTINATION"
-MOVED_PM="$MOVE_DESTINATION/agentic/pm_flow/pm_flow.sh"
+MOVED_PM="$MOVE_DESTINATION/.agentic/pm_flow/pm_flow.sh"
 assert_contains "$("$MOVED_PM" list-sections)" "| mover | must-have | planned |" "moved install resolves persisted project key"
 "$REPO_ROOT/install.sh" "$MOVE_DESTINATION" --name "Movable Project" > "$TEST_ROOT/move-reinstall.out"
-assert_file_contains "$MOVE_DESTINATION/agentic/pm_flow/.project-key" "move-source" "project key persists across rename"
-[[ ! -d "$MOVE_DESTINATION/agentic/pm_flow/move-destination" ]] || \
+assert_file_contains "$MOVE_DESTINATION/.agentic/pm_flow/.project-key" "move-source" "project key persists across rename"
+[[ ! -d "$MOVE_DESTINATION/.agentic/pm_flow/move-destination" ]] || \
   fail "reinstall after rename created a second project workspace"
 moved_status="$("$MOVED_PM" status)"
 assert_contains "$moved_status" "mover" "a relocated install still resolves its sections"
@@ -378,8 +378,8 @@ ROLE_REPO="$TEST_ROOT/role repo"
 mkdir "$ROLE_REPO"
 "$REPO_ROOT/install.sh" "$ROLE_REPO" --name "Alpha Signals" --domain crypto-trading \
   > "$TEST_ROOT/role-install.out"
-ROLE_PM="$ROLE_REPO/agentic/pm_flow/pm_flow.sh"
-ROLE_FLOW="$ROLE_REPO/agentic/pm_flow"
+ROLE_PM="$ROLE_REPO/.agentic/pm_flow/pm_flow.sh"
+ROLE_FLOW="$ROLE_REPO/.agentic/pm_flow"
 AGENT_EXEC="$ROLE_FLOW/agent_exec.sh"
 
 [[ -x "$AGENT_EXEC" ]] || fail "installer did not create executable agent_exec.sh"
@@ -400,7 +400,7 @@ assert_not_contains "$consultant_prompt" "claude" "role prompt does not name a v
 generic_repo="$TEST_ROOT/generic repo"
 mkdir "$generic_repo"
 "$REPO_ROOT/install.sh" "$generic_repo" --name "Plain Project" > "$TEST_ROOT/generic-install.out"
-generic_prompt="$("$generic_repo/agentic/pm_flow/pm_flow.sh" role-prompt cpo)"
+generic_prompt="$("$generic_repo/.agentic/pm_flow/pm_flow.sh" role-prompt cpo)"
 assert_contains "$generic_prompt" "Chief Product Officer" "generic domain falls back to a neutral title"
 assert_contains "$generic_prompt" "domain has not been specified" "generic domain avoids industry priors"
 
@@ -408,7 +408,7 @@ migration_repo="$TEST_ROOT/migration repo"
 mkdir "$migration_repo"
 "$REPO_ROOT/install.sh" "$migration_repo" --name "Golden Grid Migration" --domain migration \
   > "$TEST_ROOT/migration-install.out"
-migration_prompt="$("$migration_repo/agentic/pm_flow/pm_flow.sh" role-prompt pm)"
+migration_prompt="$("$migration_repo/.agentic/pm_flow/pm_flow.sh" role-prompt pm)"
 assert_contains "$migration_prompt" "AI Tooling Migration Manager" "migration domain specializes the pm title"
 assert_contains "$migration_prompt" "Context is a first-class artifact" "migration domain carries its own priors"
 assert_not_contains "$migration_prompt" "{{" "migration role prompt has no unrendered placeholders"
@@ -417,7 +417,7 @@ assert_not_contains "$migration_prompt" "{{" "migration role prompt has no unren
 # work, so each project carries its own domain.
 multi_repo="$TEST_ROOT/multi domain repo"
 mkdir "$multi_repo"
-MULTI_FLOW="$multi_repo/agentic/pm_flow"
+MULTI_FLOW="$multi_repo/.agentic/pm_flow"
 MULTI_PM="$MULTI_FLOW/pm_flow.sh"
 "$REPO_ROOT/install.sh" "$multi_repo" --name "Grid Platform" --project-key platform \
   --domain infrastructure > "$TEST_ROOT/multi-platform-install.out"
@@ -744,9 +744,9 @@ assert_file_contains "$TEST_ROOT/expected-failure.log" "no consultant seat produ
 DRIVER_REPO="$TEST_ROOT/driver repo"
 mkdir "$DRIVER_REPO"
 "$REPO_ROOT/install.sh" "$DRIVER_REPO" --name "Driver Project" > "$TEST_ROOT/driver-install.out"
-DRIVER_PM="$DRIVER_REPO/agentic/pm_flow/pm_flow.sh"
-DRIVER_FLOW="$DRIVER_REPO/agentic/pm_flow"
-DRIVER_SECTION="$DRIVER_REPO/agentic/pm_flow/driver-repo/sections/widget"
+DRIVER_PM="$DRIVER_REPO/.agentic/pm_flow/pm_flow.sh"
+DRIVER_FLOW="$DRIVER_REPO/.agentic/pm_flow"
+DRIVER_SECTION="$DRIVER_REPO/.agentic/pm_flow/driver-repo/sections/widget"
 
 python3 - "$DRIVER_FLOW/config.json" <<'PYCFG'
 import json, sys
@@ -826,10 +826,10 @@ SCHED_REPO="$TEST_ROOT/scheduling repo"
 mkdir "$SCHED_REPO"
 "$REPO_ROOT/install.sh" "$SCHED_REPO" --name "Scheduling Project" \
   > "$TEST_ROOT/scheduling-install.out"
-SCHED_PM="$SCHED_REPO/agentic/pm_flow/pm_flow.sh"
-SCHED_PROJECT="$SCHED_REPO/agentic/pm_flow/scheduling-repo"
+SCHED_PM="$SCHED_REPO/.agentic/pm_flow/pm_flow.sh"
+SCHED_PROJECT="$SCHED_REPO/.agentic/pm_flow/scheduling-repo"
 
-python3 - "$SCHED_REPO/agentic/pm_flow/config.json" <<'PYCFG'
+python3 - "$SCHED_REPO/.agentic/pm_flow/config.json" <<'PYCFG'
 import json, sys
 from pathlib import Path
 path = Path(sys.argv[1])
@@ -1065,7 +1065,7 @@ DECOMP_REPO="$TEST_ROOT/decomp repo"
 mkdir "$DECOMP_REPO"
 "$REPO_ROOT/install.sh" "$DECOMP_REPO" --name "Decomp Project" --domain saas \
   --mission "ship a usable task tracker" > "$TEST_ROOT/decomp-install.out"
-DECOMP_FLOW="$DECOMP_REPO/agentic/pm_flow"
+DECOMP_FLOW="$DECOMP_REPO/.agentic/pm_flow"
 python3 - "$DECOMP_FLOW/config.json" <<'PYCFG'
 import json, sys
 from pathlib import Path

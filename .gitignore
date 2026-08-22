@@ -1,7 +1,7 @@
 .DS_Store
 .idea/
-template/agentic/pm_flow/project/runs/*
-!template/agentic/pm_flow/project/runs/.gitkeep
+template/.agentic/pm_flow/project/runs/*
+!template/.agentic/pm_flow/project/runs/.gitkeep
 
 # Python bytecode from the flow's own modules.
 __pycache__/
@@ -9,7 +9,7 @@ __pycache__/
 
 # The self-hosting instance. pm-flow is installed into its own repository as the
 # `pm-agent` project so it can work on itself. Almost none of it belongs in git:
-# the scripts, roles, domains and tasks under agentic/ are copies that install.sh
+# the scripts, roles, domains and tasks under .agentic/ are copies that install.sh
 # renders from template/, and committing a second copy of the engine guarantees
 # the two drift. Reproduce it with:
 #
@@ -17,15 +17,15 @@ __pycache__/
 #
 # What is kept is the part that was authored rather than generated: the plan, the
 # section briefs, and the dependency graph between them.
-agentic/*
-!agentic/pm_flow/
-agentic/pm_flow/*
-!agentic/pm_flow/pm-agent/
-agentic/pm_flow/pm-agent/*
-!agentic/pm_flow/pm-agent/project_state/
-!agentic/pm_flow/pm-agent/sections/
-agentic/pm_flow/pm-agent/sections/*/cycles/
-agentic/pm_flow/pm-agent/sections/*/runs/
+.agentic/*
+!.agentic/pm_flow/
+.agentic/pm_flow/*
+!.agentic/pm_flow/pm-agent/
+.agentic/pm_flow/pm-agent/*
+!.agentic/pm_flow/pm-agent/project_state/
+!.agentic/pm_flow/pm-agent/sections/
+.agentic/pm_flow/pm-agent/sections/*/cycles/
+.agentic/pm_flow/pm-agent/sections/*/runs/
 
 # The rendered agent-instructions file is generated from template/CLAUDE.md at
 # install time. The template is the source; a rendered copy only drifts from it.
@@ -38,5 +38,5 @@ agentic/pm_flow/pm-agent/sections/*/runs/
 **/pm_flow.db-shm
 
 # Runtime locks, not state.
-agentic/pm_flow/*/sections/.*.lock
-agentic/pm_flow/*/sections/*.lock
+.agentic/pm_flow/*/sections/.*.lock
+.agentic/pm_flow/*/sections/*.lock

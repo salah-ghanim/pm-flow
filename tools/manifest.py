@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Generate the install manifest from the template directory.
+
+The installer cannot discover what to install. It supports installing from a URL
+as well as from a checkout, and a remote install has no directory to walk - which
+is why it carried three hand-written lists of filenames. Those lists were wrong
+the moment anything was added: four modules were shipped in the template, the
+installer did not know about them, and a stock install got a driver that called
+files which were not there.
+
+So the file list becomes data. This walks the template, classifies every file,
+and writes `template/manifest.json`. Both install paths read it, and adding a
+file to the template is all it takes for the installer to ship it.
+
+Classification is what makes upgrading safe, and it is the only thing here that
+takes judgement:
+
+    engine   the flow itself - scripts, modules, personas, tasks, domains.
+             Replaced on upgrade. Yours to read, not to edit.
+    seed     written once and never touched again: config.json holds your model
+             bindings and budgets, and an upgrade that overwrote it would silently
+             re-bind every role.
+    project  the per-project scaffold, copied once per project key.
+
+Run it after changing anything under template/:
+
+    python3 tools/manifest.py --write
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+TEMPLATE = ROOT / "template"
+MANIFEST = TEMPLATE / "manifest.json"
+
+# Anything matching these is never shipped.
+EXCLUDE_PARTS = {"__pycache__", ".DS_Store", ".git"}
+EXCLUDE_SUFFIX = {".pyc", ".pyo"}
+
+
+def classify(rel: str) -> str:
+    """Which of the three lifecycles a template file belongs to."""
+    # The per-project scaffold, instantiated once per project key.
+    if rel.startswith(".agentic/pm_flow/project/"):
+        return "project"
+    # Your bindings, budgets and thresholds. Replacing this on upgrade would
+    # re-bind every role to whatever the template happens to ship.
+    if rel == ".agentic/pm_flow/config.json":
+        return "seed"
+    # Written only if absent; a repository that already has one keeps it.
+    if rel == "CLAUDE.md":
+        return "seed"
+    # The installer appends a line per project workspace, so this file is
+    # expected to differ from what shipped. Treating it as engine would report
+    # every multi-project install as locally modified.
+    if rel == ".agentic/pm_flow/projects.md":
+        return "seed"
+    return "engine"
+
+
+def iter_template_files():
+    for path in sorted(TEMPLATE.rglob("*")):
+        if not path.is_file():
+            continue
+        if path == MANIFEST:
+            continue
+        rel = path.relative_to(TEMPLATE).as_posix()
+        if any(part in EXCLUDE_PARTS for part in path.parts):
+            continue
+        if path.suffix in EXCLUDE_SUFFIX:
+            continue
+        yield rel, path
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build() -> dict:
+    version = (ROOT / "VERSION").read_text().strip()
+    files = []
+    for rel, path in iter_template_files():
+        files.append({
+            "path": rel,
+            "sha256": sha256(path),
+            "class": classify(rel),
+            # Preserved so an installed script stays runnable. A copied file that
+            # loses its executable bit is a flow that cannot dispatch.
+            "executable": bool(path.stat().st_mode & 0o111),
+        })
+    return {"version": version, "files": files}
+
+
+def main(argv) -> int:
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--write", action="store_true", help="write template/manifest.json")
+    parser.add_argument("--check", action="store_true",
+                        help="exit non-zero if the manifest is stale")
+    args = parser.parse_args(argv[1:])
+
+    manifest = build()
+    rendered = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+
+    if args.check:
+        current = MANIFEST.read_text() if MANIFEST.is_file() else ""
+        if current != rendered:
+            print("manifest is stale; run: python3 tools/manifest.py --write",
+                  file=sys.stderr)
+            return 1
+        print(f"manifest current: {len(manifest['files'])} files at {manifest['version']}")
+        return 0
+
+    if args.write:
+        MANIFEST.write_text(rendered)
+        counts = {}
+        for entry in manifest["files"]:
+            counts[entry["class"]] = counts.get(entry["class"], 0) + 1
+        summary = ", ".join(f"{n} {k}" for k, n in sorted(counts.items()))
+        print(f"wrote {MANIFEST.relative_to(ROOT)}: "
+              f"{len(manifest['files'])} files ({summary}) at {manifest['version']}")
+        return 0
+
+    print(rendered, end="")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

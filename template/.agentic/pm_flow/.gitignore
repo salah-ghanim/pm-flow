@@ -1,0 +1,33 @@
+# Written by pm-flow's installer into the flow directory itself, so a repository
+# that installs pm-flow needs no edits of its own to stay clean.
+#
+# The rule is the same one the store is built on: definitions are committed,
+# records are not. Everything below is something the flow writes while working.
+
+# The store. One file per project, rewritten on every dispatch. Committing it
+# recreates exactly the churn it exists to remove.
+*/runs/pm_flow.db
+*/runs/pm_flow.db-wal
+*/runs/pm_flow.db-shm
+
+# Per-dispatch run records: transcripts, prompts, response envelopes, the cost
+# ledger. The store holds the same facts in a form you can query.
+*/runs/*
+!*/runs/.gitkeep
+
+# Cycle working files. A section's brief, state and handoff are worth keeping;
+# the scratch of each attempt is not.
+*/sections/*/cycles/
+*/sections/*/panels/
+*/sections/*/escalation*/
+
+# Locks and claims. Runtime coordination, meaningless once the process is gone.
+*.lock
+.claim-*
+
+# The repo-local environment hook. It exists to hold things like API base URLs
+# and tokens, so it must never be committed. `local_env.sh.example` is tracked.
+local_env.sh
+
+__pycache__/
+*.pyc
