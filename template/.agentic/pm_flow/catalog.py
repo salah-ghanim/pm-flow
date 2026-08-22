@@ -109,32 +109,59 @@ def frontmatter_block(meta: dict) -> str:
 
 # --------------------------------------------------------------- disk -> store
 
+def persona_digest(key, layer, body) -> str:
+    """A persona's identity: its key, its layer, its exact words."""
+    return store.content_hash(key, layer, body)
+
+
+def find_persona(connection, key, digest):
+    """The row for this exact wording, or None.
+
+    The whole row rather than the id, because adopting a persona into a pack
+    has to know what provenance it already carries.
+    """
+    return connection.execute(
+        "SELECT * FROM personas WHERE key = ? AND content_hash = ?", (key, digest)
+    ).fetchone()
+
+
+def insert_persona(connection, *, key, title, summary, body, layer, digest,
+                   source_path, author=None, license=None, source_url=None,
+                   version=None, tags=None, extends_id=None, pack_id=None) -> int:
+    """The bare insert. The caller owns the transaction, because installing a
+    pack has to land its pack row and all of its personas in one commit."""
+    cursor = connection.execute(
+        "INSERT INTO personas (key, title, summary, body, layer, extends_id,"
+        " pack_id, author, license, source_url, version, tags, content_hash,"
+        " source_path, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (key, title, summary, body, layer, extends_id, pack_id, author, license,
+         source_url, version, store.dumps(tags or []), digest, source_path,
+         store.now()),
+    )
+    return cursor.lastrowid
+
+
 def upsert_persona(connection, *, key, title, summary, body, layer,
                    source_path, author=None, license=None, source_url=None,
-                   version=None, tags=None, extends_id=None) -> int:
+                   version=None, tags=None, extends_id=None, pack_id=None) -> int:
     """A persona, identified by its content.
 
     Re-reading an unchanged prompt returns the same row; editing one produces a
     new version rather than mutating the old. That is what makes a measured
     result attributable to exact wording.
     """
-    digest = store.content_hash(key, layer, body)
-    row = connection.execute(
-        "SELECT id FROM personas WHERE key = ? AND content_hash = ?", (key, digest)
-    ).fetchone()
-    if row:
-        return row["id"]
+    digest = persona_digest(key, layer, body)
+    found = find_persona(connection, key, digest)
+    if found is not None:
+        return found["id"]
     with connection:
-        cursor = connection.execute(
-            "INSERT INTO personas (key, title, summary, body, layer, extends_id,"
-            " author, license, source_url, version, tags, content_hash,"
-            " source_path, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (key, title, summary, body, layer, extends_id, author, license,
-             source_url, version, store.dumps(tags or []), digest, source_path,
-             store.now()),
+        return insert_persona(
+            connection, key=key, title=title, summary=summary, body=body,
+            layer=layer, digest=digest, source_path=source_path, author=author,
+            license=license, source_url=source_url, version=version, tags=tags,
+            extends_id=extends_id, pack_id=pack_id,
         )
-        return cursor.lastrowid
 
 
 def upsert_binding(connection, *, key, cli, model, thinking, access,
@@ -443,6 +470,308 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
     return counts
 
 
+# ------------------------------------------------------------- persona packs
+#
+# A pack is a directory of markdown personas plus one JSON index. That is the
+# whole format: publishing one is pushing a repository, and installing one
+# copies nothing but text into the store. JSON for the index rather than more
+# frontmatter, because the frontmatter reader above is deliberately small and a
+# manifest is the wrong reason to grow it into a YAML parser.
+#
+# Installing must never run anything from a pack. Nothing here imports or
+# executes, and nothing here even reads a file the index does not name.
+
+PACK_MANIFEST = "persona-pack.json"
+
+PERSONA_LAYERS = ("base", "domain", "task", "style")
+
+# The local half an agent gets on arrival: which backend runs it, at what tier,
+# with what tools. A pack carrying these is neither portable nor safe to
+# install, so they are refused rather than dropped - a silently ignored model
+# name still misleads the person who wrote it.
+FORBIDDEN_KEYS = frozenset({
+    "cli", "clis", "exec", "exec_name", "command", "argv", "entrypoint",
+    "model", "models", "thinking_level", "difficulty",
+    "binding", "bindings", "access", "access_tier", "tier", "permissions",
+    "tool", "tools", "tool_grant", "tool_grants", "allowed_tools",
+    "disallowed_tools", "mcp_servers",
+})
+
+PERSONA_ENTRY_KEYS = frozenset({"key", "file", "layer", "title", "summary", "tags"})
+
+
+class PackError(Exception):
+    """A pack that will not be installed, and the reason why."""
+
+
+def _required_text(value, field) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise PackError(f"{field} must be a non-empty string")
+    return value.strip()
+
+
+def _optional_text(value):
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _tag_list(value, field):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value] if value.strip() else []
+    if not isinstance(value, list) or any(not isinstance(t, str) for t in value):
+        raise PackError(f"{field} must be a list of strings")
+    return [t.strip() for t in value if t.strip()]
+
+
+def reject_local_fields(value, where, path="") -> None:
+    """Refuse machine-local metadata anywhere in a pack, at any depth.
+
+    Nested rather than top-level only, because burying a model name one level
+    down inside a persona entry is exactly how it would arrive.
+    """
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalised = str(key).strip().lower().replace("-", "_")
+            if normalised in FORBIDDEN_KEYS:
+                at = f" at {path}" if path else ""
+                raise PackError(
+                    f"{where} carries machine-local field '{key}'{at}: a persona "
+                    "names no cli, model, binding, access tier or tool grant")
+            reject_local_fields(item, where, f"{path}.{key}" if path else str(key))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            reject_local_fields(item, where, f"{path}[{index}]")
+
+
+def resolve_inside(root: Path, relative) -> Path:
+    """A pack may only index files it contains.
+
+    Resolved rather than merely joined, so a symlink pointing out of the pack is
+    caught instead of followed.
+    """
+    if not isinstance(relative, str) or not relative.strip():
+        raise PackError("persona file must be a non-empty pack-relative path")
+    candidate = Path(relative)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise PackError(f"persona file '{relative}' must stay inside the pack")
+    resolved = (root / candidate).resolve()
+    if root not in resolved.parents:
+        raise PackError(f"persona file '{relative}' resolves outside the pack")
+    if resolved.suffix.lower() != ".md":
+        raise PackError(f"persona file '{relative}' must be a .md file")
+    if not resolved.is_file():
+        raise PackError(f"persona file '{relative}' is missing")
+    return resolved
+
+
+def read_pack(path) -> dict:
+    """Validate a pack completely, and return what installing it needs.
+
+    Everything a pack can be wrong about is decided here, before the store is
+    opened: a pack that fails halfway through validation must leave the store
+    exactly as it was, and the cheapest way to guarantee that is to have written
+    nothing yet.
+    """
+    root = Path(path).expanduser()
+    if root.is_file() and root.name == PACK_MANIFEST:
+        root = root.parent
+    root = root.resolve()
+    if not root.is_dir():
+        raise PackError(f"{path} is not a pack directory")
+    manifest_path = root / PACK_MANIFEST
+    if not manifest_path.is_file():
+        raise PackError(f"no {PACK_MANIFEST} in {root}")
+    try:
+        manifest = json.loads(manifest_path.read_text(errors="replace"))
+    except ValueError as error:
+        raise PackError(f"{PACK_MANIFEST} is not valid JSON: {error}")
+    if not isinstance(manifest, dict):
+        raise PackError(f"{PACK_MANIFEST} must be a JSON object")
+    reject_local_fields(manifest, PACK_MANIFEST)
+
+    name = _required_text(manifest.get("name"), "name")
+    author = _required_text(manifest.get("author"), "author")
+    licence = _required_text(manifest.get("license"), "license")
+    version = _required_text(manifest.get("version"), "version")
+    if "tags" not in manifest:
+        raise PackError("tags is required; use [] for none")
+    pack_tags = _tag_list(manifest.get("tags"), "tags")
+    entries = manifest.get("personas")
+    if not isinstance(entries, list) or not entries:
+        raise PackError("personas must be a non-empty list")
+
+    personas = []
+    seen = set()
+    for index, entry in enumerate(entries):
+        field = f"personas[{index}]"
+        if not isinstance(entry, dict):
+            raise PackError(f"{field} must be an object")
+        unknown = set(entry) - PERSONA_ENTRY_KEYS
+        if unknown:
+            raise PackError(f"{field} has unsupported field(s): "
+                            + ", ".join(sorted(str(u) for u in unknown)))
+        key = _required_text(entry.get("key"), f"{field}.key")
+        if key in seen:
+            raise PackError(f"duplicate persona key '{key}'")
+        seen.add(key)
+        layer = _required_text(entry.get("layer"), f"{field}.layer")
+        if layer not in PERSONA_LAYERS:
+            raise PackError(f"{field}.layer '{layer}' is not one of "
+                            + ", ".join(PERSONA_LAYERS))
+        file_path = resolve_inside(root, entry.get("file"))
+        meta, body = split_frontmatter(file_path.read_text(errors="replace"))
+        reject_local_fields(meta, f"{entry.get('file')} frontmatter")
+        if not body.strip():
+            raise PackError(f"{field} file '{entry.get('file')}' has no prompt body")
+        tags = []
+        for tag in (pack_tags + _tag_list(entry.get("tags"), f"{field}.tags")
+                    + _tag_list(meta.get("tags"), f"{field} frontmatter tags")):
+            if tag not in tags:
+                tags.append(tag)
+        personas.append({
+            "key": key,
+            "layer": layer,
+            "title": _optional_text(entry.get("title")) or _optional_text(meta.get("title")) or key,
+            "summary": _optional_text(entry.get("summary")) or _optional_text(meta.get("summary")),
+            "body": body.strip(),
+            "tags": tags,
+            "source_path": str(file_path),
+        })
+
+    return {
+        "root": root, "name": name, "author": author, "license": licence,
+        "version": version, "tags": pack_tags,
+        "description": _optional_text(manifest.get("description")),
+        "manifest": manifest, "personas": personas,
+    }
+
+
+PACK_PROVENANCE = ("pack_id", "author", "license", "source_url", "version",
+                   "tags", "source_path", "title", "summary")
+
+
+def adopt_persona(connection, row, spec, pack, pack_id, source) -> bool:
+    """Bring a persona the store already holds into the pack that ships it.
+
+    The same words may already be here as a standalone persona - written by
+    hand, or installed before this pack existed. Inserting a second row would
+    duplicate an identity that is defined by its content, and every measurement
+    already recorded against the old row would keep pointing at a persona that
+    belongs to no pack. So the row keeps its id and gains the pack's provenance.
+
+    Only provenance is touched. Key, layer, body and content hash are the
+    identity, and are the same by construction: this row was found by them.
+
+    Returns whether anything actually changed, so re-adding an unchanged pack
+    stays a reported no-op rather than announcing work it did not do.
+    """
+    wanted = {
+        "pack_id": pack_id,
+        "author": pack["author"],
+        "license": pack["license"],
+        "source_url": source,
+        "version": pack["version"],
+        "tags": store.dumps(spec["tags"]),
+        "source_path": spec["source_path"],
+        "title": spec["title"],
+        "summary": spec["summary"],
+    }
+    if all(row[column] == wanted[column] for column in PACK_PROVENANCE):
+        return False
+    connection.execute(
+        "UPDATE personas SET "
+        + ", ".join(f"{column} = ?" for column in PACK_PROVENANCE)
+        + " WHERE id = ?",
+        [wanted[column] for column in PACK_PROVENANCE] + [row["id"]],
+    )
+    return True
+
+
+def reject_cross_pack_claim(connection, row, spec, pack, pack_id) -> None:
+    """Refuse to move a persona away from the pack that already owns it.
+
+    Adoption above is for a persona that belongs to no pack: it has no pack
+    provenance to lose, so gaining this pack's is a strict improvement. A
+    persona another pack already ships is a different case. Two packs are
+    separate publications that happen to contain the same words, and silently
+    re-attributing the row would rewrite the first pack's author, licence,
+    version and source - while every measurement recorded against that row
+    stays, now filed under a pack that never published it.
+
+    Identical content is not a merge signal, so the second pack is refused
+    whole rather than partly applied. The caller's transaction is what makes
+    that atomic; this only decides, and says which persona collided with whom.
+    """
+    if row["pack_id"] is None or row["pack_id"] == pack_id:
+        return
+    owner = connection.execute(
+        "SELECT name FROM persona_packs WHERE id = ?", (row["pack_id"],)
+    ).fetchone()
+    owner_name = owner["name"] if owner else f"pack id {row['pack_id']}"
+    raise PackError(
+        f"persona '{spec['key']}' is identical to one already installed from "
+        f"pack '{owner_name}', which keeps it along with everything measured "
+        f"about it; pack '{pack['name']}' was not installed. Give the persona "
+        f"a different key, change its words so it is a distinct persona, or "
+        f"remove '{owner_name}' first."
+    )
+
+
+def install_pack(connection, pack: dict) -> dict:
+    """Record the pack and its personas in one commit.
+
+    The pack row carries the manifest verbatim and the resolved source it came
+    from, so a borrowed persona can say where it is from and be updated from
+    there later. The personas themselves are content-addressed as always, which
+    is what makes re-adding an unchanged pack a no-op.
+    """
+    source = str(pack["root"])
+    installed, adopted, unchanged = [], [], []
+    if connection.in_transaction:
+        connection.commit()
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        connection.execute(
+            "INSERT INTO persona_packs (name, source_url, ref, author, license,"
+            " description, manifest, installed_at)"
+            " VALUES (?, ?, NULL, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(name) DO UPDATE SET source_url = excluded.source_url,"
+            " author = excluded.author, license = excluded.license,"
+            " description = excluded.description, manifest = excluded.manifest",
+            (pack["name"], source, pack["author"], pack["license"],
+             pack["description"], store.dumps(pack["manifest"]), store.now()),
+        )
+        pack_id = connection.execute(
+            "SELECT id FROM persona_packs WHERE name = ?", (pack["name"],)
+        ).fetchone()["id"]
+        for spec in pack["personas"]:
+            digest = persona_digest(spec["key"], spec["layer"], spec["body"])
+            found = find_persona(connection, spec["key"], digest)
+            if found is not None:
+                reject_cross_pack_claim(connection, found, spec, pack, pack_id)
+                if adopt_persona(connection, found, spec, pack, pack_id, source):
+                    adopted.append(spec["key"])
+                else:
+                    unchanged.append(spec["key"])
+                continue
+            insert_persona(
+                connection, key=spec["key"], title=spec["title"],
+                summary=spec["summary"], body=spec["body"], layer=spec["layer"],
+                digest=digest, source_path=spec["source_path"],
+                author=pack["author"], license=pack["license"],
+                source_url=source, version=pack["version"], tags=spec["tags"],
+                pack_id=pack_id,
+            )
+            installed.append(spec["key"])
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    return {"pack_id": pack_id, "installed": installed, "adopted": adopted,
+            "unchanged": unchanged}
+
+
 # --------------------------------------------------------------- store -> vault
 
 def write_note(path: Path, parts) -> None:
@@ -665,6 +994,54 @@ def cmd_show(args):
     return 0
 
 
+def cmd_persona_add(args):
+    # Validate before opening the store: a rejected pack must not so much as
+    # create the database file it was refused from.
+    try:
+        pack = read_pack(args.path)
+    except PackError as error:
+        raise SystemExit(f"persona add: {error}")
+    connection = store.connect(args.db)
+    try:
+        result = install_pack(connection, pack)
+    except PackError as error:
+        # install_pack has already rolled back, so the store is exactly as it
+        # was; the only thing left to do is say why, without a traceback.
+        raise SystemExit(f"persona add: {error}")
+    print(f"pack {pack['name']} {pack['version']} from {pack['root']}")
+    print(f"  author {pack['author']} | license {pack['license']} | "
+          f"tags {', '.join(pack['tags']) or '-'}")
+    for key in result["installed"]:
+        print(f"  + {key}")
+    for key in result["adopted"]:
+        print(f"  ~ {key} (adopted into pack)")
+    for key in result["unchanged"]:
+        print(f"  = {key} (unchanged)")
+    print(f"installed {len(result['installed'])}, adopted {len(result['adopted'])}, "
+          f"unchanged {len(result['unchanged'])}")
+    return 0
+
+
+def cmd_persona_list(args):
+    connection = store.connect(args.db)
+    rows = connection.execute(
+        "SELECT p.key, p.layer, p.version, p.content_hash, p.source_url,"
+        " p.source_path, k.name AS pack FROM personas p"
+        " LEFT JOIN persona_packs k ON k.id = p.pack_id"
+        " WHERE p.id = (SELECT MAX(id) FROM personas b WHERE b.key = p.key)"
+        " ORDER BY p.layer, p.key"
+    ).fetchall()
+    if not rows:
+        print("no personas installed")
+        return 0
+    print(f"{'KEY':<28} {'LAYER':<8} {'PACK':<18} {'VERSION':<10} {'HASH':<14} SOURCE")
+    for row in rows:
+        print(f"{row['key']:<28} {row['layer']:<8} {row['pack'] or '-':<18} "
+              f"{row['version'] or '-':<10} {(row['content_hash'] or '')[:12]:<14} "
+              f"{row['source_url'] or row['source_path'] or '-'}")
+    return 0
+
+
 def cmd_compare(args):
     connection = store.connect(args.db)
     rows = connection.execute(
@@ -706,6 +1083,14 @@ def main(argv):
 
     p = sub.add_parser("show", help="what the store knows")
     p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("persona", help="install and inspect persona packs")
+    persona_sub = p.add_subparsers(dest="persona_command", required=True)
+    q = persona_sub.add_parser("add", help="install a persona pack from a local path")
+    q.add_argument("path", help="pack directory, or its persona-pack.json")
+    q.set_defaults(func=cmd_persona_add)
+    q = persona_sub.add_parser("list", help="installed personas and their provenance")
+    q.set_defaults(func=cmd_persona_list)
 
     p = sub.add_parser("compare", help="runs side by side, by topology")
     p.add_argument("--project")
