@@ -980,12 +980,21 @@ GUARD_OUTPUT="${GUARD_CYCLE#$DRIVER_REPO/}/result.md"
   printf -- '- `%s`\n' "$GUARD_OUTPUT"
   printf -- '- `src/widget/thing.py`\n'
 } > "$GUARD_CYCLE/assignment.md"
-expect_failure "an assignment may not own the dispatch output path" \
-  env PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick
-assert_file_contains "$TEST_ROOT/expected-failure.log" \
+# The rejection is recoverable rather than fatal. The manager wrote the
+# assignment, so the manager can rewrite it: the offending assignment is set
+# aside, the cycle returns to scope, and the tick succeeds. It used to fail the
+# whole tick, which left the cycle wedged on the same rejected assignment
+# forever.
+guard_reject_tick="$(PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
+  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick)"
+assert_contains "$guard_reject_tick" "assignment rejected; returning the cycle to scope" \
+  "an assignment owning the dispatch output path is refused and re-scoped"
+assert_file_contains "$GUARD_CYCLE/rescope_reason.txt" \
   "grants write access to the dispatch output path" "the rejection explains itself"
-assert_file_contains "$TEST_ROOT/expected-failure.log" "$GUARD_OUTPUT" \
+assert_file_contains "$GUARD_CYCLE/rescope_reason.txt" "$GUARD_OUTPUT" \
   "the rejection names the offending path"
+[[ -f "$GUARD_CYCLE/assignment.rejected.md" ]] || \
+  fail "the rejected assignment was not set aside for the manager to see"
 [[ ! -f "$GUARD_CYCLE/result.md" ]] || \
   fail "a rejected assignment still spent a developer dispatch"
 [[ ! -d "$GUARD_CYCLE/.claim-develop" ]] || \
@@ -1012,9 +1021,11 @@ rm -f "$GUARD_CYCLE/result.md"
 # usually phrased in prose.
 printf '## Assignment\n\nThe developer may write only `heartbeat.txt` and\n`result.md`.\n' \
   > "$GUARD_CYCLE/assignment.md"
-expect_failure "an inline write grant on the output name is rejected" \
-  env PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick
-assert_file_contains "$TEST_ROOT/expected-failure.log" \
+guard_inline_tick="$(PM_DONE_FLAG="$TEST_ROOT/driver-complete.flag" \
+  PATH="$TEST_ROOT/driver-bin:$PATH" "$DRIVER_PM" tick)"
+assert_contains "$guard_inline_tick" "assignment rejected; returning the cycle to scope" \
+  "an inline write grant on the output name is rejected"
+assert_file_contains "$GUARD_CYCLE/rescope_reason.txt" \
   "grants write access to the dispatch output path" "an inline grant is rejected too"
 
 # Only write grants are inspected. Another cycle's result is ordinary read-only
