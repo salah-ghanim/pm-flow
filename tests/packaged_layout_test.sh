@@ -75,48 +75,162 @@ done
   fail "a PM_FLOW_* override survived into the test environment"
 
 # --- build and install the current artifact ----------------------------------
+#
+# The build is hermetic by construction rather than by luck. Earlier cycles ran
+# `uv build`, which needs a package index the first time it resolves the build
+# backend and, on this machine, aborts inside macOS system configuration before
+# it gets that far. Neither the network nor the caller's cache is something a
+# test of *this* repository should be asserting about, so both are removed: the
+# build backend named in pyproject.toml is vendored as pinned, hashed,
+# platform-independent wheels under tests/packaging-build-wheelhouse, and pip is
+# run with the index switched off.
+#
+# Two virtual environments, deliberately. The build venv holds hatchling and its
+# dependencies; the runtime venv holds nothing but the wheel that build
+# produced. Installing into one venv would let a build-time import answer for
+# something the shipped artifact is supposed to provide.
 
+WHEELHOUSE="$REPO_ROOT/tests/packaging-build-wheelhouse"
+BUILD_REQUIREMENTS="$WHEELHOUSE/build-requirements.txt"
+BUILD_VENV="$TEST_ROOT/build-venv"
 VENV="$TEST_ROOT/venv"
 DIST="$TEST_ROOT/dist"
+BUILD_LOG="$TEST_ROOT/build.log"
 mkdir -p "$DIST"
 
-# Everything the build writes lands under TEST_ROOT, which the trap removes, so
-# the caller prepares nothing: no `env -u`, no cache override, no PATH edit. An
-# inherited VIRTUAL_ENV or PYTHONPATH would be worse than untidy - it would let
-# a different interpreter, or a pm_flow already on sys.path, answer for the
-# artifact this test claims to be proving.
+[[ -f "$BUILD_REQUIREMENTS" ]] || \
+  fail "no locked build requirements at $BUILD_REQUIREMENTS"
+
+# Reports what the runtime venv actually has installed, read from the installed
+# metadata rather than from anything this script arranged. Kept as a file under
+# TEST_ROOT so the venv's own interpreter runs it with no PYTHONPATH games.
+/bin/cat > "$TEST_ROOT/describe_install.py" <<'PY'
+import json
+import pathlib
+import sysconfig
+
+site = pathlib.Path(sysconfig.get_paths()["purelib"])
+for info in sorted(site.glob("pm_flow-*.dist-info")):
+    print(info.name)
+    wheel_meta = info / "WHEEL"
+    if wheel_meta.exists():
+        print(wheel_meta.read_text())
+    direct = info / "direct_url.json"
+    if direct.exists():
+        print(json.loads(direct.read_text()).get("url", ""))
+PY
+
+# Everything the build reads and writes lands under TEST_ROOT or the checked-in
+# wheelhouse, so the caller prepares nothing: no `env -u`, no cache override, no
+# PATH edit. An inherited VIRTUAL_ENV or PYTHONPATH would be worse than untidy -
+# it would let a different interpreter, or a pm_flow already on sys.path, answer
+# for the artifact this test claims to be proving. An inherited PIP_* or UV_*
+# setting could point the build at an index, a config file or a cache this test
+# never wrote, which is exactly the dependence it exists to remove.
 unset VIRTUAL_ENV PYTHONPATH PYTHONHOME PYTHONSTARTUP
-export UV_CACHE_DIR="$TEST_ROOT/uv-cache"
+for name in ${(k)parameters[(I)PIP_*]} ${(k)parameters[(I)UV_*]}; do
+  unset "$name"
+done
 export PIP_CACHE_DIR="$TEST_ROOT/pip-cache"
 export XDG_CACHE_HOME="$TEST_ROOT/xdg-cache"
+export PIP_CONFIG_FILE="$TEST_ROOT/pip.conf"
+export PIP_DISABLE_PIP_VERSION_CHECK=1
+export PIP_NO_INPUT=1
+: > "$PIP_CONFIG_FILE"
+[[ -z "${PIP_INDEX_URL:-}${PIP_EXTRA_INDEX_URL:-}${UV_CACHE_DIR:-}" ]] || \
+  fail "an inherited PIP_/UV_ setting survived into the build environment"
 
-if command -v uv >/dev/null 2>&1; then
-  uv build --wheel --out-dir "$DIST" "$REPO_ROOT" > "$TEST_ROOT/build.log" 2>&1 || {
-    /bin/cat "$TEST_ROOT/build.log" >&2
-    fail "uv build failed"
-  }
-  uv venv "$VENV" >> "$TEST_ROOT/build.log" 2>&1 || fail "uv venv failed"
-  VIRTUAL_ENV="$VENV" uv pip install "$DIST"/pm_flow-*.whl \
-    >> "$TEST_ROOT/build.log" 2>&1 || {
-    /bin/cat "$TEST_ROOT/build.log" >&2
-    fail "uv pip install failed"
-  }
-else
-  python3 -m venv "$VENV" > "$TEST_ROOT/build.log" 2>&1 || fail "venv creation failed"
-  "$VENV/bin/pip" install --quiet "$REPO_ROOT" >> "$TEST_ROOT/build.log" 2>&1 || {
-    /bin/cat "$TEST_ROOT/build.log" >&2
-    fail "pip install of the checkout failed"
-  }
-fi
+# `pip download` is never run here. --no-index means the only place a
+# distribution can come from is --find-links, and --require-hashes means it must
+# be byte for byte the file the lock recorded.
+pip_offline() {
+  local venv="$1"
+  shift
+  "$venv/bin/python" -m pip install \
+    --no-index --find-links "$WHEELHOUSE" \
+    --disable-pip-version-check --no-input "$@"
+}
+
+python3 -m venv "$BUILD_VENV" > "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "build venv creation failed"
+}
+pip_offline "$BUILD_VENV" --quiet --require-hashes \
+  -r "$BUILD_REQUIREMENTS" >> "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "the locked build requirements did not install offline from $WHEELHOUSE"
+}
+
+# The backend actually named by pyproject.toml, resolved out of the build venv.
+# If the wheelhouse ever drifts from `[build-system] requires`, this is where it
+# shows, rather than in a confusing build error further down.
+"$BUILD_VENV/bin/python" -c 'import hatchling.build' >> "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "the build venv cannot import the declared build backend"
+}
+
+# --no-build-isolation, because isolation is what would reach for an index: the
+# build venv already holds the pinned backend. --no-deps, because pm-flow
+# declares no runtime dependencies and a build that started resolving some would
+# be building something other than this package.
+"$BUILD_VENV/bin/python" -m pip wheel \
+  --no-index --no-build-isolation --no-deps \
+  --disable-pip-version-check --no-input \
+  --wheel-dir "$DIST" "$REPO_ROOT" >> "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "the offline wheel build failed"
+}
+
+built_wheels="$(find "$DIST" -maxdepth 1 -type f -name 'pm_flow-*.whl' | sort)"
+wheel_count="$(printf '%s' "$built_wheels" | grep -c . || true)"
+[[ "$wheel_count" == 1 ]] || \
+  fail "expected exactly one built pm_flow wheel in $DIST, found $wheel_count"
+WHEEL="$built_wheels"
+assert_contains "$WHEEL" "py3-none-any.whl" "the built wheel is platform-independent"
+
+# The runtime venv gets the wheel and nothing else. --no-index and --no-deps
+# together mean a missing piece cannot be silently fetched, and the checkout is
+# never named on this command line, so nothing can be installed from it.
+python3 -m venv "$VENV" >> "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "runtime venv creation failed"
+}
+"$VENV/bin/python" -m pip install \
+  --quiet --no-index --no-deps \
+  --disable-pip-version-check --no-input \
+  "$WHEEL" >> "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "installing the built wheel into the runtime venv failed"
+}
 
 PM_FLOW="$VENV/bin/pm-flow"
 [[ -x "$PM_FLOW" ]] || fail "the install produced no pm-flow entry point at $PM_FLOW"
 
-# The build actually used the redirected cache rather than the caller's: if the
-# directory is missing, the exports above stopped working and this run is
-# quietly writing into whatever cache the caller had configured.
-[[ -d "$UV_CACHE_DIR" || -d "$PIP_CACHE_DIR" ]] || \
-  fail "the build wrote no cache inside the test workspace, so it used the caller's"
+# The runtime venv is clean: it carries the wheel's contents, not the build
+# toolchain that produced them. If hatchling is importable here the two
+# environments were merged, and "installed from the wheel" means less than it says.
+! "$VENV/bin/python" -c 'import hatchling' >/dev/null 2>&1 || \
+  fail "the runtime venv contains the build backend, so it is not a clean install"
+
+# And it holds the built artifact rather than the checkout. A source or editable
+# install records the checkout path in the installed metadata; a wheel install
+# records the wheel. Nothing under the runtime venv may point back at REPO_ROOT.
+installed_record="$("$VENV/bin/python" "$TEST_ROOT/describe_install.py")"
+assert_contains "$installed_record" "Generator: hatchling" \
+  "the installed distribution was produced by the pinned build backend"
+assert_contains "$installed_record" "Root-Is-Purelib: true" \
+  "the installed distribution is the platform-independent wheel"
+case "$installed_record" in
+  *"$REPO_ROOT"*) fail "the runtime venv records the checkout as its source:"$'\n'"$installed_record" ;;
+esac
+
+# The build used the redirected cache rather than the caller's: if PIP_CACHE_DIR
+# still pointed outside TEST_ROOT the exports above stopped working, and this run
+# is quietly reading and writing whatever cache the caller had configured.
+case "$PIP_CACHE_DIR" in
+  "$TEST_ROOT"/*) ;;
+  *) fail "the build cache escaped the test workspace: $PIP_CACHE_DIR" ;;
+esac
 VENV_REAL="$(cd -P "$VENV" && pwd -P)"
 
 # --- a fixture repository holding project data and nothing else --------------
