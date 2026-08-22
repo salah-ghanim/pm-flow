@@ -41,6 +41,7 @@ Usage:
   pm_flow.sh [--project <name>] status
   pm_flow.sh [--project <name>] next
   pm_flow.sh [--project <name>] cost
+  pm_flow.sh [--project <name>] access [--all]
   pm_flow.sh version
   pm_flow.sh upgrade --source <pm-flow checkout> [--apply] [--force]
   pm_flow.sh [--project <name>] [--section <name>] tick
@@ -1754,6 +1755,10 @@ main() {
     cost)
       shift || true
       cmd_cost "$@"
+      ;;
+    access)
+      shift || true
+      cmd_access "$@"
       ;;
     version)
       shift || true

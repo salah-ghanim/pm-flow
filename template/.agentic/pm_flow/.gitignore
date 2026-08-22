@@ -25,6 +25,15 @@
 *.lock
 .claim-*
 
+# Per-dispatch scratch the driver writes beside a section: the error from the
+# last failed action, and the working-tree snapshot taken before a dispatch so
+# its leftovers can be named afterwards. Both are rewritten on every dispatch
+# and neither means anything once the process is gone. `.gitkeep` is kept.
+*/sections/*/.last_error.txt
+*/sections/*/.pre_dispatch.txt
+*/sections/*/.post_dispatch.txt
+*/sections/*/.verdict_error.txt
+
 # The repo-local environment hook. It exists to hold things like API base URLs
 # and tokens, so it must never be committed. `local_env.sh.example` is tracked.
 local_env.sh

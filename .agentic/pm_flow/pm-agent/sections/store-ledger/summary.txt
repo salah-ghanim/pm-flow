@@ -1,1 +1,1 @@
-Blocked: scoped against a layout packaging replaces; re-cut once packaging lands.
+Reopened: its paths are disjoint from packaging and do not move.

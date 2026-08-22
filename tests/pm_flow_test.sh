@@ -980,6 +980,46 @@ project_idle_tick="$("$SCHED_PM" tick)"
 assert_contains "$project_idle_tick" "idle=project" "automatic tick ignores a blocked section"
 [[ ! -d "$SCHED_BLOCKED/cycles" ]] || fail "a blocked section was dispatched"
 
+# --- access observation ------------------------------------------------------
+#
+# The access tiers say what a role may touch. On codex the scoped tier bounds
+# writes and not reads, and on claude the write tier grants bare Bash, which is
+# unrestricted read by construction. Both are documented; neither was ever
+# measured. The hook is what measures it, so it is asserted rather than assumed
+# - the first version logged one empty record per tool call and looked fine,
+# because `python3 - <<'PY'` had already eaten the payload off stdin.
+ACCESS_HOOK="$FIXTURE_REPO/.agentic/pm_flow/access_hook.sh"
+[[ -x "$ACCESS_HOOK" ]] || fail "the access hook was installed without the execute bit"
+ACCESS_LOG="$TEST_ROOT/access-probe.jsonl"
+access_probe() {
+  printf '%s' "$1" | PM_FLOW_ACCESS_LOG="$ACCESS_LOG" PM_FLOW_ACCESS_ROLE=developer \
+    PM_FLOW_ACCESS_LABEL="develop widget 001" PM_FLOW_REPO_ROOT="$FIXTURE_REPO" \
+    PM_FLOW_ACCESS_WORK_ROOT="$FIXTURE_REPO" "$ACCESS_HOOK"
+}
+access_probe '{"tool_name":"Read","tool_input":{"file_path":"/etc/passwd"}}' \
+  || fail "the access hook exited non-zero; it must never break a dispatch"
+access_probe "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$FIXTURE_REPO/README.md\"}}"
+access_probe '{"tool_name":"Bash","tool_input":{"command":"cat ~/.ssh/config"}}'
+access_probe 'not json at all'
+
+access_records="$(/bin/cat "$ACCESS_LOG")"
+assert_contains "$access_records" '"tool": "Read"' "the hook records which tool was used"
+assert_contains "$access_records" '"path": "/etc/passwd", "outside": true' \
+  "a read outside the repository is recorded as outside"
+assert_contains "$access_records" "$FIXTURE_REPO/README.md\", \"outside\": false" \
+  "a read inside the repository is not flagged"
+assert_contains "$access_records" '"command": "cat ~/.ssh/config"' \
+  "a shell command is recorded verbatim, not merely counted"
+# Four probes, four records: the malformed one is still logged rather than
+# dropped, because a payload the hook could not read is itself worth knowing.
+access_line_count="$(/usr/bin/wc -l < "$ACCESS_LOG" | tr -d '[:space:]')"
+[[ "$access_line_count" == 4 ]] || \
+  fail "expected 4 access records, got $access_line_count"
+assert_not_contains "$access_records" '"targets": [], "outside": false, "command"' \
+  "a shell command with paths in it does not record an empty target list"
+
+printf 'PASS: per-dispatch access observation\n'
+
 printf 'PASS: dependency scheduling and blocked sections\n'
 
 reset_driver_section
@@ -1203,6 +1243,18 @@ assert_contains "$wt_cwds" "/pm-flow/worktrees/worktree-repo/beta" \
 assert_not_contains "$wt_cwds" "$WT_REPO
 " "no developer dispatch ran in the main working tree"
 
+# Tool caches must land somewhere the dispatch is allowed to write. codex runs
+# reviewers under --sandbox workspace-write, which refuses $HOME/.cache, so an
+# acceptance check that builds anything failed with "Failed to initialize cache
+# ... Operation not permitted" - and the section was rejected for not passing a
+# check that could not be executed at all. Two cycles and an escalation went to
+# that before anyone looked.
+wt_env="$(/bin/cat "$TEST_ROOT/wt-state/develop_env.log")"
+assert_contains "$wt_env" "$WT_PROJECT/runs/.cache" \
+  "tool caches are pointed inside the project, where every sandbox can write"
+assert_not_contains "$wt_env" "unset" \
+  "every cache variable a build tool reads for is set, not merely one of them"
+
 # An accepted cycle merges back. Both sections wrote a file, each in its own
 # tree, and both files are in the main tree afterwards without either having
 # collided with the other.
@@ -1239,6 +1291,90 @@ PM_STUB_REVIEW=NO_GO wt_run 4 > /dev/null
   fail "a rejected cycle left the main working tree dirty"
 
 printf 'PASS: per-section git worktrees, merge-back, and cleanup\n'
+
+# Two section-scoped runs at once. Worktrees made this safe; the project lock
+# still made it impossible, because it was exclusive for every run. A
+# section-scoped run now takes the project lock shared and its own section
+# exclusively, so two sections proceed and a project-wide run is still refused
+# while either is in flight.
+wt_init_section delta
+wt_init_section epsilon
+git -C "$WT_REPO" add -A
+git -C "$WT_REPO" -c user.name="pm-flow test" -c user.email="pm-flow-test@localhost" \
+  commit -q -m "add the concurrent sections"
+
+wt_parallel_section() {
+  PM_STUB_STATE="$TEST_ROOT/wt-state" PM_STUB_REVIEW=GO \
+  PATH="$TEST_ROOT/wt-bin:$PATH" "$WT_PM" --section "$1" run --max-ticks 8 \
+    > "$TEST_ROOT/wt-$1.log" 2>&1
+}
+wt_parallel_section delta &
+wt_delta_pid=$!
+wt_parallel_section epsilon &
+wt_epsilon_pid=$!
+wait "$wt_delta_pid" || fail "the delta section run failed: $(/bin/cat "$TEST_ROOT/wt-delta.log")"
+wait "$wt_epsilon_pid" || fail "the epsilon section run failed: $(/bin/cat "$TEST_ROOT/wt-epsilon.log")"
+
+assert_contains "$(/bin/cat "$TEST_ROOT/wt-delta.log")" "complete -> section done" \
+  "a section completes while another section is running"
+assert_contains "$(/bin/cat "$TEST_ROOT/wt-epsilon.log")" "complete -> section done" \
+  "the concurrent section completes too"
+assert_file_contains "$WT_REPO/src/delta.txt" "written by delta" \
+  "one concurrent section merged back"
+assert_file_contains "$WT_REPO/src/epsilon.txt" "written by epsilon" \
+  "the other concurrent section merged back without losing the first"
+[[ -z "$(git -C "$WT_REPO" status --porcelain -- src)" ]] || \
+  fail "concurrent merges left the main working tree dirty"
+
+# A section whose branch has commits of its own must still pick up the base.
+# It used to fast-forward only, so once a section had committed anything it was
+# pinned to the base as it stood at that moment - including the shared
+# acceptance check every section is judged on. persona-packs lost two cycles and
+# reached the escalation threshold on a flaky test it did not own, because its
+# branch could never receive the fix.
+WT_SYNC_BRANCH="pm-flow/worktree-repo/delta"
+git -C "$WT_REPO" show-ref --verify --quiet "refs/heads/$WT_SYNC_BRANCH" || \
+  fail "the delta section left no branch to test syncing against"
+printf 'a shared fix that landed after the section branched\n' > "$WT_REPO/src/shared-fix.txt"
+git -C "$WT_REPO" add -A
+git -C "$WT_REPO" -c user.name="pm-flow test" -c user.email="pm-flow-test@localhost" \
+  commit -q -m "a fix on the base, after delta already committed"
+WT_SYNC_TREE="$WT_ROOT/delta-sync"
+git -C "$WT_REPO" worktree add --force "$WT_SYNC_TREE" "$WT_SYNC_BRANCH" > /dev/null 2>&1
+[[ ! -f "$WT_SYNC_TREE/src/shared-fix.txt" ]] || \
+  fail "the section branch already had the base fix; the test proves nothing"
+( eval "$(sed -n '/^sync_section_worktree() {/,/^}/p' "$WT_FLOW/driver.zsh")"
+  PROJECT_ROOT="$WT_REPO"
+  driver_base_branch() { printf 'main\n'; }
+  sync_section_worktree "$WT_SYNC_TREE" "" ) || true
+[[ -f "$WT_SYNC_TREE/src/shared-fix.txt" ]] || \
+  fail "a section branch with its own commits never received the base fix"
+git -C "$WT_REPO" worktree remove --force "$WT_SYNC_TREE" > /dev/null 2>&1 || true
+
+# A section run holds the project lock in shared mode, so a project-wide run,
+# which schedules across every section, must be refused rather than allowed to
+# race it. Asserted by holding the shared lock directly rather than by starting
+# a second run and hoping it is still alive: that version passed or failed
+# depending on which process won, which is a coin toss dressed up as a test.
+zmodload zsh/system
+: >> "$WT_PROJECT/.driver.lock"
+zsystem flock -t 0 -r -f WT_SHARED_LOCK "$WT_PROJECT/.driver.lock" || \
+  fail "could not take the project lock in shared mode; two section runs could never coexist"
+wt_project_refusal=0
+PM_STUB_STATE="$TEST_ROOT/wt-state" PATH="$TEST_ROOT/wt-bin:$PATH" \
+  "$WT_PM" run --max-ticks 1 > "$TEST_ROOT/wt-project.log" 2>&1 || wt_project_refusal=$?
+(( wt_project_refusal != 0 )) || \
+  fail "a project-wide run was allowed while a section run held the project lock"
+assert_contains "$(/bin/cat "$TEST_ROOT/wt-project.log")" "already running" \
+  "the refusal says which lock stopped it"
+# And a second shared holder is admitted, which is the other half of the claim.
+zsystem flock -t 0 -r -f WT_SHARED_LOCK_2 "$WT_PROJECT/.driver.lock" || \
+  fail "a second section run could not take the shared lock; concurrency is not real"
+zsystem flock -u "$WT_SHARED_LOCK_2"
+zsystem flock -u "$WT_SHARED_LOCK"
+
+printf 'PASS: concurrent section runs, serialised merges, and lock exclusion\n'
+
 
 # The product officer cuts the product into sections before any section exists,
 # and a run started from an empty project drives them all to completion.

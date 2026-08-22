@@ -1,1 +1,1 @@
-Blocked: scoped against a layout packaging replaces; re-cut once packaging lands.
+Cycle 002; last action review.

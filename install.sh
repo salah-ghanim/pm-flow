@@ -774,16 +774,16 @@ except Exception:
   # `engine` files are synced here; `seed` and `project` files are yours.
   sync_manifest_engine "$flow_dir" "$abs_target"
 
-  chmod +x "$flow_dir/pm_flow.sh"
-  chmod +x "$flow_dir/net_exec.sh"
-  chmod +x "$flow_dir/agent_exec.sh"
-  chmod +x "$flow_dir/fetch.sh"
-  chmod +x "$flow_dir/heartbeat.sh"
-  chmod +x "$flow_dir/watch.py"
-  [[ ! -f "$flow_dir/upgrade.py" ]] || chmod +x "$flow_dir/upgrade.py"
-  [[ ! -f "$flow_dir/catalog.py" ]] || chmod +x "$flow_dir/catalog.py"
-  [[ ! -f "$flow_dir/telemetry.py" ]] || chmod +x "$flow_dir/telemetry.py"
-  [[ ! -f "$flow_dir/trace_export.py" ]] || chmod +x "$flow_dir/trace_export.py"
+  # Derived from the file rather than listed by hand. The list this replaces
+  # named ten paths and had to be edited every time one was added, which is a
+  # rule nobody remembers: access_hook.sh shipped unexecutable and its hook
+  # silently did nothing. A file that declares an interpreter is meant to be
+  # run, and that declaration is already in the file.
+  local candidate
+  for candidate in "$flow_dir"/*(.N); do
+    [[ "$(/usr/bin/head -c 2 "$candidate" 2>/dev/null)" == "#!" ]] || continue
+    chmod +x "$candidate"
+  done
 
   touch "$project_dir/runs/.gitkeep"
   touch "$project_dir/sections/.gitkeep"

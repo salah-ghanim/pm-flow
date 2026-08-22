@@ -2,7 +2,8 @@ pyproject.toml
 src/**
 install.sh
 MANIFEST
-template/**
+template/.agentic/pm_flow/pm_flow.sh
+template/.agentic/pm_flow/upgrade.py
+template/.agentic/pm_flow/.gitignore
 tests/**
 .gitignore
-README.md

@@ -57,10 +57,21 @@ peer of those sections; it is the re-baselining they will be re-cut against.
 - src/**
 - install.sh
 - MANIFEST
-- template/**
+- template/.agentic/pm_flow/pm_flow.sh
+- template/.agentic/pm_flow/upgrade.py
+- template/.agentic/pm_flow/.gitignore
 - tests/**
 - .gitignore
-- README.md
+
+Narrowed from `template/**` and `README.md`. Owning all of `template/` was
+over-claiming: packaging does not move the engine's source files - the wheel
+force-includes `template/.agentic/pm_flow` as package data, so `agent_exec.sh`,
+`cost.py`, `catalog.py` and the personas stay exactly where they are. What
+packaging actually changes is how a *host repository* gets them, which is
+install.sh, MANIFEST, the entry point, and the path resolution in pm_flow.sh.
+Claiming the rest would have blocked three sections that touch none of it.
+`README.md` belongs to agents-md, which has to describe the finished layout
+anyway.
 
 ### Dependencies
 - green-suite

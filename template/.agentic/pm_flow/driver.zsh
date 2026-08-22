@@ -384,6 +384,121 @@ cmd_cost() {
   python3 "$SCRIPT_DIR/cost.py" report "$PROJECT_DIR" "$(cost_ledger_file)"
 }
 
+# What the roles actually reached for.
+#
+# The access tiers describe what a role is *allowed* to touch, and on two of the
+# three backends that description is a promise rather than an enforcement: codex
+# bounds writes and not reads, and claude's write tier grants bare Bash, which
+# is unrestricted read by construction. Both facts are in the README. Neither
+# was ever measured. This reads the per-dispatch access logs and says what
+# happened, so the question is settled by evidence rather than by reasoning
+# about flags.
+cmd_access() {
+  local show_all=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --all) show_all=1 ;;
+      *) fail "unknown access argument: $1" ;;
+    esac
+    shift || true
+  done
+  python3 - "$RUNS_DIR" "$SECTIONS_DIR" "$PROJECT_ROOT" "$show_all" <<'PY_ACCESS'
+import json
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+runs_dir, sections_dir, repo_root, show_all = sys.argv[1:5]
+show_all = show_all == "1"
+
+logs = []
+for base in (Path(runs_dir), Path(sections_dir)):
+    if base.is_dir():
+        logs.extend(sorted(base.rglob("*.access.jsonl")))
+
+if not logs:
+    print("No access records yet. They are written beside each dispatch response")
+    print("as `<response>.access.jsonl`, from the next dispatch onwards.")
+    raise SystemExit(0)
+
+by_role = defaultdict(lambda: {"calls": 0, "outside": 0, "user": 0, "tools": Counter()})
+buckets = {"other": Counter(), "system": Counter(), "temp": Counter()}
+examples = {}
+total = 0
+partial_roles = set()
+
+for log in logs:
+    for line in log.read_text(errors="replace").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        total += 1
+        role = record.get("role") or "unknown"
+        entry = by_role[role]
+        entry["calls"] += 1
+        entry["tools"][record.get("tool") or "?"] += 1
+        if record.get("source") == "codex-events":
+            partial_roles.add(role)
+        if record.get("outside"):
+            entry["outside"] += 1
+        if record.get("reaches_user_files"):
+            entry["user"] += 1
+        for target in record.get("targets") or []:
+            kind = target.get("kind") or ("other" if target.get("outside") else "repo")
+            if kind == "repo":
+                continue
+            path = target.get("path") or "?"
+            # Grouped by the directory a few levels up, so a hundred reads of
+            # one tree read as one fact rather than a hundred.
+            parts = Path(path).parts
+            key = str(Path(*parts[:4])) if len(parts) > 4 else path
+            buckets[kind][key] += 1
+            examples.setdefault(key, path)
+
+print(f"{total} recorded tool call(s) across {len(logs)} dispatch(es)\n")
+print(f"{'ROLE':<18}{'CALLS':>8}{'OUTSIDE':>9}{'USER FILES':>12}   TOP TOOLS")
+for role in sorted(by_role):
+    entry = by_role[role]
+    tools = ", ".join(f"{name} {count}" for name, count in entry["tools"].most_common(3))
+    mark = " *" if role in partial_roles else ""
+    print(f"{role + mark:<18}{entry['calls']:>8}{entry['outside']:>9}"
+          f"{entry['user']:>12}   {tools}")
+print("\nOUTSIDE counts anything not under the repository or the section worktree,")
+print("which includes /bin/zsh and scratch directories. USER FILES is the column")
+print("that matters: paths that are neither ours, nor a system binary, nor temp.")
+
+if partial_roles:
+    print("\n* reconstructed from codex's event stream after the dispatch, not")
+    print("  observed as it happened. Shell commands only; direct file reads by")
+    print("  the model are not in that stream, so this is a floor, not a total.")
+
+limit = None if show_all else 15
+titles = {
+    "other": "Reached outside the project, and not a system path or scratch",
+    "system": "System paths (binaries and configuration)",
+    "temp": "Scratch and temporary directories",
+}
+for kind in ("other", "system", "temp"):
+    counts = buckets[kind]
+    if not counts:
+        if kind == "other":
+            print("\nNothing recorded outside the project that was not a system")
+            print("path or a temporary directory.")
+        continue
+    print(f"\n{titles[kind]}:\n")
+    for key, count in counts.most_common(limit):
+        print(f"  {count:>5}  {key}")
+        if key != examples[key]:
+            print(f"         e.g. {examples[key]}")
+    if limit and len(counts) > limit:
+        print(f"\n  ... and {len(counts) - limit} more; pass --all to see them.")
+PY_ACCESS
+}
+
 config_number() {
   python3 - "$AGENT_CONFIG_FILE" "$1" "$2" "$3" <<'PY'
 import json
@@ -747,6 +862,32 @@ dispatch_role() {
   local staged="${output_md}.staging"
 
   assert_within_budget "$section_key"
+
+  # Tool caches, pointed somewhere the dispatch is actually allowed to write.
+  #
+  # codex runs with --sandbox workspace-write, which permits writes under the
+  # working root and refuses them everywhere else - including $HOME/.cache. A
+  # reviewer asked to run an acceptance check that builds anything therefore
+  # failed on `uv build: Failed to initialize cache at ~/.cache/uv: Operation
+  # not permitted`, and reported the section as not meeting acceptance. The
+  # implementation was fine both times; the check could not be executed at all.
+  #
+  # That is the worst failure mode this flow has: an acceptance no reviewer can
+  # run is unpassable, and the section escalates to a consultant panel that
+  # cannot fix a sandbox either. Two cycles were spent on it.
+  local dispatch_cache="$RUNS_DIR/.cache"
+  mkdir -p "$dispatch_cache"
+  export XDG_CACHE_HOME="$dispatch_cache"
+  export UV_CACHE_DIR="$dispatch_cache/uv"
+  export PIP_CACHE_DIR="$dispatch_cache/pip"
+  export npm_config_cache="$dispatch_cache/npm"
+
+  # The real repository, named before the dispatch can confuse it for one.
+  # agent_exec.sh falls back to its own PROJECT_ROOT, and under --work-root that
+  # *is* the worktree - so without this the access log calls every read of the
+  # main tree "outside the repository", which is both wrong and the majority of
+  # what it reports.
+  export PM_FLOW_REPO_ROOT="$PROJECT_ROOT"
 
   local dispatch_args=("$role" --prompt-file "$prompt_file" --output "$response_json" --label "$label")
   [[ -z "$heartbeat" ]] || dispatch_args+=(--heartbeat "$heartbeat")
@@ -1177,7 +1318,7 @@ integrate_section_work() {
   commit_section_worktree "$tree_path" \
     "$section_key: accepted cycle $cycle_number" || true
   merge_status=0
-  merge_section_worktree "$section_dir" || merge_status=$?
+  with_repo_git_lock merge_section_worktree "$section_dir" || merge_status=$?
   case "$merge_status" in
     0) printf '        merged %s into %s\n' "$(section_worktree_branch "$section_key")" \
          "$(driver_base_branch 2>/dev/null || printf 'HEAD\n')" ;;
@@ -1469,7 +1610,7 @@ integrate_rescue_work() {
   if (( ${#delivered[@]} == 1 )); then
     local only="${delivered[1]}"
     local merged=0
-    merge_rescue_branch "$section_dir" "$section_key-rescue-$only" || merged=$?
+    with_repo_git_lock merge_rescue_branch "$section_dir" "$section_key-rescue-$only" || merged=$?
     if (( merged == 0 )); then
       printf '        merged rescue path %s\n' "$only"
     fi
@@ -1647,6 +1788,56 @@ stamp_section_progress() {
 # with the worktree as its working root, and the cycle directory is granted
 # alongside it so the role can still read its assignment and write its heartbeat.
 
+# --- one driver per section, several sections at once ------------------------
+#
+# The project lock is exclusive and refused immediately, and that was right
+# while a section's only isolation was a promise about paths: two drivers
+# observing the same actionable section would both dispatch it, because the
+# claim directories are per step and both would pay for the same call.
+#
+# Worktrees changed the premise. A section-scoped run touches one section's
+# state and one section's tree, so several of them can run at once. It takes the
+# project lock in *shared* mode - enough to exclude a project-wide run, which
+# schedules across every section and would double-dispatch - plus an exclusive
+# lock on its own section, so two runs cannot be pointed at the same one.
+#
+# A project-wide run still takes the project lock exclusively, so it waits for
+# nothing and refuses immediately if any section run is in flight.
+acquire_run_lock() {
+  local section="${SECTION_OVERRIDE:-}"
+  if [[ -z "$section" ]]; then
+    acquire_driver_lock
+    return 0
+  fi
+  zmodload zsh/system 2>/dev/null || fail "the zsh/system module is required for safe locking"
+  mkdir -p "$PROJECT_DIR" "$SECTIONS_DIR"
+  local project_lock="$PROJECT_DIR/.driver.lock"
+  [[ -e "$project_lock" ]] || : >> "$project_lock"
+  if ! zsystem flock -t 0 -r -f DRIVER_LOCK "$project_lock" 2>/dev/null; then
+    fail "a project-wide pm_flow driver is already running for project '$PROJECT_KEY'"
+  fi
+  local section_dir section_lock
+  section_dir="$(resolve_section_dir "$section")"
+  section_lock="$section_dir/.driver.lock"
+  [[ -e "$section_lock" ]] || : >> "$section_lock"
+  if ! zsystem flock -t 0 -f SECTION_DRIVER_LOCK "$section_lock" 2>/dev/null; then
+    fail "another pm_flow driver is already running for section '$(basename "$section_dir")'"
+  fi
+  return 0
+}
+
+# Git's own index, ref and worktree locks are per repository, not per worktree,
+# so concurrent section runs must not call into it at the same time. `worktree
+# add`, `prune` and every merge back go through here. It waits rather than
+# refusing: the other run holds it for one git command, not for its whole life.
+with_repo_git_lock() {
+  local status_code=0
+  acquire_lock "$PROJECT_DIR/.repo_git.lock" REPO_GIT_LOCK 300
+  "$@" || status_code=$?
+  release_lock REPO_GIT_LOCK
+  return "$status_code"
+}
+
 DISPATCH_WORK_ROOT=""
 DISPATCH_EXTRA_DIRS=()
 
@@ -1693,6 +1884,21 @@ git_worktree() {
   git -C "$PROJECT_ROOT" "$@"
 }
 
+# The part that touches repository-wide git state, so it can be serialised as
+# one unit: pruning a stale record and claiming the path have to happen without
+# another run's `worktree add` in between.
+add_worktree() {
+  local tree_path="$1"
+  local branch="$2"
+  git_worktree worktree prune >/dev/null 2>&1 || true
+  if git_worktree show-ref --verify --quiet "refs/heads/$branch"; then
+    git_worktree worktree add --force "$tree_path" "$branch" >/dev/null 2>&1 || return 1
+  else
+    git_worktree worktree add --force -b "$branch" "$tree_path" HEAD >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
 # Create the section's worktree, or hand back the one it already has. Prints the
 # path; prints nothing and fails if the worktree cannot be established, and the
 # caller then dispatches against the main tree exactly as it did before.
@@ -1715,26 +1921,51 @@ ensure_section_worktree() {
   # first: git refuses to add a worktree whose administrative record still
   # exists, and that record outlives the directory.
   rm -rf -- "$tree_path"
-  git_worktree worktree prune >/dev/null 2>&1 || true
   mkdir -p -- "${tree_path:h}"
-  if git_worktree show-ref --verify --quiet "refs/heads/$branch"; then
-    git_worktree worktree add --force "$tree_path" "$branch" >/dev/null 2>&1 || return 1
-  else
-    git_worktree worktree add --force -b "$branch" "$tree_path" HEAD >/dev/null 2>&1 || return 1
-  fi
+  with_repo_git_lock add_worktree "$tree_path" "$branch" || return 1
   printf '%s\n' "$tree_path"
 }
 
-# Bring the section's branch up to the base before it is worked on again, so a
-# section is never rebuilding against a tree three merges old. Only a
-# fast-forward is taken: a real merge here could conflict, and a conflict in the
-# section's own worktree at the start of a cycle is a worse place to discover it
-# than at the merge back, where there is a manager to tell.
+# Bring the section's branch up to the base before it is worked on again.
+#
+# This used to fast-forward only, which meant a section that had committed
+# anything never picked up the base again - including fixes to the acceptance
+# check every section is judged on. A shared suite is a shared failure domain:
+# one section breaking it rejects every other section's work, and the reviewer
+# cannot tell the difference. persona-packs lost two cycles and reached the
+# escalation threshold on a racy test it did not own and could not have fixed,
+# because its branch was pinned to the base as it stood before the fix landed.
+#
+# So a real merge is attempted, and it is conflict-checked first: on a conflict
+# the branch is left exactly as it was and the reason is written next to the
+# section, because a worktree full of conflict markers at the start of a cycle
+# is a worse place to discover this than a note a manager can read.
 sync_section_worktree() {
   local tree_path="$1"
+  local section_dir="${2:-}"
   local base
   base="$(driver_base_branch)" || return 0
-  git -C "$tree_path" merge --ff-only "$base" >/dev/null 2>&1 || true
+  git -C "$tree_path" merge --ff-only "$base" >/dev/null 2>&1 && return 0
+  if ! git -C "$tree_path" merge-tree --write-tree HEAD "$base" >/dev/null 2>&1; then
+    [[ -z "$section_dir" ]] || {
+      printf 'this section cannot be brought up to %s without a conflict, so it is
+' "$base"
+      printf 'still being built against an older base. Resolve it in the worktree:
+
+'
+      printf '  git -C %s merge %s
+' "$tree_path" "$base"
+    } > "$section_dir/sync_blocked.txt"
+    return 0
+  fi
+  [[ -z "$section_dir" ]] || rm -f "$section_dir/sync_blocked.txt"
+  git -C "$tree_path" \
+    -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
+    -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
+    merge --no-edit -m "sync: bring the section up to $base" "$base" >/dev/null 2>&1 || {
+      git -C "$tree_path" merge --abort >/dev/null 2>&1 || true
+    }
+  return 0
 }
 
 # Everything the role changed, on the section's own branch. Returns 1 when there
@@ -1813,8 +2044,9 @@ remove_section_worktree() {
   local tree_path
   tree_path="$(section_worktree_path "$section_key")" || return 0
   [[ -d "$tree_path" ]] || return 0
-  git_worktree worktree remove --force "$tree_path" >/dev/null 2>&1 || rm -rf -- "$tree_path"
-  git_worktree worktree prune >/dev/null 2>&1 || true
+  with_repo_git_lock git_worktree worktree remove --force "$tree_path" >/dev/null 2>&1 \
+    || rm -rf -- "$tree_path"
+  with_repo_git_lock git_worktree worktree prune >/dev/null 2>&1 || true
 }
 
 # A killed run leaves worktrees behind, and git refuses to reuse a path whose
@@ -1824,7 +2056,7 @@ remove_section_worktree() {
 prune_section_worktrees() {
   worktree_isolation_enabled || return 0
   local root entry key
-  git_worktree worktree prune >/dev/null 2>&1 || true
+  with_repo_git_lock git_worktree worktree prune >/dev/null 2>&1 || true
   root="$(worktrees_root)" || return 0
   [[ -d "$root" ]] || return 0
   for entry in "$root"/*(/N); do
@@ -1853,7 +2085,7 @@ begin_worktree_dispatch() {
   local tree_path
   tree_path="$(ensure_section_worktree "$section_key")" || return 0
   [[ -n "$tree_path" ]] || return 0
-  sync_section_worktree "$tree_path"
+  sync_section_worktree "$tree_path" "${SECTIONS_DIR}/${section_key%%-rescue-*}"
   DISPATCH_WORK_ROOT="$tree_path"
   DISPATCH_EXTRA_DIRS=("$@")
   CONTEXT_PATH_STYLE="absolute"
@@ -2054,7 +2286,7 @@ quarantined_sections() {
 cmd_tick() {
   local requested_section="${SECTION_OVERRIDE:-}"
   local section_dir action
-  acquire_driver_lock
+  acquire_run_lock
   prune_section_worktrees
   if [[ -n "$requested_section" ]]; then
     section_dir="$(resolve_section_dir "$requested_section")"
@@ -2125,7 +2357,7 @@ cmd_run() {
     shift || true
   done
 
-  acquire_driver_lock
+  acquire_run_lock
   # A killed run leaves worktrees whose administrative record outlives the
   # directory, and git then refuses to reuse the path. Clearing that once per
   # run is what keeps a crash from blocking the next one.
