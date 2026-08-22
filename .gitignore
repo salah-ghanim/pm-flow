@@ -40,6 +40,14 @@ __pycache__/
 # Runtime locks, not state.
 .agentic/pm_flow/*/sections/.*.lock
 .agentic/pm_flow/*/sections/*.lock
+.agentic/pm_flow/*/sections/*/.driver.lock
+
+# Per-dispatch scratch. Rewritten on every dispatch, meaningless afterwards, and
+# exactly the churn the plan says the host repository must not absorb.
+.agentic/pm_flow/*/sections/*/.last_error.txt
+.agentic/pm_flow/*/sections/*/.pre_dispatch.txt
+.agentic/pm_flow/*/sections/*/.post_dispatch.txt
+.agentic/pm_flow/*/sections/*/.verdict_error.txt
 
 # Build artifacts from packaging.
 dist/

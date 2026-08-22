@@ -39,12 +39,23 @@
 - Cycle 001 starts with no prior accepted cycle. The dirty packaging
   `status.txt`, `summary.txt`, timestamps, and dispatch markers are current
   orchestration state, not uncommitted accepted implementation.
+- Cycle 001 review is `NO_GO`. The focused packaged-layout test passes in a
+  disposable offline build environment and its project-data boundary mutation
+  is detected, but the assigned command `zsh tests/pm_flow_test.sh` exits 1 in
+  the actual PM environment because inherited `PM_FLOW_PROJECT=pm-agent`
+  redirects the fixture to a nonexistent workspace before any PASS group.
+  Removing `PM_FLOW_PROJECT` and `PM_FLOW_ROOT` makes the unchanged suite exit
+  0 with seven PASS groups, confirming both that the implementation does not
+  regress the suite and that the assignment's "six PASS groups" count is stale.
+  No implementation is accepted or committed from this cycle.
 
 ## Current assignment
 
-- Make installed `pm-flow status` and `pm-flow role-prompt pm` operate against a
-  fixture whose `.agentic/pm_flow` contains project data only, while the command
-  and default persona/domain come from the installed artifact.
+- Re-scope cycle 002 so the acceptance command itself is hermetic to inherited
+  orchestration selectors (including permission to change the full-suite
+  harness if that is the chosen boundary), retain the cycle-001 engine/data
+  change, and require the exact listed commands to exit zero without reviewer
+  environment surgery.
 
 ## Dependencies
 
