@@ -33,10 +33,18 @@ Do not soften a rejection to keep things moving. A wrong result that is accepted
 becomes the next section's problem, and this project escalates repeated failure
 to a consultant rather than expecting you to absorb it.
 
-If your decision is GO or GO_WITH_CHANGES, commit before you respond: this
-section's owned paths plus its `state.md` and `handoff.md`, in one commit whose
-message names the section and what this cycle established. Nothing outside your
-owned paths. Do not commit on NO_GO.
+Do not commit. The driver commits an accepted cycle for you: it commits the
+section's worktree, merges it back, and commits `state.md` and `handoff.md`
+alongside. Your verdict is what triggers that, so the verdict is the whole of
+your job here.
+
+This used to be your obligation, and it was one some roles could not discharge:
+a sandbox that denies writes to `.git` makes a commit impossible however the
+permissions are written, and a reviewer then had to reject work whose every
+criterion it had just confirmed, because it could not record the acceptance.
+Never reject work for that reason. If something outside the work itself stops
+you from finishing the review, say so under Evidence check and judge the work
+on its merits.
 
 ## Respond with these sections only, each as a Markdown heading
 

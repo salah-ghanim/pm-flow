@@ -2,9 +2,9 @@
 
 ## Outcome
 
-- Cycles 001 and 002 are rejected; no implementation has been accepted or
-  committed. Cycle 002's focused adoption behavior is correct, but its required
-  hermetic full suite exits 1 reproducibly.
+- Cycle 003 behavior passes all focused, mutation, regression, and full-suite
+  checks, but the review is operational `NO_GO`: the required bundled acceptance
+  commit cannot be created under the review sandbox's worktree/Git write policy.
 
 ## Decisions
 
@@ -22,31 +22,39 @@
   lock`. This is outside the section's two owned source paths.
 - Two rejected cycles meet the configured consultant threshold. Do not re-issue
   the same assignment.
+- Cycle 003 establishes that cross-pack content identity is not permission to
+  rewrite provenance. A different pack name claiming the same key, layer and
+  body exits 1 and leaves the existing pack, persona, all nine provenance
+  fields, persona ID, and measurement reference unchanged.
+- The focused Cycle 003 acceptance exits 0. Its temporary-copy mutation disables
+  the guard and makes the collision assertions exit 1. Saved Cycle 002 and 001
+  checks exit 0, and the independently rerun hermetic full suite exits 0,
+  including concurrent lock exclusion.
 
 ## Interfaces
 
-- None accepted yet.
+- No interface is accepted yet. The candidate implementation proves local pack
+  install/list, standalone adoption, and atomic cross-pack collision refusal,
+  but remains uncommitted.
 
 ## Risks
 
 - Content-addressed reuse can preserve stale standalone metadata unless pack
   adoption updates or otherwise links the existing row.
-- The adoption implementation reattributes identical content already assigned
-  to another pack; cross-pack collision policy has not been specified or tested.
-- The full suite's lock-exclusion check is reproducibly red in the review
-  environment even with all inherited PM-flow selectors removed.
+- Cross-pack provenance protection depends on the new guard; the accepted
+  focused mutation check detects its removal.
+- Candidate local source-path behavior is validated but uncommitted; git URL
+  lifecycle behavior remains unimplemented and unproven.
+- The validated Cycle 003 work can be lost until a commit-capable review records
+  it with `state.md` and `handoff.md` in the section branch.
 
 ## What is unproven
 
-- No cycle result stands. Fresh local-path behavior and existing-content
-  adoption pass their focused checks, including mutation, but the full-suite
-  acceptance condition remains unsatisfied.
-- Git acquisition, update-from-source, and layer-specific swapping remain
-  unattempted.
+- Acceptance of the validated local-pack foundation remains uncommitted. Git
+  acquisition, update-from-source while retaining old attributable persona
+  versions, and layer-specific swapping remain unattempted.
 
 ## Next action
 
-- Escalate to a consultant with the exact Cycle 002 evidence. The alternative
-  must account for the passing owned-path implementation, the repeated unowned
-  lock-test failure, and whether closure requires a dependency handoff to the
-  section responsible for suite/locking behavior.
+- Repeat review/commit in an environment allowed to update the dedicated
+  worktree's records and Git object store. Do not rework the passing source.

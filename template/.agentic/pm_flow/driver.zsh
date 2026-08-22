@@ -1303,6 +1303,43 @@ do_review() {
   esac
 }
 
+# The section's own orchestration state, committed by the driver.
+#
+# The contract used to require the *reviewer* to commit on acceptance. That is
+# impossible for a role bound to codex: --sandbox workspace-write denies writes
+# to .git, so no commit can be created however the allow-list is written. A
+# reviewer therefore had to reject work whose every technical criterion it had
+# just confirmed, purely because it could not record the acceptance -
+#
+#     The next action is to commit the already-validated diff ... in a
+#     Git-writable review context - not to reissue implementation work.
+#
+# The driver runs unsandboxed and already commits and merges the worktree on
+# acceptance, so it commits this too. An obligation nobody could discharge
+# became one nobody has to.
+#
+# Only this section's directory is committed, by path, so a concurrent section
+# and any work in progress in the main tree are left alone.
+commit_section_state() {
+  local section_dir="$1"
+  local section_key="$2"
+  local cycle_number="$3"
+  worktree_isolation_enabled || return 0
+  [[ -d "$section_dir" ]] || return 0
+  git -C "$PROJECT_ROOT" add -- "$section_dir" >/dev/null 2>&1 || return 0
+  if git -C "$PROJECT_ROOT" diff --cached --quiet -- "$section_dir" 2>/dev/null; then
+    git -C "$PROJECT_ROOT" reset --quiet -- "$section_dir" >/dev/null 2>&1 || true
+    return 0
+  fi
+  git -C "$PROJECT_ROOT" \
+    -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
+    -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
+    commit --quiet --no-verify \
+    -m "$section_key: accepted cycle $cycle_number (state and handoff)" \
+    -- "$section_dir" >/dev/null 2>&1 || true
+  return 0
+}
+
 # An accepted cycle is the only thing that moves code out of a section's
 # worktree. A rejected one leaves it on the branch, where the next cycle
 # continues from it and the main tree never saw it.
@@ -1319,6 +1356,7 @@ integrate_section_work() {
     "$section_key: accepted cycle $cycle_number" || true
   merge_status=0
   with_repo_git_lock merge_section_worktree "$section_dir" || merge_status=$?
+  with_repo_git_lock commit_section_state "$section_dir" "$section_key" "$cycle_number"
   case "$merge_status" in
     0) printf '        merged %s into %s\n' "$(section_worktree_branch "$section_key")" \
          "$(driver_base_branch 2>/dev/null || printf 'HEAD\n')" ;;

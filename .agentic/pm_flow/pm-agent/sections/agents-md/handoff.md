@@ -2,34 +2,44 @@
 
 ## Outcome
 
-Nothing attempted. The section is blocked on purpose, not stalled.
+Cycle 001 is `NO_GO`. No implementation was returned, accepted, or committed.
 
 ## Decisions
 
-This brief was cut against a layout where the engine lives inside the
-repository, so its owned paths point at files that `packaging` is about to
-move or delete. Working it now would be work done twice, and the second time
-would be a merge against a tree that no longer has those paths.
-
-It is marked `blocked` rather than left `planned` so an unscoped run cannot
-spend budget on a scope that is wrong by construction.
+- The returned section branch has no diff from its base.
+- Independent installs create no `AGENTS.md`; `CLAUDE.md` still contains the
+  full router and invariants. Existing CLAUDE content is preserved.
+- The isolated full suite exits 0 with all nine PASS groups, so it does not
+  currently test this section's required behavior.
+- Manifest checking exits 1 in the section worktree because its absolute path
+  is below `.git` and the generator excludes any resolved path containing that
+  component.
+- The developer's access evidence shows literal writes throughout that nested
+  worktree are refused as sensitive, while `/tmp` and the main cycle-record
+  directory remain writable. This is an internal dispatch/worktree-placement
+  defect, not an external dependency.
 
 ## Interfaces
 
-None yet.
+None accepted.
 
 ## Risks
 
-Re-cutting must be done from this brief's *objective*, not by editing
-`owned_paths.txt`. Scope is captured at `init-section` and never re-derived,
-so a brief and the scope actually enforced can disagree silently. That is a real
-pm-flow defect, found by using it, and it is why this is a re-cut rather than an
-edit.
+- Re-dispatching the same assignment into the same nested worktree will repeat
+  the refusal without producing new evidence.
+- The green full suite can mask a regression or total absence of AGENTS install
+  behavior until a focused assertion is added or run during review.
 
 ## What is unproven
 
-Everything the brief claims. Nothing here has been attempted.
+Every product criterion remains unproven: rendered `AGENTS.md`, compatibility
+pointer-only `CLAUDE.md`, README documentation, generated MANIFEST, and tests
+that detect violations of those guarantees.
 
 ## Next action
 
-Re-cut against the packaged layout once `packaging` reports done, then reopen.
+Escalate the internal section-worktree placement/sandbox collision. Once the
+developer receives a writable worktree outside a `.git` path (or an equivalent
+explicitly supported configuration), repeat the bounded implementation and its
+fresh-install plus mutation checks. One rejection has been recorded; the
+configured consultant threshold is two.

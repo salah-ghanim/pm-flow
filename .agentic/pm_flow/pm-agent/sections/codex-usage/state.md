@@ -12,49 +12,51 @@
 
 ## Plan
 
-- Cycle 001: validate the Codex dispatch path with a fake `codex` executable and
-  correct only `agent_exec.sh` if the direct probe exposes a gap.
-- Review with the same direct probe, the full suite, and mutations that remove
-  JSON mode, event-stream liveness, stderr isolation, and trace propagation.
+- Cycle 001 validated the existing Codex JSONL, trace, liveness, token parsing,
+  and stderr-isolation behavior, then exposed supervisor stream pollution.
+- Cycle 002 preserved the declaration fix and disabled zsh background-job
+  niceness so supervisor stdout and stderr satisfy their contracts.
 
 ## Decisions and evidence
 
-- Cycle 001 is `NO_GO`; no section implementation has been accepted or
-  committed. The direct fake-Codex probe independently proved JSON mode, exact
-  trace propagation, response-adjacent events, event-only liveness, token
-  parsing, and stderr-only network classification, but exited 1 because the
-  review sandbox wrote `nice(5) failed: operation not permitted` to the
-  supervisor stderr and the probe required that stream to be empty.
-- Cycle 001's disposable mutation restored the loop-local `events_seen`
-  declaration and the stdout-contract assertion caught four leaked
-  `events_seen=<mtime>` lines. The declaration move therefore fixes a real
-  defect, but cannot be accepted while the assigned direct probe fails.
-- The independent full suite exited 0 with all nine current PASS groups.
-- Commit `d5b48ee` already added `codex exec --json`, a response-adjacent
-  `EVENTS_FILE`, stdout/stderr separation, and event-file mtime participation in
-  `run_attempt` for a separate observability objective. These are candidates to
-  validate and reuse, not evidence that this section is complete.
-- `telemetry.py usage_from_codex_events` and the driver's
-  `telemetry_end_attempt` event-file lookup already consume
-  `<response-without-.json>.events.jsonl`; they are outside this section and must
-  not be rebuilt or changed.
-- The green-suite handoff states that `zsh tests/pm_flow_test.sh` completes with
-  six stable PASS labels and identifies no remaining dependency work.
+- Cycle 001 was `NO_GO`: the direct probe exited 1 because sandbox-denied
+  `nice(5)` polluted supervisor stderr, although the suite passed and the
+  `events_seen` mutation proved the stdout declaration fix.
+- Cycle 002 technically satisfies every assigned acceptance criterion.
+  `unsetopt BG_NICE` prevents zsh from attempting the background `nice(2)` call;
+  it does not filter or redirect the warning.
+- The independent Cycle 002 fake-Codex probe exited 0. It proved `exec --json`,
+  exact `TRACEPARENT` propagation, event-only liveness beyond the two-second
+  stall limit, a non-empty response-adjacent events file, token-total recovery,
+  final response delivery through `-o`, exact four-line supervisor stdout,
+  empty successful supervisor stderr, and stderr-only network classification.
+- The clean-environment full suite exited 0 with all nine PASS groups.
+- Restoring loop-local `events_seen` made the probe exit 1 after leaking
+  `events_seen=<mtime>` records. Removing `unsetopt BG_NICE` made it exit 1
+  after reproducing `nice(5) failed: operation not permitted` on supervisor
+  stderr. Both mutations were applied only to disposable installed copies.
+- Only `template/.agentic/pm_flow/agent_exec.sh` changed; `git diff --check`
+  passed. No parser, driver, test, or sandbox-permission change was accepted.
+- Cycle 002 cannot be accepted in this review context because the mandatory
+  one-commit handoff cannot be created: Git ref creation and new object writes
+  under `.git` are denied by the managed filesystem. The implementation must
+  not be reissued; the review/commit step must be retried with writable Git
+  metadata.
 
 ## Current assignment
 
-- Cycle 001 is rejected. Scope cycle 002 around the observed zsh background-job
-  niceness warning and an acceptance probe that directly distinguishes child
-  attempt-log stderr from supervisor stderr. Preserve the proven declaration
-  fix and all existing Codex event/trace behavior; do not expand outside
-  `agent_exec.sh`.
+- Do not issue another implementation assignment. Re-run the acceptance commit
+  in a context that can write Git objects and refs, then integrate the already
+  validated owned-path diff with this state and handoff.
 
 ## Dependencies
 
-- `green-suite`: satisfied by its handoff; the full suite is runnable and stable.
+- `green-suite`: satisfied; its suite remains green under the validated change.
+- External review environment: blocked on permission to create `.git` object,
+  index-lock, and ref-lock files required by the mandated scoped commit.
 
 ## Review history
 
-- Cycle 001: `NO_GO`. Full suite passed and mutation was caught; direct probe
-  returned 13 passed, 1 failed because sandbox-denied `nice(5)` polluted the
-  stderr stream its harness required to be empty. No commit was made.
+- Cycle 001: `NO_GO`; direct probe failed the quiet-stderr contract.
+- Cycle 002: `NO_GO`; all technical checks and mutations passed, but the
+  required accepted-cycle commit was impossible under the review sandbox.

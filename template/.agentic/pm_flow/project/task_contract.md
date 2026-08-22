@@ -105,12 +105,18 @@ Work that is not committed does not exist. Every role runs as its own process
 with a fresh context, so an uncommitted tree is lost the moment a process is
 killed, a worktree is cleaned, or the next agent starts.
 
-- The section manager commits after every accepted result. An applied `GO` or
-  `GO_WITH_CHANGES` is the commit point; a `NO_GO` is not.
-- A commit covers that section's owned paths together with its `state.md` and
-  `handoff.md`, so the work and the record of the work move as one.
-- Commit only your own owned paths. Sections run concurrently, and a commit that
-  reaches across boundaries picks up another section's half-finished work.
+- The driver commits an accepted result, not the role. An applied `GO` or
+  `GO_WITH_CHANGES` commits the section's worktree, merges it to the base, and
+  commits `state.md` and `handoff.md` with it; a `NO_GO` commits nothing and
+  leaves the work on the section's branch for the next cycle.
+- No role is asked to commit as a condition of acceptance. A sandbox that denies
+  writes to `.git` makes that impossible however the permissions are written,
+  and a reviewer that cannot record an acceptance must not reject the work over
+  it. Say so in the review and judge the work on its merits.
+- The work and the record of the work still move as one, and still only within
+  one section's boundary. Sections run concurrently, and a commit that reached
+  across boundaries would pick up another section's half-finished work - which
+  is why the driver commits by path rather than everything it finds.
 - The message is `type(scope): short title` on one line under 72 characters,
   then bullets. `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `plan`.
   Scope is the section key.

@@ -19,7 +19,7 @@ root template
 engine - e1c85a7f2ca0086b6e7d96b053dae82a88681caf44b5cd282c4b25191418d27e .agentic/pm_flow/.gitignore
 engine - 35c01638901a1745cfd637938e68daa19fa0c16958c37e6792c70df1ec6ad866 .agentic/pm_flow/README.md
 engine x 358d34cfcb5877cf5bacc3625e3fb93da0464a86b69ed4c1ed1cd7b3e6954a4b .agentic/pm_flow/access_hook.sh
-engine - faa403a9c62fa28e69b3a24b392a0a36e73d11f5983935b15dccb992154001be .agentic/pm_flow/agent_exec.sh
+engine - 4028730ec34a0110aad8e41fbe8a1bb61a248691b47acdb2062c50b941c9b8e9 .agentic/pm_flow/agent_exec.sh
 engine - 73aca46cef1a37a503942778d5711f6274fe9fbe6ad4e71d2c6b12e834d84d3f .agentic/pm_flow/catalog.py
 seed - cf1507834402f2bb745e2c7824a2499f3c4cb16d9a9c017943e578410097ad3f .agentic/pm_flow/config.json
 engine - 67669681fc442645d8f4a0fe831469243c829dc4e5f9f52964b52f51752e8398 .agentic/pm_flow/cost.py
@@ -46,7 +46,7 @@ engine - f0f7fc5c2abb9ca1c036a3e794e4bdb0b96b6c28521053e1a3357e4dc61cf40d .agent
 engine - 5744530fc106bf2c24d2adeb68ca094dbe9908b6aa2f0853f9de84b58b8157a5 .agentic/pm_flow/domains/migration.json
 engine - 924607490999f6f858fdba9265bf0a3c02100d8499af4e79500de21db0019cc8 .agentic/pm_flow/domains/prop-trading.json
 engine - 6e70e941699e7b1776df82a85d071b2294b20500d65a2107e48d9d0da4b6c500 .agentic/pm_flow/domains/saas.json
-engine - d8b9b93bd2aa8971a9f789fed098b6a6b6641c3fa388be4c02dd693ca55ba019 .agentic/pm_flow/driver.zsh
+engine - d114268c0c737c7e6f596b154a5c10fe6315019229b4b4575e8767292a1e89cd .agentic/pm_flow/driver.zsh
 engine x afba5af554a0f87c3bc6472a0216d1c0ee165be70ff0cad7434efb7c49704e84 .agentic/pm_flow/fetch.sh
 engine x 180f98b1a434669e21bbeb27db181ec7ba5773202cd6b09d21868fdcfb3b70da .agentic/pm_flow/heartbeat.sh
 engine - b558bbaa3ab875748b08100aa12267ac8dee12d6c19b1c7fd14bc63e5b2af8e8 .agentic/pm_flow/local_env.sh.example
@@ -60,7 +60,7 @@ project - 22d2c889dfd9722388e78790e3b5d5201cc7932144c86906c38e2e05a85806ce .agen
 project - d0e9918fb31fd90547b6aea7bd3ea41c2a111c5c04099f8ba2824ceb15395354 .agentic/pm_flow/project/project_state/start.md
 project - 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b .agentic/pm_flow/project/runs/.gitkeep
 project - 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b .agentic/pm_flow/project/sections/.gitkeep
-project - 07be1686d7875c5a087d4d51520cdb0d391b926cad5e336303facb3cd314980c .agentic/pm_flow/project/task_contract.md
+project - 4afc059e78f31b81eb9223852cf5e23151a40ad922f256a51f17fc315171e122 .agentic/pm_flow/project/task_contract.md
 seed - dd4056f53a444c90f75974f328998b4d7d7ce95d37f9645ebd59de78f4f7ea9d .agentic/pm_flow/projects.md
 engine - f59b0f40f8af206e1fdc5a6f962d8cde61a6c899b6bbfe46e4c1059a2ff8508c .agentic/pm_flow/requirements-telemetry.txt
 engine - 88f3409f11845fe1398fe6fb060fddbfc19092d6f20f46c8e3133488f1c30d5e .agentic/pm_flow/roles/10x_developer.md
@@ -77,7 +77,7 @@ engine - bfe5628a200a5d3cd121e689fd9c658fda568f3d73228a7a1072bcf6a9922130 .agent
 engine - 4968e731db2240593d738a0c3a1ca11fbfc8ba3128bd1be5e332b063321e6b5a .agentic/pm_flow/tasks/section_analysis.md
 engine - 7429afb5f4f54fbd6c9e36a18d842bb916a4470a499b95c7a3c5f550bd1b1fa5 .agentic/pm_flow/tasks/section_handoff.md
 engine - 20a6e769638b6b37c89d9d2801f0222f293151db11e0e547d6a7be5f2ce24d09 .agentic/pm_flow/tasks/section_rescue.md
-engine - 3d521c5b4d4ee045a8d18decd19b5ba46ab2db0c209df3a8323cdc75067da149 .agentic/pm_flow/tasks/section_review.md
+engine - a89114c1df26a6fe2c59bb0d81bb1073095a3367706c9159c0222e2ae2dc7c8f .agentic/pm_flow/tasks/section_review.md
 engine - 9802bbd14c532b4dadf9fafac4880b7d263810a5ea0d1d01b151c4dc10785e66 .agentic/pm_flow/tasks/section_scope.md
 engine - 8821a05674b2874e6c731bd9a3a5f2fa2bec4641393e59ea8279e41d5eff9bd6 .agentic/pm_flow/telemetry.py
 engine x ae5c95943d466f9906fd5bf7d2e123cbb06e1238a85651c42ad52d6e1c52cf9c .agentic/pm_flow/tests/governance.zsh

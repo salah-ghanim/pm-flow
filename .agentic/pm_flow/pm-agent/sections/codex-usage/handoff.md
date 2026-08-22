@@ -2,47 +2,54 @@
 
 ## Outcome
 
-Cycle 001 is rejected and uncommitted. The Codex event-stream behavior works,
-and moving `events_seen` out of the polling loop prevents zsh from printing its
-value into the driver's stdout metadata. The exact direct probe nevertheless
-exited 1 because the managed sandbox denied zsh's background niceness adjustment
-and the harness required supervisor stderr to be completely empty.
+Cycle 002 is technically validated but not accepted. Codex dispatch behavior
+meets every assigned criterion, but the manager could not create the mandatory
+commit because the managed sandbox denied Git object and ref writes.
 
 ## Decisions
 
-- Do not accept Cycle 001: its required direct command returned 13 passed and 1
-  failed. A passing full suite does not override that rejection condition.
-- Preserve the returned declaration move in the developer worktree for the next
-  attempt; the mutation check showed that reverting it leaks four
-  `events_seen=<mtime>` lines during a five-second dispatch.
-- The warning mechanism is established: zsh's default background-job niceness
-  adjustment attempted `nice(5)`, and the managed sandbox denied it.
+- Preserve the current owned-path diff; do not send it through another
+  implementation cycle.
+- Keep `events_seen` in the function-level local declaration because a repeated
+  loop-local declaration prints its value in zsh.
+- Keep `unsetopt BG_NICE` at supervisor startup. This prevents zsh's background
+  `nice(2)` attempt rather than hiding the resulting warning.
+- Retry the review commit only in a context with writable Git metadata.
 
 ## Interfaces
 
-- Codex is invoked as `codex exec --json`; its stdout goes to
-  `<response-without-.json>.events.jsonl`, while its stderr remains the failure
-  classifier input.
-- `TRACEPARENT` reaches the fake child unchanged.
-- `telemetry.py usage_from_codex_events` parsed the emitted totals without
-  modification.
+- Codex stdout is `<response-without-.json>.events.jsonl`.
+- Codex stderr remains the attempt log and the only classifier input.
+- The final response is read from the path supplied to Codex with `-o`.
+- `TRACEPARENT` reaches the child unchanged.
+- `telemetry.py usage_from_codex_events` consumes the retained JSONL and
+  recovers input, cached-input, output, reasoning, and total token counts.
+
+## Evidence
+
+- Independent direct probe: exit 0, including exact four-record supervisor
+  stdout and empty successful supervisor stderr.
+- Independent clean suite: exit 0 with all nine PASS groups.
+- Disposable `events_seen` mutation: exit 1 on stdout leakage.
+- Disposable `BG_NICE` mutation: exit 1 on the managed-sandbox niceness warning.
+- `git merge --ff-only main` failed creating `ORIG_HEAD.lock`; direct Git object
+  writes failed with `unable to create temporary file: Operation not permitted`.
 
 ## Risks
 
-The current probe calls its capture “child stderr” but actually captures the
-supervisor process's stderr. That masks whether a line came from the redirected
-attempt log or from zsh itself. Cycle 002 needs to make this boundary observable
-without weakening the rejection of JSONL leakage.
+- The validated source diff is currently staged because `git add` could reuse
+  its existing blob, while both attempts to restore the index were denied when
+  creating `index.lock`. The file content itself is unchanged.
+- The focused acceptance probe is temporary rather than a tracked repository
+  test because this section owns only `agent_exec.sh`; the tracked suite passed.
 
 ## What is unproven
 
-No acceptance run has completed with all direct-probe assertions passing in the
-review environment. The implementation therefore remains unaccepted despite
-the core behavior evidence and the full-suite pass.
+- No product behavior remains unproven. Only the required durable Git commit is
+  missing.
 
 ## Next action
 
-Scope Cycle 002 to preserve the declaration fix and remove the observed
-quiet-stderr failure through the smallest owned-path correction or a direct
-attempt-log observation. Re-run both probes, the stdout mutation, and the full
-suite before acceptance.
+- Re-run the manager commit with Git metadata write permission, committing only
+  `template/.agentic/pm_flow/agent_exec.sh`, this `state.md`, and this
+  `handoff.md`, then integrate the section branch.

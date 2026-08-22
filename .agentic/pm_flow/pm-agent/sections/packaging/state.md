@@ -31,10 +31,12 @@
 - Cycle 001 is `NO_GO`: its focused packaged-layout proof passed and caught a project-data mutation, but the exact full-suite command inherited PM-flow selectors and exited before any PASS group.
 - Cycle 002 is `NO_GO`: both exact full-suite commands exited 0 with the same seven PASS groups, and a disposable mutation disabling the new selector cleanup was caught. The exact `zsh tests/packaged_layout_test.sh` command exited 1 before any of its six PASS groups because `uv build` panicked while initializing macOS system configuration. The returned implementation remains uncommitted.
 - The Cycle 002 developer notes that redirecting to a fresh cache requires network to fetch the wheel build backend. That exchanges caller-cache dependence for an external dependency and does not meet the hermetic exact-command criterion.
+- The two-failure escalation was archived after dispatch caches were redirected into the writable project run directory, and the failure streak was explicitly reset at Cycle 002. A Cycle 003 scope probe ran the preserved Cycle 002 `zsh tests/packaged_layout_test.sh` with `UV_CACHE_DIR`, `XDG_CACHE_HOME`, and `PIP_CACHE_DIR` all beneath that run directory; it still exited 1 with the same `system-configuration` NULL-object panic. Cache writability did not fix the `uv` initialization failure.
+- The viable different path is an offline, repository-local wheelhouse for Hatchling and its transitive build requirements, used through `python3 -m venv` and pip with index access disabled. This removes `uv`, network, and caller-cache state from the focused artifact proof without weakening the installed-wheel boundary.
 
 ## Current assignment
 
-- None. Two consecutive rejected cycles meet `escalation.failures_before_consultant = 2`; prepare consultant escalation with the exact `uv` panic, the cache/network dependency, the successful seven-group selector-isolation runs, and the caught mutation. Do not re-issue the same assignment.
+- Cycle 003: retain the preserved Cycle 001 engine/data split and Cycle 002 selector cleanup, but replace the focused test's opportunistic `uv`/online build with a pinned, hash-recorded repository-local build wheelhouse and an offline pip build/install path. Prove the exact focused and full-suite commands with hostile inherited selector, cache, and index settings.
 
 ## Dependencies
 

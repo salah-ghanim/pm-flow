@@ -24,9 +24,10 @@
   small YAML-ish frontmatter parser into a general manifest parser.
 - The first slice reuses `persona_packs`, `upsert_persona`, content hashes and
   existing provenance columns. It does not introduce a parallel store.
-- No persona-packs implementation has been accepted. At cycle 001 scope, git
-  showed no changes to either owned source path, `state.md`, or `handoff.md`;
-  only driver-managed status scratch was dirty, so there was nothing to commit.
+- No persona-packs implementation was accepted in cycles 001 or 002. At cycle
+  001 scope, git showed no changes to either owned source path, `state.md`, or
+  `handoff.md`; only driver-managed status scratch was dirty, so there was
+  nothing to commit.
 - Cycle 001 review is `NO_GO`; no implementation was accepted or committed.
   The fresh-store acceptance script exits 0 and a runtime mutation proves the
   forbidden-metadata rejection assertion detects its violation. However, when
@@ -47,18 +48,33 @@
 - The current adoption implementation also reattributes an identical persona
   already owned by another pack. Cycle 002 specified only adoption from no pack,
   so cross-pack collision policy remains unproven rather than accepted behavior.
+- Cycle 003 behavior passes review, but the decision is operational `NO_GO`
+  because the required acceptance commit cannot be formed in this review
+  sandbox. A focused temporary-database check proves a second
+  pack with the same persona identity is rejected atomically: the second pack
+  row is rolled back, pack/persona counts and the original persona ID are
+  unchanged, all nine provenance fields remain attributed to the first pack,
+  and the existing `attempts.persona_id` still resolves. Disabling the guard in
+  a temporary module copy makes those assertions exit 1. The saved Cycle 002
+  adoption check and Cycle 001 local-pack check both exit 0, and the hermetic
+  full suite exits 0, including lock exclusion. The sandbox denies writes to
+  the dedicated worktree's tracked `state.md` and `handoff.md`, and denies the
+  Git object creation needed to stage the canonical copies with `catalog.py` in
+  one commit. Therefore the accumulated implementation remains unaccepted;
+  `store.py` remains unchanged.
 
 ## Current assignment
 
-- Do not re-issue Cycle 002. Two rejected cycles reach the configured consultant
-  threshold. Escalate with the passing adoption/mutation evidence, both repeated
-  lock-exclusion suite failures, and the unowned-path constraint; seek an
-  alternative closure path or an explicit dependency on the section that owns
-  the suite/locking behavior.
+- Do not re-issue implementation work: the Cycle 003 code and all required
+  evidence are green. Repeat the acceptance/commit step in an environment that
+  can write the dedicated worktree records and Git object store, then commit
+  `catalog.py`, `state.md`, and `handoff.md` together.
 
 ## Dependencies
 
 - Installer is complete. Its handoff proves stock installs include both owned
   modules and identifies no unproven dependency capability.
-- Acceptance is currently held by reproducible failure of the repository's
-  project/section lock-exclusion test, outside persona-packs' owned paths.
+- The earlier project/section lock-exclusion failure is resolved in the current
+  base; Cycle 003's independent hermetic suite run passed that group.
+- Acceptance is held only by the review environment's write restriction on the
+  dedicated worktree/Git object store, not by a source or test defect.

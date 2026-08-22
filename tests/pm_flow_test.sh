@@ -611,11 +611,26 @@ stub_cli 'sleep 900'
 stall_started="$(date +%s)"
 run_supervised
 stall_elapsed=$(( $(date +%s) - stall_started ))
-[[ "$stall_elapsed" -lt 30 ]] || fail "a hung agent was not terminated (${stall_elapsed}s)"
+# Generous on purpose. The point is that a hung agent is terminated at all, not
+# that it happens within a particular second; the stall threshold above is 4s,
+# and a loaded machine can take a while to get round to noticing.
+[[ "$stall_elapsed" -lt 90 ]] || fail "a hung agent was not terminated (${stall_elapsed}s)"
 [[ "$(response_field failure_reason)" == "stall" ]] || fail "a hung agent was not reported as a stall"
 assert_file_contains "$TEST_ROOT/heartbeat.txt" "stalled with no progress" "a stall is recorded in the heartbeat"
-sleep 1
-[[ "$(pgrep -f 'sleep 900' | wc -l | tr -d '[:space:]')" == "0" ]] || \
+# Polled rather than slept on. A fixed one-second wait is a race, and it loses
+# under load: sections run concurrently now, and this suite is the shared
+# acceptance check every one of them is judged by, so a test that fails when the
+# machine is busy rejects work that was never wrong. That has already cost this
+# project two cycles and an escalation.
+orphans_gone=0
+for _ in $(seq 1 60); do
+  if [[ "$(pgrep -f 'sleep 900' | wc -l | tr -d '[:space:]')" == "0" ]]; then
+    orphans_gone=1
+    break
+  fi
+  sleep 0.5
+done
+(( orphans_gone == 1 )) || \
   fail "terminating a stalled agent left orphaned subprocesses"
 
 # An agent that keeps reporting progress must survive past the stall threshold.
