@@ -1,36 +1,65 @@
-# Resuming pm-flow self-hosting
+# Resume here
 
-Run it again:
+Written 2026-08-22 at the end of a long session. Read this and `plan.md`; you do
+not need the conversation that produced them.
 
-```bash
-./.agentic/pm_flow/pm_flow.sh run
-```
+## Where the work stands
 
-There is nothing to clean up first and no recovery flag to pass. The driver
-keeps no record of what it was doing: each tick reads the section files, derives
-the single next action, performs it, and exits. An interrupted run left the
-files in a state that describes itself, so resuming is the same command.
+Shipped and verified on main (`b864674`):
 
-A dispatch that died mid-flight leaves a claim with no output. That is treated
-as an attempt that bought nothing and is retried; a claim that keeps failing
-stops the run rather than spending further.
+- **The store.** SQLite schema with runs, attempts, spans, outcomes, and a
+  persona/binding split. A persona names no model, so it is portable; a binding
+  is machine-local. `seat_personas` stacks layers, and the existing
+  `roles/` + `domains/<d>/roles/` files already map onto base + domain.
+- **Telemetry recording and export.** Both GenAI and OpenInference attributes on
+  one span, verified against a live OTLP listener. Codex token counts read from
+  its JSONL event stream, which is the only place they exist.
+- **The catalogue.** Syncs definitions into the store and renders a linked
+  markdown vault. Idempotent.
+- **Manifest-driven install**, a shipped `.gitignore`, `pm-flow version` and
+  `pm-flow upgrade`, and a `.agentic` migration that also rewrites recorded paths.
+- **Packaging.** `pyproject.toml` ships the engine as package data; a wheel was
+  built and run from a clean venv with no checkout present. `paths.py` holds the
+  layout for both languages, with IntelliJ-style `$PROJECT$` macros so persisted
+  paths survive a move.
 
-To see where things stand before continuing:
+## Priority
 
-```bash
-./.agentic/pm_flow/pm_flow.sh status
-```
+1. **green-suite** - by hand, not by the flow. It owns the acceptance check
+   everything else is graded on, and its fix is inside `driver.zsh`, which the
+   flow executes while running.
+2. **worktree-isolation** - by hand, same reason. It is the mitigation that makes
+   self-hosting safe, and it cannot isolate its own work.
+3. **packaging** - the re-baselining. Foundational: several sections below become
+   cheaper or unnecessary once the engine stops being copied.
+4. Then the rest, re-cut against the packaged layout: codex-usage,
+   trace-commands, store-ledger, persona-packs, agents-md.
 
-`STATUS` is the section's lifecycle — `planned`, `active`, `blocked`, `done`,
-`cancelled`. `NEXT ACTION` is what the next tick would do: `scope`, `develop`,
-`review`, `escalate`, `adjudicate`, `rescue`, `review-rescue`, `complete`,
-`abandon`, `waiting-dependencies`, or `idle`. A blocked section is idle until
-deliberately reopened; a section waiting on dependencies cannot be dispatched
-until every required section is done.
+## Before handing anything to the flow
 
-A section sitting at `escalate` has failed enough consecutive reviews to earn a
-consultant panel. A section at `abandon` has exhausted its rescue rounds; read
-`sections/<key>/escalation/adjudication.md` for why before overriding it.
+- The suite must run to completion. Every brief's acceptance says "the suite
+  still passes"; today it halts at one pass, so no review has mechanical
+  evidence and a PM can only take the developer's word.
+- `installer` is finished but still reads `planned`. Governance requires a PM
+  completion review to close it, and `persona-packs` and `agents-md` wait behind
+  it. Closing it costs one dispatch.
+- Telemetry is recorded but **not wired into dispatch**. The helpers in
+  driver.zsh are deliberately uncalled: wiring them regressed the scheduling
+  tests with no error on any stream, and the cause is unexplained. Re-wire only
+  with a test proving a dispatch still happens.
+- `budget.max_usd` is now 40 with 8 per section. Those are rails, not estimates.
 
-To reopen a terminal section deliberately, publish an `active` or `planned`
-handoff for it first.
+## Known defects
+
+- **The dispatch-output guard does not fire in the harness.** Extracted and run
+  standalone against the exact fixture the suite writes, it refuses correctly.
+  Inside the harness it does not. The test repo path contains a space
+  (`$TEST_ROOT/driver repo`), which is the strongest untested lead.
+- **Editing `brief.md` does not re-derive `owned_paths.txt`.** Scope is captured
+  at `init-section` and never refreshed, so a brief and the scope actually
+  enforced can disagree silently. green-suite hit this; its file was corrected by
+  hand. This is a real pm-flow bug, found by using it.
+- **`packaging` is scoped narrowly on purpose.** The registry refused a wider
+  scope because it overlapped three sections scoped against the layout packaging
+  replaces. That refusal was correct: packaging is a re-baselining, not a peer.
+  Move the engine into the package only after those sections land or are re-cut.
