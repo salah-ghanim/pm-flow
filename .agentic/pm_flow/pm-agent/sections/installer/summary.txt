@@ -1,1 +1,1 @@
-Section created; its PM sub-agent has not been launched yet.
+A stock install lands every module, ignores the store and bytecode, and preserves state on reinstall.
