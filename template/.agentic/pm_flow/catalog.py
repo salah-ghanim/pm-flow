@@ -131,17 +131,18 @@ def find_persona(connection, key, digest):
 
 def insert_persona(connection, *, key, title, summary, body, layer, digest,
                    source_path, author=None, license=None, source_url=None,
-                   version=None, tags=None, extends_id=None, pack_id=None) -> int:
+                   version=None, tags=None, extends_id=None, pack_id=None,
+                   metadata=None) -> int:
     """The bare insert. The caller owns the transaction, because installing a
     pack has to land its pack row and all of its personas in one commit."""
     cursor = connection.execute(
         "INSERT INTO personas (key, title, summary, body, layer, extends_id,"
-        " pack_id, author, license, source_url, version, tags, content_hash,"
-        " source_path, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " pack_id, author, license, source_url, version, tags, metadata,"
+        " content_hash, source_path, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (key, title, summary, body, layer, extends_id, pack_id, author, license,
-         source_url, version, store.dumps(tags or []), digest, source_path,
-         store.now()),
+         source_url, version, store.dumps(tags or []),
+         store.dumps(metadata or {}), digest, source_path, store.now()),
     )
     return cursor.lastrowid
 
@@ -755,7 +756,37 @@ def read_pack_from_url(url: str, directory: Path, commit: str) -> dict:
 
 
 PACK_PROVENANCE = ("pack_id", "author", "license", "source_url", "version",
-                   "tags", "source_path", "title", "summary")
+                   "tags", "metadata", "source_path", "title", "summary")
+
+# Where a persona row records the commit it was installed from.
+GIT_COMMIT_KEY = "git_commit"
+
+
+def persona_git_metadata(pack, existing=None) -> dict:
+    """The commit one persona version came from, kept on that version.
+
+    `persona_packs.ref` is the pack's *current* commit and moves forward every
+    time the pack is re-added, so it can only ever describe the newest version.
+    A superseded version still has to be able to say where its words came from,
+    or every measurement recorded against it loses its source. The persona row
+    already carries a metadata blob, so the commit goes there: one commit per
+    version, alongside the source URL the row already keeps.
+
+    A commit already recorded is never rewritten. A row is found by its exact
+    words, so a row that is still here is a version that has not changed, and
+    the commit that first published those words has not changed either.
+    """
+    metadata = dict(existing) if isinstance(existing, dict) else {}
+    ref = pack.get("ref")
+    if ref and not metadata.get(GIT_COMMIT_KEY):
+        metadata[GIT_COMMIT_KEY] = ref
+    return metadata
+
+
+def persona_commit(raw_metadata):
+    """The commit recorded on a persona row, or None."""
+    metadata = store.loads(raw_metadata)
+    return metadata.get(GIT_COMMIT_KEY) if isinstance(metadata, dict) else None
 
 
 def adopt_persona(connection, row, spec, pack, pack_id, source) -> bool:
@@ -768,7 +799,9 @@ def adopt_persona(connection, row, spec, pack, pack_id, source) -> bool:
     belongs to no pack. So the row keeps its id and gains the pack's provenance.
 
     Only provenance is touched. Key, layer, body and content hash are the
-    identity, and are the same by construction: this row was found by them.
+    identity, and are the same by construction: this row was found by them. The
+    commit inside the metadata is provenance the row may already hold, so it is
+    carried rather than replaced - see `persona_git_metadata`.
 
     Returns whether anything actually changed, so re-adding an unchanged pack
     stays a reported no-op rather than announcing work it did not do.
@@ -780,6 +813,8 @@ def adopt_persona(connection, row, spec, pack, pack_id, source) -> bool:
         "source_url": source,
         "version": pack["version"],
         "tags": store.dumps(spec["tags"]),
+        "metadata": store.dumps(
+            persona_git_metadata(pack, store.loads(row["metadata"]))),
         "source_path": spec["source_path"],
         "title": spec["title"],
         "summary": spec["summary"],
@@ -832,13 +867,19 @@ def install_pack(connection, pack: dict) -> dict:
     from, so a borrowed persona can say where it is from and be updated from
     there later. The personas themselves are content-addressed as always, which
     is what makes re-adding an unchanged pack a no-op.
+
+    Updating from source is therefore the same command again rather than a new
+    one: re-adding a URL whose prompts have moved on inserts the new wording as
+    a further version, while the version that was measured stays exactly as it
+    was - same row, same words, same commit, same id for everything already
+    recorded against it.
     """
     # A pack fetched from a URL is provenance in the caller's terms: the URL
     # they gave and the commit that was installed. A local pack keeps the path
     # it was read from, and has no ref to record.
     source = pack.get("source_url") or str(pack["root"])
     ref = pack.get("ref")
-    installed, adopted, unchanged = [], [], []
+    installed, updated, adopted, unchanged = [], [], [], []
     if connection.in_transaction:
         connection.commit()
     connection.execute("BEGIN IMMEDIATE")
@@ -867,21 +908,28 @@ def install_pack(connection, pack: dict) -> dict:
                 else:
                     unchanged.append(spec["key"])
                 continue
+            # A key the store already holds under different words is the same
+            # persona rewritten upstream, not a new one. Both rows stay; only
+            # the wording of the report changes, so re-adding a moved-on pack
+            # reads as the update it is rather than as a first installation.
+            superseded = connection.execute(
+                "SELECT 1 FROM personas WHERE key = ?", (spec["key"],)
+            ).fetchone() is not None
             insert_persona(
                 connection, key=spec["key"], title=spec["title"],
                 summary=spec["summary"], body=spec["body"], layer=spec["layer"],
                 digest=digest, source_path=spec["source_path"],
                 author=pack["author"], license=pack["license"],
                 source_url=source, version=pack["version"], tags=spec["tags"],
-                pack_id=pack_id,
+                pack_id=pack_id, metadata=persona_git_metadata(pack),
             )
-            installed.append(spec["key"])
+            (updated if superseded else installed).append(spec["key"])
         connection.commit()
     except Exception:
         connection.rollback()
         raise
-    return {"pack_id": pack_id, "installed": installed, "adopted": adopted,
-            "unchanged": unchanged}
+    return {"pack_id": pack_id, "installed": installed, "updated": updated,
+            "adopted": adopted, "unchanged": unchanged}
 
 
 # --------------------------------------------------------------- store -> vault
@@ -1142,12 +1190,14 @@ def install_and_report(db, pack: dict) -> int:
           f"tags {', '.join(pack['tags']) or '-'}")
     for key in result["installed"]:
         print(f"  + {key}")
+    for key in result["updated"]:
+        print(f"  ^ {key} (new version; the previous one is kept)")
     for key in result["adopted"]:
         print(f"  ~ {key} (adopted into pack)")
     for key in result["unchanged"]:
         print(f"  = {key} (unchanged)")
-    print(f"installed {len(result['installed'])}, adopted {len(result['adopted'])}, "
-          f"unchanged {len(result['unchanged'])}")
+    print(f"installed {len(result['installed'])}, updated {len(result['updated'])}, "
+          f"adopted {len(result['adopted'])}, unchanged {len(result['unchanged'])}")
     return 0
 
 
@@ -1155,7 +1205,7 @@ def cmd_persona_list(args):
     connection = store.connect(args.db)
     rows = connection.execute(
         "SELECT p.key, p.layer, p.version, p.content_hash, p.source_url,"
-        " p.source_path, k.name AS pack FROM personas p"
+        " p.source_path, p.metadata, p.body, k.name AS pack FROM personas p"
         " LEFT JOIN persona_packs k ON k.id = p.pack_id"
         " WHERE p.id = (SELECT MAX(id) FROM personas b WHERE b.key = p.key)"
         " ORDER BY p.layer, p.key"
@@ -1163,12 +1213,38 @@ def cmd_persona_list(args):
     if not rows:
         print("no personas installed")
         return 0
-    print(f"{'KEY':<28} {'LAYER':<8} {'PACK':<18} {'VERSION':<10} {'HASH':<14} SOURCE")
+    # The commit is per version rather than per pack, so it belongs next to the
+    # content hash: together they say which words these are and where they came
+    # from, for the version being shown rather than for the pack's newest.
+    print(f"{'KEY':<28} {'LAYER':<8} {'PACK':<18} {'VERSION':<10} {'HASH':<14} "
+          f"{'COMMIT':<14} SOURCE")
     for row in rows:
+        commit = persona_commit(row["metadata"]) or "-"
         print(f"{row['key']:<28} {row['layer']:<8} {row['pack'] or '-':<18} "
               f"{row['version'] or '-':<10} {(row['content_hash'] or '')[:12]:<14} "
+              f"{commit[:12]:<14} "
               f"{row['source_url'] or row['source_path'] or '-'}")
+    # A persona is its wording. The table says which version is current and
+    # where it came from, but a hash cannot be read: the only way to see what
+    # a seat will actually be told is to print the words. So they are printed
+    # exactly as stored - the whole body, not truncated, reflowed or indented -
+    # for the version the table names, and for no other.
+    for row in rows:
+        print()
+        print(f"--- {row['key']} ---")
+        print(persona_wording(row))
+        print(f"--- end {row['key']} ---")
     return 0
+
+
+def persona_wording(row):
+    """The stored body of a persona row, verbatim.
+
+    Nothing here shortens or rewrites it. A summary or a hash would describe
+    the prompt; only the body is the prompt, and the point of listing is to
+    read it.
+    """
+    return row["body"] or ""
 
 
 def cmd_compare(args):
