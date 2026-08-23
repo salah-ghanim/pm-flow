@@ -1,6 +1,6 @@
 ## Outcome
 
-- Cut by a portfolio review: advances no plan bullet; the driver already writes Conventional Commits; its failure mode (hook refusing the driver's subject) stops the flow. Product no longer guarantee...
+- Cut by a portfolio review: advances no plan bullet; the driver already writes Conventional Commits; its failure mode (hook refusing the driver's subject) stops the flow. Product no longer guarantees a commit-message hook or an install registry. Reopen with a planned handoff once the must-haves close.
 
 ## Decisions
 

@@ -1,6 +1,6 @@
 ## Outcome
 
-- Cut by a portfolio review: no plan bullet names A2A (the binding criterion is ACP); waits on an unstarted section; its own stated risk is an unauthenticated endpoint that spends budget. Product no ...
+- Cut by a portfolio review: no plan bullet names A2A (the binding criterion is ACP); waits on an unstarted section; its own stated risk is an unauthenticated endpoint that spends budget. Product no longer guarantees an A2A-bound seat.
 
 ## Decisions
 
