@@ -315,5 +315,96 @@ printf '\n===== D4: the lock is released, so the commands work again =====\n'
 out="$(PM_FLOW_STUB="$ANALYSIS" "$FLOWSH" section-analysis alpha 2>&1)"
 has "D4 section-analysis runs once the driver is gone" "$out" "recorded=section-analysis"
 
+printf '\n===== D5: init-section with a request has the officer cut the section =====\n'
+PROPOSAL='## Assessment
+
+The plan asks for a recording layer; nothing live owns an exporter. Probe:
+`ls src` shows no trace module.
+
+## Section: theta
+
+### Objective
+- Ship recorded spans to a backend with one command.
+
+### Current baseline
+- Spans are recorded; nothing exports them.
+
+### Deliverables
+- `pm-flow trace export`.
+
+### User-visible scenarios
+1. `pm-flow trace export --file out.json` writes OTLP JSON.
+
+### Interfaces produced
+- The `trace` command.
+
+### Interfaces consumed
+- The spans table.
+
+### Scope
+- In: export. Out: recording.
+
+### Non-goals
+- A vendor default.
+
+### Priority
+- must-have: a record nobody can open is not a record.
+
+### Owned paths
+- `export/**`
+
+### Dependencies
+- None.
+
+### Constraints and fixed decisions
+- None.
+
+### Acceptance
+- A1: `pm-flow trace export --file out.json` exits 0 and the file parses as OTLP JSON.
+
+### Rejection conditions
+- A vendor endpoint is defaulted.
+
+### Open questions
+- None.
+
+## Decision
+
+CUT - serves the plan bullet on backend-readable traces'
+printf 'Runs should be exportable to a backend with one command.\n' > "$W/req.md"
+: > "$STUB_LOG"
+out="$(PM_FLOW_STUB="$PROPOSAL" "$FLOWSH" init-section theta --file "$W/req.md" 2>&1)"
+has    "D5 the officer is dispatched once"        "$(cat "$STUB_LOG")" "cpo	propose section theta"
+eq     "D5 exactly one dispatch is spent"         "$(grep -c . "$STUB_LOG")" "1"
+has    "D5 the decision is reported"              "$out" "init-section theta -> CUT"
+if [[ -f "$FLOW/demo/sections/theta/brief.md" ]]; then ok "D5 the section exists"; else bad "D5 the section exists" "$out"; fi
+has    "D5 the brief is the officer's, in full shape" "$(cat "$FLOW/demo/sections/theta/brief.md")" "### Deliverables"
+has    "D5 acceptance carries its ID"             "$(cat "$FLOW/demo/sections/theta/brief.md")" "A1:"
+eq     "D5 owned paths come from the brief"       "$(cat "$FLOW/demo/sections/theta/owned_paths.txt")" "export/**"
+has    "D5 the request is kept with the proposal" "$(cat "$FLOW"/demo/project_state/proposals/*-theta/request.md)" "exportable"
+has    "D5 the proposal prompt names the live owners" "$(cat "$FLOW"/demo/project_state/proposals/*-theta/prompt.md)" '`lib/` (alpha)'
+absent "D5 no placeholder survives composition"   "$(cat "$FLOW"/demo/project_state/proposals/*-theta/prompt.md)" "{{"
+
+printf '\n===== D5: a DECLINE creates nothing =====\n'
+DECLINED='## Assessment
+
+Covered by theta.
+
+## Section block
+
+Not applicable.
+
+## Decision
+
+DECLINE - theta already owns export'
+out="$(PM_FLOW_STUB="$DECLINED" "$FLOWSH" init-section iota --file "$W/req.md" 2>&1)"
+has "D5 the decline is reported" "$out" "init-section iota -> DECLINE"
+if [[ ! -d "$FLOW/demo/sections/iota" ]]; then ok "D5 no section was created"; else bad "D5 no section was created" "iota exists"; fi
+
+printf '\n===== D5: a block under another name is refused =====\n'
+out="$(PM_FLOW_STUB="$PROPOSAL" "$FLOWSH" init-section kappa --file "$W/req.md" 2>&1 || true)"
+has "D5 the mismatch is named" "$out" "named its section 'theta'"
+if [[ ! -d "$FLOW/demo/sections/kappa" ]]; then ok "D5 nothing was created for kappa"; else bad "D5 nothing was created for kappa" "exists"; fi
+
 printf '\ntotals: pass=%d fail=%d\n' "$pass" "$failn"
 [[ "$failn" == 0 ]]

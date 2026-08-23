@@ -34,6 +34,7 @@ PHASE_WORD_BUDGETS = {
     "section_rescue": 700,
     "consultant_panel_adjudication": 900,
     "consultant_panel": 600,
+    "section_proposal": 1000,
 }
 
 

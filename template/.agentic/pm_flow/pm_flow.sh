@@ -329,7 +329,11 @@ compose_role_task() {
     domain_task="$SCRIPT_DIR/domains/$DOMAIN/tasks/$phase.md"
   [[ -f "$PROJECT_DIR/tasks/$phase.md" ]] && \
     project_task="$PROJECT_DIR/tasks/$phase.md"
-  python3 - "$task_file" "$domain_task" "$project_task" "$@" <<'PY'
+  # The section block format is one file, rendered into every task that asks
+  # the officer for a section, so decomposition and a single proposal cannot
+  # drift apart.
+  python3 - "$task_file" "$domain_task" "$project_task" \
+    "SECTION_BLOCK=$(/bin/cat "$SCRIPT_DIR/tasks/section_block.md")" "$@" <<'PY'
 import sys
 from pathlib import Path
 
@@ -1667,6 +1671,13 @@ cmd_init_section() {
 
   local section_brief owned_paths dependency_handoffs priority
   section_brief="$(read_body_arg "$body_mode" "$body_path")"
+  # A body without the brief's headings is a request, not a brief: the
+  # product officer writes the brief against the plan and the live ownership
+  # map, and this command is then re-entered with what it wrote.
+  if ! printf '%s' "$section_brief" | grep -qiE '^#{1,6}[[:space:]]+Objective[[:space:]]*$'; then
+    propose_section_from_request "$section_name" "$section_brief"
+    return
+  fi
   [[ -n "$section_brief" ]] || fail "section brief must not be empty"
   [[ -f "$CONTRACT_FILE" ]] || fail "missing task contract: $CONTRACT_FILE"
   validate_section_brief "$section_brief"

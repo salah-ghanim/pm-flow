@@ -3504,6 +3504,81 @@ ${problems%$'\n'}"
 # that waited would dispatch into the middle of somebody else's tick, against
 # state that changed while it waited.
 
+# `init-section` given a request rather than a brief: the product officer cuts
+# one section against the plan and the live ownership map, through the same
+# validate-then-create path the decomposition uses, and the brief the section
+# starts from is the officer's, not the owner's.
+live_owned_paths_bullets() {
+  # Not `status`: zsh reserves that name, and a `local status` is an error.
+  local section_dir key lifecycle line
+  for section_dir in "$SECTIONS_DIR"/*(/N); do
+    key="$(basename "$section_dir")"
+    [[ "$key" != .* ]] || continue
+    lifecycle="$(first_line_or "$section_dir/status.txt" planned)"
+    case "$lifecycle" in done|cancelled) continue ;; esac
+    [[ -f "$section_dir/owned_paths.txt" ]] || continue
+    for line in ${(f)"$(/bin/cat "$section_dir/owned_paths.txt")"}; do
+      [[ -n "$line" ]] && printf -- '- `%s` (%s)\n' "$line" "$key"
+    done
+  done
+}
+
+propose_section_from_request() {
+  local section_input="${1:-}"
+  local request="${2:-}"
+  [[ -n "$request" ]] || fail "the request must not be empty"
+  [[ "$(project_next_action)" != "decompose" ]] || \
+    fail "this project has no sections yet; decompose it before adding one by request"
+  local key
+  key="$(slugify "$section_input")"
+  [[ ! -d "$SECTIONS_DIR/$key" ]] || fail "section '$key' already exists"
+
+  acquire_driver_lock
+  assert_within_budget
+
+  local proposal_dir
+  proposal_dir="$STATE_DIR/proposals/$(now_compact_utc)-$key"
+  mkdir -p "$proposal_dir"
+  printf '%s\n' "$request" > "$proposal_dir/request.md"
+  [[ -f "$SECTIONS_INDEX_FILE" ]] || refresh_sections_index >/dev/null 2>&1 || true
+
+  local context prompt owned
+  owned="$(live_owned_paths_bullets)"
+  [[ -n "$owned" ]] || owned="- None."
+  context="$(context_bullet_list "$STATE_DIR/plan.md" "$SECTIONS_INDEX_FILE" \
+    "$proposal_dir/request.md")"
+  prompt="$proposal_dir/prompt.md"
+  compose_role_task cpo "$(task_file section_proposal)" \
+    "SECTION_NAME=$key" \
+    "OWNED_PATHS=$owned" \
+    "CONTEXT_FILES=$context" > "$prompt"
+
+  dispatch_role cpo "$prompt" "$proposal_dir/proposal.md" "" "propose section $key"
+
+  local decision
+  decision="$(extract_markdown_decision_line "$(/bin/cat "$proposal_dir/proposal.md")" \
+    "CUT,DECLINE" Decision)" || fail "the proposal has no CUT or DECLINE decision; see $proposal_dir/proposal.md"
+  printf '%s\n' "$decision" > "$proposal_dir/decision.txt"
+  if [[ "${decision%% *}" == "DECLINE" ]]; then
+    printf 'init-section %s -> %s\n' "$key" "$decision"
+    return 0
+  fi
+
+  local names name brief_file
+  names="$(split_section_blocks "$proposal_dir/proposal.md" "$proposal_dir/briefs")"
+  [[ "$(printf '%s\n' "$names" | grep -c .)" == "1" ]] || \
+    fail "the proposal must contain exactly one section block; see $proposal_dir/proposal.md"
+  name="${names%%$'\n'*}"
+  [[ "$name" == "$key" ]] || \
+    fail "the proposal named its section '$name'; the request was for '$key'. See $proposal_dir/proposal.md"
+  brief_file="$proposal_dir/briefs/01-$name.md"
+  validate_section_brief "$(/bin/cat "$brief_file")"
+  extract_owned_paths "$(/bin/cat "$brief_file")" >/dev/null
+  extract_section_priority "$(/bin/cat "$brief_file")" >/dev/null
+  cmd_init_section "$name" --file "$brief_file"
+  printf 'init-section %s -> %s\n' "$key" "$decision"
+}
+
 # The same review the thresholds convene: same prompt, same verdict parsing, and
 # the verdicts take effect the same way. It advances the governance baseline on
 # success, so asking for one does not leave the loop about to ask for another.

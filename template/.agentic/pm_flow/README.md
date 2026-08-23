@@ -434,7 +434,20 @@ mode, so a template change that breaks a composed prompt fails there.
 
 ## Sections by hand
 
-The product officer normally creates sections, but you can add one directly:
+The product officer cuts the sections at decomposition. To add one later,
+describe the capability in a paragraph - what it is for and what you have
+seen go wrong without it - and hand that to `init-section`: the officer reads
+the plan, the registry and the paths live sections own, probes what already
+exists, and either cuts the section in the full brief shape or declines with
+the reason. The request, the prompt and the officer's answer are kept under
+`project_state/proposals/`.
+
+```bash
+./.agentic/pm_flow/pm_flow.sh init-section run-detach --file request.md
+```
+
+A file that already is a brief (it has the `Objective` heading) is created as
+written, with no model call:
 
 ```bash
 ./.agentic/pm_flow/pm_flow.sh init-section "api-contract" --file brief.md
