@@ -11,3 +11,5 @@ tests/pm_flow_test.sh
 tests/packaged_layout_test.sh
 tests/fixtures/stub_*.zsh
 .gitignore
+tools/manifest.py
+README.md

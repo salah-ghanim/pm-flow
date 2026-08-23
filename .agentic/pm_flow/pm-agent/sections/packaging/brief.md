@@ -66,6 +66,9 @@ peer of those sections; it is the re-baselining they will be re-cut against.
 - tests/packaged_layout_test.sh
 - tests/fixtures/stub_*.zsh
 - .gitignore
+- `tools/manifest.py`
+- `README.md`, limited to the passages that describe MANIFEST, the manifest
+  tool, and the copy-version lifecycle.
 
 `src/**` and `tests/**` were both narrowed to the files this section actually
 edits. Owning a whole directory is a claim on every file anyone might ever add
@@ -83,6 +86,20 @@ Claiming the rest would have blocked three sections that touch none of it.
 `README.md` belongs to agents-md, which has to describe the finished layout
 anyway.
 
+**Both of those last two were added after cycle 005.** That cycle deleted
+`MANIFEST` as this brief asks, and immediately exposed a deadlock: a rejection
+condition below says the file-lifecycle machinery must be deleted or justified,
+`tools/manifest.py` is that machinery, and it sat outside this section's
+allowlist so no assignment here could remove it. A section cannot be held to a
+condition it has no path to satisfy. `tools/` is owned by nobody, and `README.md`
+was released when `agents-md` closed.
+
+Taking `README.md` is not a licence to rewrite it. `agents-md` closed on a
+contract that section is entitled to keep: `AGENTS.md` is the instructions file,
+it is rendered before `CLAUDE.md`, the managed markers and the one-time
+`*.pre-pm-flow.md` backups are preserved, and pre-existing content survives.
+Change the manifest passages and leave the rest alone.
+
 ### Dependencies
 - green-suite
 - worktree-isolation
@@ -99,6 +116,8 @@ anyway.
 - The suite runs to completion against the packaged layout.
 - An existing `.agentic/pm_flow` install migrates: project data is kept, the
   copied engine is removed, and the run afterwards behaves identically.
+- A checkout does not describe machinery it no longer has: with `MANIFEST` gone,
+  no tool regenerates it and no documentation tells a reader to run one.
 
 ### Rejection conditions
 - The engine is still copied into the repository under any name.
