@@ -2,10 +2,9 @@
 
 ## Current task
 
-- T7 assigned in cycle 011: the chained end-to-end proof on one store. T6 is
-  merged on `main` (`e2eb511`; `cmd_persona_update` and
-  `acquire_install_and_report` are at `catalog.py:1557` / `:1513`), so the
-  prerequisite is met.
+- None. T7 (cycle 011) is accepted; the workplan is complete. No product
+  source changed in cycle 011, so there is nothing for the driver to merge
+  beyond the section's planning artifacts.
 
 ## Completed tasks and evidence
 
@@ -52,6 +51,44 @@
   exit 0. `review_suite.out` — ten `PASS:` groups, `review_suite_exit=0`.
   `git diff --check` exit 0; `git status --short` lists only
   `template/.agentic/pm_flow/catalog.py`.
+- T7 / A1–A5 (end-to-end): accepted in cycle 011 (review GO). The brief's
+  three scenarios run in one chain on one `$DB` from a real `install.sh`
+  fixture; `cycles/011/acceptance.sh` + `assertions.py`, `regressions.sh`.
+  No product change: the worktree at `2038254` (engine paths identical to
+  `main`) has an empty `git status --short`. Evidence (PM re-run from the
+  developer worktree, `cycles/011/review/run_acceptance.zsh` →
+  `review/acceptance.out`): `assertions_exit=0`, 88 `ok` lines, no `FAIL`.
+  Step 1 `persona add <dir>` → `+ update-manager`, list shows hash
+  `701d0151a77e`, commit `-`, path source; `persona_packs` = (path, NULL).
+  Step 2 `persona add file://…` at C1 → `commit C1` + `~ update-manager
+  (adopted into pack)`, no `+`/`^`; `personas` row count 1 → 1, same id 1,
+  same hash; row `source_url` = URL, `metadata.git_commit` = C1,
+  `source_path` = `personas/manager.md`; `persona_packs` = (URL, C1);
+  `ls -A checkouts` empty. Step 3 swap → exactly one `seat_personas` row
+  (pm agent id 6, layer base) changed `persona_id` → 1; domain/style rows,
+  other seats, `bindings`, `tool_grants`, `topology_agents` (minus the
+  override column) identical; `overrides` = `{"persona_layers": {"base":
+  "update-manager"}}` only. Step 4 tick → `prompt-v1.txt` has `VERSION ONE
+  ONLY`, exact domain body, both house lines, base<domain<style; one new pm
+  attempt (id 1) names H1. Step 5 `persona update` exit 0 → `commit C2`,
+  `^ update-manager (new version; the previous one is kept)`, `= stable-style
+  (unchanged)`; list shows `1095e5071565`/C2/URL, H1 absent; v1 row
+  field-identical; `persona_packs` = (URL, C2); `attempts`/`seat_personas`/
+  `topology_agents`/`bindings`/`tool_grants` identical. Step 6 tick →
+  `prompt-v2.txt` has `VERSION TWO ONLY`, no `VERSION ONE ONLY`; attempt 2
+  names H2, attempt 1 still H1. Step 7 `persona update update-crafts` →
+  `= update-manager (unchanged)`, 15 → 15 rows, snapshot identical. Step 8
+  readback prints exactly `1 H1 1 C1` and `2 H2 15 C2`; pack ref C2. Step 9
+  marker absent, no `pm-flow-pack-*`, roles/domains digest and worktree
+  status unchanged. Mutants (`review/run_mutants.zsh`): M1 update rewrites
+  the newest row in place → `assertions_exit=1` on `v1 row identical field by
+  field`, `pre-update attempt still resolves to a live row`, `readback shows
+  H1→C1 and H2→C2` (one line only); M2 Git add never adopts →
+  `sqlite3.IntegrityError: UNIQUE constraint failed: personas.key,
+  personas.content_hash`, `persona add URL exit` 1 and 16 more FAILs.
+  `review/regressions_and_suite.out` — `cycle_008_exit=0 cycle_009_exit=0
+  cycle_010_exit=0 regressions_exit=0`; suite ten `PASS:` lines,
+  `suite_exit=0`; `diff_check_exit=0`; `git status --short` empty.
 
 ## Gap found at cycle 010 scope (closed by T6)
 
@@ -86,17 +123,25 @@
 
 - None.
 
-## Notes for T7
+## Notes
 
 - `adopt_persona` (T1, unchanged) refreshes provenance columns in place when a
   pack's content is unchanged but its manifest `version`/`summary`/`title`
   differ (reported `~ adopted`); `persona update` inherits this through the
-  shared helper. Body, hash, key and layer are never touched. T7's chain should
-  show the `=` path for a no-op and not mistake `~` for a version row.
+  shared helper. Body, hash, key and layer are never touched. Cycle 011
+  showed `~` only on the path→URL adoption and `=` on the no-op update.
+- A swap is persisted in `topology_agents.overrides` on the swapped seat's
+  row (T4 design); "topology_agents unchanged" is therefore checked on every
+  column except `overrides`, with the override pinned to exactly the
+  requested key.
+- `cycles/011/acceptance.sh` removes `$TMPDIR/xcrun_db` (Apple's git shim
+  cache) before the step-2 emptiness probe; the authoritative leak guard is
+  step 9's `find -name 'pm-flow-pack-*'`.
 - The PM tier cannot `cd` or run bare `python3`; validation from a worktree
-  goes through a `zsh` wrapper (`cycles/010/review_run.sh` is the pattern).
+  goes through a `zsh` wrapper (`cycles/011/review/run_acceptance.zsh` is the
+  pattern).
 
 ## Next eligible task
 
-- T7 (in flight, cycle 011). It is the last task before `COMPLETE`; no
-  product change is expected unless the chain exposes a defect.
+- None. All workplan tasks are done; the section is ready to report
+  `COMPLETE` through `handoff.md`.

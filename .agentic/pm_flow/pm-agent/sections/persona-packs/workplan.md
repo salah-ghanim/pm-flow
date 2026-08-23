@@ -113,7 +113,8 @@
 
 ## Task T7 — End-to-end closing proof
 
-- Status: in flight (cycle 011).
+- Status: done (cycle 011, review GO; evidence in `state.md`). No product
+  change was needed: the chain exposed no defect.
 - Outcome: one script on one real `install.sh` fixture runs the brief's three
   scenarios in sequence against a single store, in this order — `persona add
   <local path>` of the pack directory, `persona add file://<same repo>` at
@@ -135,6 +136,9 @@
   printed and `assertions_exit=0`; cycles 008–010 regressions exit 0;
   `zsh tests/pm_flow_test.sh` exits 0 with ten `PASS:` lines.
 - Depends on: T6 (merged, `e2eb511`).
+
+All tasks T1–T7 are done; every brief acceptance ID (A1–A5) has end-to-end
+evidence on one store.
 
 ## Integration and end-to-end validation
 
