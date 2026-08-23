@@ -1,26 +1,25 @@
-# repo-hooks section handoff
-
 ## Outcome
 
-- Nothing delivered yet.
+- Cut by a portfolio review: advances no plan bullet; the driver already writes Conventional Commits; its failure mode (hook refusing the driver's subject) stops the flow. Product no longer guarantee...
 
 ## Decisions
 
-- None yet.
+- The product officer decided this in a portfolio review, against the
+  mission and the evidence it probed, not against this section reporting.
 
 ## Interfaces
 
-- Planned: `tools/hooks/install|uninstall|projects`;
-  `~/.config/pm-flow/projects.txt`.
+- Nothing new. Any section expecting this capability must be reconciled
+  without it.
 
 ## Risks
 
-- A hook refusing a driver subject would stop the flow.
+- advances no plan bullet; the driver already writes Conventional Commits; its failure mode (hook refusing the driver's subject) stops the flow. Product no longer guarantees a commit-message hook or an install registry. Reopen with a planned handoff once the must-haves close.
 
 ## What is unproven
 
-- Everything in the brief.
+- Everything this section was to deliver; it was cut before proving any of it.
 
 ## Next action
 
-- Assign T1.
+- Reconcile the product plan without this section.

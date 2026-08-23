@@ -1,0 +1,10 @@
+a2a-binding	CUT	no plan bullet names A2A (the binding criterion is ACP); waits on an unstarted section; its own stated risk is an unauthenticated endpoint that spends budget. Product no longer guarantees an A2A-bound seat.
+agent-bindings	CONTINUE	
+codex-usage	CONTINUE	
+otel-semconv	CONTINUE	
+persona-cards	CONTINUE	
+persona-packs	CONTINUE	
+repo-hooks	CUT	advances no plan bullet; the driver already writes Conventional Commits; its failure mode (hook refusing the driver's subject) stops the flow. Product no longer guarantees a commit-message hook or an install registry. Reopen with a planned handoff once the must-haves close.
+store-ledger	CONTINUE	
+topology-compare	CONTINUE	
+trace-commands	CONTINUE	

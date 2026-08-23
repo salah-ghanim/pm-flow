@@ -1,0 +1,4 @@
+UNSTARTED_DEPENDENCY	FOUND	topology-compare` → `store-ledger` (0 cycles); `a2a-binding` → `agent-bindings` (0 cycles); both upstreams wait on nothing.
+UNREACHABLE_SECTION	CLEAR	
+MUST_HAVE_INFLATION	CLEAR	
+LINEAR_CHAIN_RISK	CLEAR	

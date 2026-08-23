@@ -1,26 +1,25 @@
-# a2a-binding section handoff
-
 ## Outcome
 
-- Nothing delivered yet.
+- Cut by a portfolio review: no plan bullet names A2A (the binding criterion is ACP); waits on an unstarted section; its own stated risk is an unauthenticated endpoint that spends budget. Product no ...
 
 ## Decisions
 
-- None yet.
+- The product officer decided this in a portfolio review, against the
+  mission and the evidence it probed, not against this section reporting.
 
 ## Interfaces
 
-- Planned: binding `cli: a2a`; served Agent Card and task endpoints.
+- Nothing new. Any section expecting this capability must be reconciled
+  without it.
 
 ## Risks
 
-- An unauthenticated served card would let anything reaching the port spend
-  budget.
+- no plan bullet names A2A (the binding criterion is ACP); waits on an unstarted section; its own stated risk is an unauthenticated endpoint that spends budget. Product no longer guarantees an A2A-bound seat.
 
 ## What is unproven
 
-- Everything in the brief.
+- Everything this section was to deliver; it was cut before proving any of it.
 
 ## Next action
 
-- Wait for `agent-bindings`, then assign T1.
+- Reconcile the product plan without this section.
