@@ -38,6 +38,18 @@ workspace machinery rather than part of your product, and it ships its own
 `.gitignore` so the repository stays clean with no edits of your own. An install
 that predates this is moved to the new path automatically, as a recorded rename.
 
+`AGENTS.md` is the instructions file. It is written at the repository root and
+carries the role router and the repo-wide invariants that every agent needs
+before it acts. A `CLAUDE.md` is written beside it for tools that look for that
+name instead; it is a pointer that imports `AGENTS.md` with `@AGENTS.md` and
+holds no copy of the rules, so the two cannot drift apart.
+
+Both are installed the same way, and neither is overwritten. If your repository
+already has one, it is backed up once to `AGENTS.pre-pm-flow.md` or
+`CLAUDE.pre-pm-flow.md`, and pm-flow's content is merged in between
+`<!-- pm-flow:begin -->` and `<!-- pm-flow:end -->`. Everything you wrote outside
+those markers survives every reinstall; everything between them is replaced.
+
 ## Versions and upgrades
 
 An install records the manifest it was made from, so it knows what it is and what
@@ -105,6 +117,10 @@ to each other — worth doing across different model families, not within one.
 Only the building roles can write to the repository; reviewing and planning
 roles are dispatched read-only.
 
+The same rule decides what the instructions file is called. `AGENTS.md` is the
+name agents look for and is not any vendor's; a flow whose own root file named
+one would be contradicting itself on the first thing an agent reads.
+
 ## What happens when work fails
 
 After a configurable number of consecutive rejections a section goes to the
@@ -142,6 +158,8 @@ whole process group and retried.
 - `install.sh` installs or upgrades the scaffold.
 - `VERSION` and `manifest.json` — what a release is, and what it ships.
 - `tools/manifest.py` regenerates the manifest from the template.
+- `template/AGENTS.md` — the instructions file installed at the repository root.
+- `template/CLAUDE.md` — the pointer installed beside it, which imports it.
 - `template/.agentic/pm_flow/upgrade.py` — what is installed, and what an
   upgrade would change.
 - `template/.agentic/pm_flow/pm_flow.sh` — commands.

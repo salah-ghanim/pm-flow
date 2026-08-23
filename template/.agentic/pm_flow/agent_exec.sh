@@ -473,6 +473,15 @@ codex_effort() {
   esac
 }
 
+# Claude's output style, applied to every claude dispatch whatever its access
+# tier. A role writes a report for another process to parse, not prose for a
+# reader, and the default style spends a sizeable share of each response
+# narrating what it is about to do. The style is carried in the settings file
+# rather than on the command line because there is no flag for it, and because
+# the scoped tier runs with `--setting-sources ""`: anything not in this file
+# is stripped before the role ever sees it. Empty disables it.
+CLAUDE_OUTPUT_STYLE="${CLAUDE_OUTPUT_STYLE-Concise}"
+
 # Render the scoped tier as a claude settings file. The tier is expressed as an
 # allow-list under the default permission mode: a headless run cannot prompt, so
 # anything the list does not name is denied outright. `acceptEdits` is
@@ -483,19 +492,19 @@ codex_effort() {
 # on all of them. The scoped tier layers its allow-list on top.
 write_access_settings() {
   local settings_path="$1"
-  python3 - "$settings_path" "$SCRIPT_DIR/access_hook.sh" <<'PY_ACCESS'
+  python3 - "$settings_path" "$SCRIPT_DIR/access_hook.sh" "$CLAUDE_OUTPUT_STYLE" <<'PY_ACCESS'
 import json
 import sys
 from pathlib import Path
 
-settings_path, hook = sys.argv[1:3]
-Path(settings_path).write_text(json.dumps({
-    "hooks": {
-        "PreToolUse": [
-            {"matcher": "*", "hooks": [{"type": "command", "command": hook}]}
-        ]
-    },
-}, indent=2) + "\n")
+settings_path, hook, output_style = sys.argv[1:4]
+settings = {}
+if output_style:
+    settings["outputStyle"] = output_style
+settings["hooks"] = {"PreToolUse": [
+    {"matcher": "*", "hooks": [{"type": "command", "command": hook}]},
+]}
+Path(settings_path).write_text(json.dumps(settings, indent=2) + "\n")
 PY_ACCESS
 }
 
@@ -504,13 +513,13 @@ write_scoped_settings() {
   # An --extra-dir is granted to a scoped role the same way it is to a writing
   # one. A manager isolated in a worktree still has to write its own cycle
   # records, and those live with the run, not with the code.
-  python3 - "$settings_path" "$SCOPED_POLICY" "$SCRIPT_DIR/access_hook.sh" "${EXTRA_DIRS[@]}" <<'PY'
+  python3 - "$settings_path" "$SCOPED_POLICY" "$SCRIPT_DIR/access_hook.sh" "$CLAUDE_OUTPUT_STYLE" "${EXTRA_DIRS[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-settings_path, policy_json, hook = sys.argv[1:4]
-extra_dirs = sys.argv[4:]
+settings_path, policy_json, hook, output_style = sys.argv[1:5]
+extra_dirs = sys.argv[5:]
 policy = json.loads(policy_json)
 
 allow = []
@@ -530,16 +539,17 @@ for entry in policy.get("deny", []):
     for tool in ("Edit", "Write", "NotebookEdit"):
         deny.append(f"{tool}({pattern})")
 
-Path(settings_path).write_text(json.dumps({
-    "permissions": {"defaultMode": "default", "allow": allow, "deny": deny},
-    # The scoped tier isolates settings sources, so the observation hook has to
-    # be carried in here or it is stripped along with everything else.
-    "hooks": {
-        "PreToolUse": [
-            {"matcher": "*", "hooks": [{"type": "command", "command": hook}]}
-        ]
-    },
-}, indent=2) + "\n")
+settings = {}
+if output_style:
+    settings["outputStyle"] = output_style
+settings["permissions"] = {"defaultMode": "default", "allow": allow, "deny": deny}
+# The scoped tier isolates settings sources, so the observation hook and the
+# output style have to be carried in here or they are stripped along with
+# everything else.
+settings["hooks"] = {"PreToolUse": [
+    {"matcher": "*", "hooks": [{"type": "command", "command": hook}]},
+]}
+Path(settings_path).write_text(json.dumps(settings, indent=2) + "\n")
 PY
 }
 
@@ -746,10 +756,59 @@ PY
 }
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-agent.XXXXXX")"
+
+# codex keeps its session state, logs, caches and credentials under $CODEX_HOME
+# (default $HOME/.codex) and opens them before it does anything else. A codex
+# role sandboxes every command it runs to the workspace and $TMPDIR, so a
+# *nested* codex - the only way a role can exercise a real codex dispatch, which
+# is what codex token accounting has to be checked against - cannot write that
+# directory and dies before emitting a single event:
+#
+#   Error: failed to initialize in-process app-server client:
+#   Operation not permitted (os error 1)
+#
+# Widening the sandbox to reach $HOME/.codex would hand every role write access
+# to the user's real credentials, so the dispatch gets a disposable home inside
+# the work dir instead. The child inherits CODEX_HOME and lands inside the
+# writable area the sandbox already grants, and the real home stops being
+# mutable state any role can touch at all. Credentials are seeded in and copied
+# back if codex refreshed them, because that is the one thing in there the next
+# dispatch needs; everything else is per-dispatch and goes with the work dir.
+CODEX_HOME_SOURCE=""
+prepare_codex_home() {
+  [[ "$AGENT_CLI" == "codex" ]] || return 0
+  local source_home="${CODEX_HOME:-$HOME/.codex}"
+  [[ -d "$source_home" ]] || return 0
+  CODEX_HOME_SOURCE="$source_home"
+  export CODEX_HOME="$WORK_DIR/codex-home"
+  mkdir -p "$CODEX_HOME"
+  local name
+  for name in auth.json config.toml; do
+    [[ -f "$CODEX_HOME_SOURCE/$name" ]] || continue
+    /bin/cp -p "$CODEX_HOME_SOURCE/$name" "$CODEX_HOME/$name"
+  done
+}
+
+# Sections run in parallel, so several dispatches can finish holding refreshed
+# credentials at once. Writing the real auth.json in place would let one of them
+# be read half-written by a dispatch that is only just starting, and the failure
+# mode is the whole run losing its login. Land it by rename instead: a reader
+# sees either the old file or the new one, never a partial one.
+save_codex_credentials() {
+  [[ -n "$CODEX_HOME_SOURCE" && -f "${CODEX_HOME:-}/auth.json" ]] || return 0
+  /usr/bin/cmp -s "$CODEX_HOME/auth.json" "$CODEX_HOME_SOURCE/auth.json" && return 0
+  local staged="$CODEX_HOME_SOURCE/.auth.json.$$"
+  /bin/cp -p "$CODEX_HOME/auth.json" "$staged" || return 0
+  /bin/mv -f "$staged" "$CODEX_HOME_SOURCE/auth.json" || /bin/rm -f "$staged"
+}
+
 cleanup_work_dir() {
+  save_codex_credentials
   [[ -n "${WORK_DIR:-}" && -d "$WORK_DIR" ]] && rm -rf -- "$WORK_DIR"
 }
 trap cleanup_work_dir EXIT HUP INT TERM
+
+prepare_codex_home
 
 RAW_OUTPUT="$WORK_DIR/raw.txt"
 # codex reports token usage nowhere the response envelope can reach, so the

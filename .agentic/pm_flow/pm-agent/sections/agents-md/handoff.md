@@ -1,57 +1,32 @@
-# agents-md handoff
-
 ## Outcome
 
-Cycles 001 and 002 are `NO_GO`. No implementation was returned, accepted, or
-committed. The configured two-failure threshold has been reached.
+Section `agents-md` is complete on `main` at `4b53d0e`. Installed `AGENTS.md` is the sole full copy of the four-role router and repo-wide invariants; installed `CLAUDE.md` imports it with `@AGENTS.md` and does not duplicate those rules. README names `AGENTS.md` as the instructions file.
+
+Independent validation installed this checkout into fresh Git repositories and repositories with pre-existing instruction files. It proved preservation, one-time backups, managed-block replacement, and same-version reinstall idempotence. Router-removal and rule-duplication mutations were both detected. `zsh tests/pm_flow_test.sh` completed all 10 PASS groups, and `python3 tools/manifest.py --check` reported 77 current files.
 
 ## Decisions
 
-- The returned section branch has no diff from its base.
-- Independent installs create no `AGENTS.md`; `CLAUDE.md` still contains the
-  full router and invariants. Existing CLAUDE content is preserved.
-- The isolated full suite exits 0 with all nine PASS groups, so it does not
-  currently test this section's required behavior.
-- Manifest checking exits 1 in the section worktree because its absolute path
-  is below `.git` and the generator excludes any resolved path containing that
-  component.
-- The developer's access evidence shows literal writes throughout that nested
-  worktree are refused as sensitive, while `/tmp` and the main cycle-record
-  directory remain writable. This is an internal dispatch/worktree-placement
-  defect, not an external dependency.
-- Cycle 002 independently reproduced both failed gates: the worktree resolves
-  below `.git`, manifest print contains zero template entries, and manifest
-  check exits 1. The exact isolated suite still exits 0 with all nine PASS
-  groups.
-- Fresh and existing-repository installs still create no `AGENTS.md`, leave the
-  full router and invariants in CLAUDE without an AGENTS pointer, and README does
-  not identify AGENTS. Existing CLAUDE content survives.
-- Mutation evidence cannot be produced against this return: there is no
-  implementation and the feature probe fails before mutation.
+- `template/AGENTS.md` owns the complete instructions; `template/CLAUDE.md` is compatibility-only.
+- Both files use one file-neutral installer path and `merge_managed_block`. Existing text outside `<!-- pm-flow:begin -->` / `<!-- pm-flow:end -->` survives; each original file is backed up once.
+- Both instruction templates are manifest `seed` files so post-render engine synchronization cannot overwrite rendered values with raw placeholders.
+- The two failed development cycles were caused by worktrees under `.git`, not product behavior. The worktree-placement and manifest path-exclusion defects are already fixed on `main`; no consultant work remains.
 
 ## Interfaces
 
-None accepted.
+- Other sections may depend on root `AGENTS.md` containing the rendered router, invariants, and project task-contract path.
+- Vendor-specific tooling may depend on root `CLAUDE.md` containing `@AGENTS.md`.
+- Installer/packaging must preserve the managed markers, backup names (`AGENTS.pre-pm-flow.md`, `CLAUDE.pre-pm-flow.md`), seed classification, and AGENTS-before-CLAUDE installation order.
 
 ## Risks
 
-- Re-dispatching the same assignment into the same nested worktree will repeat
-  the refusal without producing new evidence.
-- The green full suite can mask a regression or total absence of AGENTS install
-  behavior until a focused assertion is added or run during review.
-- A third unchanged developer dispatch would repeat an already-confirmed
-  internal mechanism failure and violate the escalation policy.
+- `packaging` also changes `install.sh` and `MANIFEST`; conflict resolution could drop this contract. Re-running the manifest check, full suite, focused install probes, and both mutations after its merge would reveal regression.
+- Installs retain `*.pm-flow.template.md` prefetch artifacts. This predates the section and is symmetric across both files; packaging should decide whether release cleanup is required.
 
 ## What is unproven
 
-Every product criterion remains unproven: rendered `AGENTS.md`, compatibility
-pointer-only `CLAUDE.md`, README documentation, generated MANIFEST, and tests
-that detect violations of those guarantees.
+- No configured real agent CLI was launched to prove automatic `AGENTS.md` discovery or that a CLAUDE-only client follows `@AGENTS.md`. Launch each supported CLI in an installed repository without injecting either file and observe it follow a unique managed instruction.
+- Migration from an actual previously released CLAUDE-only pm-flow install was not exercised. Install the prior release, add user content outside its managed block, upgrade with current `install.sh`, and observe preservation plus a single current block in each instruction file.
 
 ## Next action
 
-Escalate to a consultant now. Provide both cycle reports and ask for an
-alternative section-execution path that is writable, resolves outside `.git`,
-and lets `tools/manifest.py` enumerate the template tree without bypassing
-controls. Only after that mechanism is established should the bounded
-implementation and focused mutation checks be reassigned.
+Close `agents-md`; when packaging reconciles its shared paths, require the post-merge checks named under Risks before release.

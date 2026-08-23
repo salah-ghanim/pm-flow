@@ -37,10 +37,18 @@ This is not an escape from difficulty — difficulty is what escalation is for.
 It is for work that is not blocked on effort at all. Name the dependency and
 what would unblock it on the decision line itself; a bare token is rejected.
 
-Before you respond, check that the last accepted cycle was committed. If your
-section's owned paths, `state.md` or `handoff.md` have uncommitted changes from
-work already accepted, commit them now — the next developer starts fresh and
-cannot recover what an interrupted process leaves behind.
+Do not commit. The driver commits accepted work for you: it commits the
+section's worktree, merges it back, and commits `state.md` and `handoff.md`
+alongside the verdict that accepted them.
+
+This used to be your obligation and it was one no codex-bound role could
+discharge. A linked worktree keeps its object store in the parent repository,
+outside the directory a dispatch is scoped to, so committing from inside a
+worktree means writing where the sandbox refuses however the permissions are
+written. The reviewer was released from this obligation and this role was not,
+which left the same impossible instruction standing here. If you find
+uncommitted work from an accepted cycle, say so in your response and scope
+around it; never spend the cycle trying to record it.
 
 ## What an acceptance criterion has to be
 

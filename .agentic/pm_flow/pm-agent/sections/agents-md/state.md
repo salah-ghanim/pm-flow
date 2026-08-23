@@ -15,79 +15,78 @@
   merging, and the `AGENTS.md`/`CLAUDE.md` rendering block.
 - `MANIFEST`, generated only by `python3 tools/manifest.py --write`.
 
-## Plan
+## Where this section actually stands
 
-- One cohesive implementation cycle: move the full managed instructions to the
-  AGENTS template, render it on install, reduce the CLAUDE template to a
-  managed pointer, preserve pre-existing CLAUDE content, update README, and
-  regenerate MANIFEST.
-- Review with fresh-install and existing-CLAUDE probes plus the full suite, then
-  mutation-test the probes before accepting.
+**The implementation is on `main` as `4b53d0e` and every acceptance criterion in
+the brief is met.** Read this section before reading the cycle history below,
+because that history describes a state the repository has since left.
 
-## Decisions and evidence
+Cycles 001 and 002 failed for the harness, not the work. The rescue that
+followed them succeeded, committed a complete implementation to
+`pm-flow/pm-agent/agents-md-rescue-1` (`a9790f2`), and was then killed before it
+wrote its result file, so the driver never reviewed or merged it and the section
+record never learned that the work existed. The deliverable was salvaged onto
+`main` deliberately, its escalation directory was archived rather than resumed
+(`escalation-archived-20260823T082009Z/why_archived.md`), and the section was
+reconciled in `f16a0ae`. Nothing here is waiting on a consultant.
 
-- The installer dependency is complete; its handoff reports a real fresh install
-  and a MANIFEST-driven engine while preserving project state on reinstall.
-- `install.sh` still explicitly prefetches `template/CLAUDE.md`, provides
-  `merge_claude_rules`, and renders or merges CLAUDE at the end of `main`; these
-  are the existing mechanisms to generalize rather than duplicate.
-- Existing tests are outside this section's ownership and still inspect the
-  compatibility CLAUDE file for managed markers, the rendered task-contract
-  path, and the instruction to identify the role. The pointer may retain those
-  references but must not duplicate the router or invariants.
-- A direct `zsh tests/pm_flow_test.sh` inherited `PM_FLOW_PROJECT=pm-agent` from
-  this dispatch and exited 1 while looking for the temporary fixture's contract
-  under the wrong key. The isolated baseline command
-  `env -u PM_FLOW_PROJECT -u PM_FLOW_ROOT -u PM_FLOW_REPO_ROOT zsh tests/pm_flow_test.sh`
-  exited 0 and ended with the four suite PASS lines.
-- No earlier implementation cycle exists. At scope time, owned source paths,
-  `state.md`, and `handoff.md` had no uncommitted accepted work; only driver
-  bookkeeping was dirty.
-- Cycle 001 review is `NO_GO`; no implementation was accepted or committed.
-  The section branch remains exactly at its base commit with no changed files.
-  Independent fresh and existing-repository installs from that worktree create
-  no `AGENTS.md`; both leave the complete role router and repo-wide invariants
-  in `CLAUDE.md`, while preserving the pre-existing CLAUDE content. `README.md`
-  does not identify `AGENTS.md` as the installed instructions source.
-- The exact isolated suite exits 0 and reaches all nine PASS groups despite the
-  missing target behavior. `python3 tools/manifest.py --check` exits 1 because
-  `iter_template_files()` excludes every resolved template path when the
-  section worktree itself is nested below a `.git` directory. There is no
-  returned implementation to mutate; mutation evidence is therefore impossible
-  in this cycle, and the green suite is not evidence for the AGENTS contract.
-- The developer's access record names and distinguishes the write mechanism:
-  literal writes anywhere in the nested section worktree are refused as
-  sensitive, while writes in `/tmp` and the main section record directory are
-  allowed. This is an internal dispatch/worktree-placement defect outside this
-  section's owned paths, not an external credential, entitlement, or service
-  dependency.
-- Cycle 002 review is `NO_GO`; the developer correctly stopped without an
-  implementation after both explicit pre-edit gate conditions failed. The
-  returned branch is clean at base commit `76ee9ef`, `pwd -P` still resolves
-  below `.git`, manifest print has zero template entries, and manifest check
-  exits 1.
-- The reviewer ran the isolated full suite independently: it exits 0 and reaches
-  all nine PASS groups, but independent fresh and existing-repository installs
-  still create no `AGENTS.md`; their `CLAUDE.md` files retain both full sections
-  and do not point to AGENTS, and README still does not name AGENTS. Existing
-  CLAUDE content is preserved.
-- A valid mutation test is impossible because there is no returned
-  implementation and the focused baseline already fails. This is the second
-  rejected cycle and reaches the configured consultant threshold.
+## Evidence, re-verified against the current `main`
+
+Two fresh `git init` repositories and one with pre-existing content, installed
+from this checkout with
+`env -u PM_FLOW_PROJECT -u PM_FLOW_ROOT -u PM_FLOW_REPO_ROOT ./install.sh <repo> --name <name>`:
+
+- **Fresh install writes the router and invariants.** A 58-line `AGENTS.md`
+  appears at the repository root carrying the role router (all four roles) and
+  the repo-wide invariants in full, including the driver-commits rule.
+- **A pre-existing `CLAUDE.md` is preserved.** Its own content stays at the top
+  of the file, untouched, with the managed block merged in below it between
+  `<!-- pm-flow:begin -->` and `<!-- pm-flow:end -->`, and backed up once as
+  `CLAUDE.pre-pm-flow.md`. The rendered `CLAUDE.md` is a 17-line pointer that
+  imports `@AGENTS.md` and keeps no copy of the rules.
+- **A pre-existing `AGENTS.md` is preserved the same way.** This was recorded as
+  unproven in the previous handoff and has now been exercised: content kept,
+  one managed block merged, `AGENTS.pre-pm-flow.md` written, `CLAUDE.md` pointer
+  created. `merge_managed_block` is file-neutral, which is why both paths behave
+  identically.
+- **Reinstalling is idempotent.** A second install of the same repository leaves
+  exactly one managed block in each file and the pre-existing content intact.
+- **README names it.** `README.md` describes `AGENTS.md` as the instructions
+  file at lines 41, 44, 120 and 161.
+- **The suite passes.** `zsh tests/pm_flow_test.sh` exits 0 with 10 PASS groups,
+  and `python3 tools/manifest.py --check` reports the manifest current at 77
+  files.
+
+Observed and deliberately not treated as a defect: an install leaves
+`CLAUDE.pm-flow.template.md` (and `AGENTS.pm-flow.template.md` where that file
+pre-existed) in the target repository. That is the prefetch artifact, it predates
+this section, it is symmetric across both instruction files, and no acceptance
+criterion speaks to it. Raise it with `packaging` if it should be cleaned up;
+do not reopen this section for it.
+
+## History, retained for the record
+
+- Cycles 001 and 002 were both `NO_GO`, and neither returned an implementation.
+  The cause was harness, not product: this section's worktrees were placed under
+  `.git/`, where agent write controls refuse the paths as sensitive and
+  `tools/manifest.py` enumerated 0 of 74 template files. Those worktrees have
+  been removed and the branches survive.
+- `main` has since fixed both independently — worktree placement in
+  `driver.zsh`, path exclusion in `tools/manifest.py` — so neither obstruction
+  can recur here.
+- Not salvaged from the rescue branch: its own copies of those two fixes. `main`
+  reached both with the same reasoning while the branch sat unmerged.
 
 ## Current assignment
 
-- Do not re-issue the implementation. Escalate to a consultant with both cycle
-  reports and seek an alternative that gives the section a writable source
-  checkout outside `.git` and preserves manifest enumeration without bypassing
-  either control. Any later implementation must retain the same owned-path
-  boundary and focused pass-to-fail mutation requirements.
+- None. Do not re-issue the implementation and do not escalate: both would
+  re-solve a solved problem. The only thing this section still owes is a
+  completion review. Re-run the acceptance checks above yourself, and if they
+  hold, answer `COMPLETE`.
 
 ## Dependencies
 
-- `installer`: complete. Its bounded handoff was read for this scope.
-- Section execution is currently impeded by the internal worktree location
-  `.git/pm-flow/worktrees/...`: the developer could not write owned paths there,
-  and `tools/manifest.py` excludes the entire template for the same path shape.
-- Two rejected cycles meet the configured consultant threshold. This remains an
-  internal execution dependency and does not qualify as `BLOCKED_EXTERNAL`.
+- `installer`: complete. Its bounded handoff was read at scope time.
+- `packaging` also claims `install.sh` and `MANIFEST` and is mid-flight on both.
+  This section's work is committed, so the exposure is a merge conflict on
+  packaging's branch, not a race.

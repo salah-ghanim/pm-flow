@@ -1,0 +1,15 @@
+# Uncommitted changes left by a failed dispatch
+
+Recorded at 2026-08-23T00:28:33Z for section persona-packs.
+
+The dispatch failed after changing the working tree, and nothing
+committed it. Review and either commit or discard these paths before
+the section is released from quarantine.
+
+```diff
+1c1,2
+< head 937f4cfb6aa74ac29246638ba4b0ca486680023e
+---
+> head 1579145e31834cd3e68ed6531c739070456e4117
+>  M template/.agentic/pm_flow/catalog.py
+```

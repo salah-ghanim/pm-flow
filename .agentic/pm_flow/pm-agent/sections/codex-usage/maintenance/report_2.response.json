@@ -1,0 +1,111 @@
+{
+  "is_error": false,
+  "duration_api_ms": 342717,
+  "num_turns": 49,
+  "stop_reason": "end_turn",
+  "session_id": "3429f27b-5cbf-4224-bbcf-b55a78674b05",
+  "total_cost_usd": 2.5570014999999997,
+  "usage": {
+    "input_tokens": 72,
+    "cache_creation_input_tokens": 79045,
+    "cache_read_input_tokens": 2333269,
+    "output_tokens": 23882,
+    "output_tokens_details": {
+      "thinking_tokens": 12538
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 79045,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 2927,
+        "cache_read_input_tokens": 94259,
+        "cache_creation_input_tokens": 805,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 805
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 2437,
+      "outputTokens": 14,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.002507,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty"
+    },
+    "claude-opus-5": {
+      "inputTokens": 72,
+      "outputTokens": 23882,
+      "cacheReadInputTokens": 2333269,
+      "cacheCreationInputTokens": 79045,
+      "webSearchRequests": 0,
+      "costUSD": 2.5544945,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "canonicalModel": "claude-opus-5",
+      "provider": "firstParty"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "# Obstruction\n\nThe reviewer for `codex-usage` is a `codex`-bound, `scoped`-tier role, and the acceptance it was given requires that reviewer to independently run a real authenticated Codex dispatch \u2014 which its access tier deliberately forbids, so the review can never pass however correct the implementation is.\n\n# Cause\n\nTwo boundaries sit in front of a nested Codex dispatch, and only the first was plumbing.\n\n**First (fixed).** A nested `codex` inherits `CODEX_HOME=$HOME/.codex`, which is outside the outer codex role's `workspace-write` sandbox, so it died at `failed to initialize in-process app-server client` before emitting a single event. That is a harness fault: the harness never told the child where it was allowed to keep its state. The fix is to relocate `CODEX_HOME` into the dispatch's own work dir \u2014 inside the writable area the sandbox already grants \u2014 rather than widening the sandbox to reach the user's real credentials. Attempt 1 of this maintenance had written that; I confirmed it, and hardened the one unsafe edge in it (below).\n\n**Second (not plumbing).** With `CODEX_HOME` fixed the nested codex authenticates and then fails on DNS, because a codex role's sandbox gives its child commands no network. That is not an accident of the backend. `agent_exec.sh` builds the `scoped` tier on the claude backend from an explicit allowlist (`DEFAULT_SCOPED_BASH`, agent_exec.sh:229) that grants `git`, `pytest`, `ls`/`cat`/`grep`, `nc` \u2014 and deliberately withholds a general shell and `pm_flow.sh run`/`tick`, with the comment *\"a dispatched role must not be able to dispatch the flow.\"* Network reaches roles only through `fetch.sh`, a context-free reader. So on both backends the scoped tier means: no arbitrary shell, no outbound calls, no dispatching the flow. Codex's network denial is that same tier being enforced, just with an uglier error.\n\nEnabling `sandbox_workspace_write.network_access` for codex roles, or moving `pm` into `write_roles`, would each hand every managing role the capability the tier exists to withhold. Both are defeating the gate, so I did neither.\n\nThe developer role (`claude`, `write` tier) *can* do a real Codex dispatch, and did \u2014 cycle 005's review says the implementation shows \"no confirmed task defect\". Only the independent re-run at review time is impossible.\n\n# What I changed\n\n- `template/.agentic/pm_flow/agent_exec.sh` + the installed engine copy: made the refreshed-credential copy-back atomic. It was `cp -p` straight over `$HOME/.codex/auth.json`; sections run in parallel, so two dispatches finishing at once could leave a starting dispatch reading a half-written credential and lose the run its login. Now staged in the same directory and landed by `mv`.\n- Nothing else. I did not touch the section's deliverable (`driver.zsh`, `telemetry.py`, the fixture), its brief, or its acceptance.\n\nThe `CODEX_HOME` relocation itself was already in the working tree from attempt 1 (which ran out of usage limit before it could report). It is still uncommitted \u2014 see below.\n\n# Evidence\n\nThe obstruction, reproduced in both halves.\n\n`CODEX_HOME` unwritable \u2014 the exact failure the reviews recorded:\n\n```text\n$ CODEX_HOME=/tmp/cu-home/ro codex exec --json --ephemeral --sandbox read-only 'say hi'\nRO_EXIT=1\nError: failed to initialize in-process app-server client: Permission denied (os error 13)\n```\n\n`CODEX_HOME` relocated to a writable dir seeded with `auth.json`/`config.toml` \u2014 same command, passing:\n\n```text\n$ CODEX_HOME=/tmp/cu-home/rw codex exec --json --ephemeral --sandbox read-only 'reply with the single word: ok'\nRW_EXIT=0\n{\"type\": \"item.completed\", \"item\": {\"type\": \"agent_message\", \"text\": \"ok\"}}\n{\"type\": \"turn.completed\", \"usage\": {\"input_tokens\": 13738, \"cached_input_tokens\": 9984, \"output_tokens\": 5, \"reasoning_output_tokens\": 0}}\n```\n\nEnd to end through the live harness, a real codex dispatch with the relocated home and the atomic copy-back in place:\n\n```text\n$ env -i HOME=$HOME PATH=$PATH TMPDIR=$TMPDIR .agentic/pm_flow/agent_exec.sh pm \\\n    --prompt-file /tmp/cu-probe/p.md --output /tmp/cu-probe/resp.json --work-root /tmp/cu-probe\nrole=pm\ncli=codex\nresponse=/tmp/cu-probe/resp.json\nattempts=1\nAGENT_EXEC_EXIT=0\n{\"type\": \"turn.completed\", \"usage\": {\"input_tokens\": 14085, \"cached_input_tokens\": 9984, \"output_tokens\": 5, \"reasoning_output_tokens\": 0}}\n{'model': 'gpt-5.6-sol', 'is_error': False, 'failure_reason': 'none'}\nresult: 'ok'\n```\n\n`$HOME/.codex/auth.json` intact afterwards, no staged file left behind (`stray staged files: 0`).\n\nThe second boundary, reproduced directly \u2014 a child command of a codex `workspace-write` role has no network:\n\n```text\n$ codex exec --sandbox workspace-write ... 'run: curl -sS -o /dev/null -w \"%{http_code}\" https://api.openai.com/v1/models'\ncurl: (6) Could not resolve host: api.openai.com\n000 exit=6\n```\n\nFull suite, unchanged and green:\n\n```text\nPASS: codex token accounting against a real event stream\nPASS: per-dispatch access observation\nPASS: dependency scheduling and blocked sections\nPASS: headless driver, escalation, and parallel rescue\nPASS: per-section git worktrees, merge-back, and cleanup\nPASS: concurrent section runs, serialised merges, and lock exclusion\nPASS: product decomposition and a full headless project run\nPASS: section-scoped PM flow\nPASS: role personas, agent dispatch, and supervision\nPASS: independent consultant panel and CPO adjudication\nSUITE_EXIT=0\n```\n\nThe section's own failing command \u2014 the cycle-004/005 real-dispatch probe run *as the reviewer* \u2014 I did not make pass, and cannot without crossing the boundary above.\n\n# What I did not fix\n\n- **The `CODEX_HOME` relocation is uncommitted.** It sits in the main working tree as a modification to `template/.agentic/pm_flow/agent_exec.sh` (attempt 1's work plus my atomic-rename hardening). Committing engine changes is not a maintenance-engineer act here and nothing I ran needed it, but an uncommitted engine fix does not survive the next fresh process \u2014 someone must land it.\n- **The live install is stale against `main`.** `.agentic/pm_flow/telemetry.py` still carries the `attempts.agent_definition_id` INSERT that `store.py` has no column for \u2014 the cycle-004 obstruction \u2014 even though `template/` on `main` no longer does, and the installed `agent_exec.sh` predates the `FLOW_DIR` refactor. Every dispatch of *this* flow runs the stale copy. I did not upgrade it: regenerating the install is `packaging`'s ground, and doing it mid-run would swap the engine under sections that are live.\n- **The codex backend cannot express the `scoped` tier at all.** `agent_exec.sh` already says so in a comment: `--extra-dir` and the write boundary are prompt-level only on codex. Network is the one part of the tier codex *does* enforce, which is why the asymmetry surfaced here and not earlier. Nothing enforces the \"may not dispatch the flow\" rule on a codex role except the absence of network.\n- The cycle-002 blocker (git object/ref writes denied to the reviewer) I did not revisit; cycle 005 got past it, so it appears environmental rather than standing.\n\n# Decision\n\nNOT_PLUMBING \u2014 the harness fault I could repair (nested codex denied its own `CODEX_HOME`) is fixed and proven, but the remaining blocker is the `scoped` access tier working exactly as designed, and only a product decision can resolve it: either the reviewer verifies the developer's recorded real-dispatch artifacts and the real-stream fixture the brief already asks for, or the access model changes to give this review a bounded, allowlisted way to make one outbound dispatch.",
+  "ttft_ms": 1695,
+  "ttft_stream_ms": 962,
+  "time_to_request_ms": 39,
+  "type": "result",
+  "duration_ms": 546120,
+  "uuid": "08c67323-c33f-4ffc-a5f9-b8315c7682b8",
+  "failure_reason": "none",
+  "role": "maintenance_engineer",
+  "pm_backend": "claude",
+  "model": "claude-opus-5",
+  "difficulty": "medium",
+  "attempts": 1,
+  "session_resumable": false
+}

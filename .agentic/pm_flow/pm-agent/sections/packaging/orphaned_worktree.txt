@@ -1,0 +1,23 @@
+# Uncommitted changes left by a failed dispatch
+
+Recorded at 2026-08-23T00:29:02Z for section packaging.
+
+The dispatch failed after changing the working tree, and nothing
+committed it. Review and either commit or discard these paths before
+the section is released from quarantine.
+
+```diff
+1c1,10
+< head 795510d359e7f208cf9c6d765d2d44f6bcf89072
+---
+> head ad66452ea0699ddb1e021d59ac9b08cc200aa4a1
+>  M .gitignore
+> D  MANIFEST
+>  M install.sh
+>  M pyproject.toml
+>  M src/pm_flow/paths.py
+>  M template/.agentic/pm_flow/pm_flow.sh
+> D  template/.agentic/pm_flow/upgrade.py
+>  M tests/packaged_layout_test.sh
+>  M tests/pm_flow_test.sh
+```
