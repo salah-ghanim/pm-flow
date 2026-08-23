@@ -473,6 +473,15 @@ codex_effort() {
   esac
 }
 
+# Claude's output style, applied to every claude dispatch whatever its access
+# tier. A role writes a report for another process to parse, not prose for a
+# reader, and the default style spends a sizeable share of each response
+# narrating what it is about to do. The style is carried in the settings file
+# rather than on the command line because there is no flag for it, and because
+# the scoped tier runs with `--setting-sources ""`: anything not in this file
+# is stripped before the role ever sees it. Empty disables it.
+CLAUDE_OUTPUT_STYLE="${CLAUDE_OUTPUT_STYLE-Concise}"
+
 # Render the scoped tier as a claude settings file. The tier is expressed as an
 # allow-list under the default permission mode: a headless run cannot prompt, so
 # anything the list does not name is denied outright. `acceptEdits` is
@@ -483,19 +492,19 @@ codex_effort() {
 # on all of them. The scoped tier layers its allow-list on top.
 write_access_settings() {
   local settings_path="$1"
-  python3 - "$settings_path" "$SCRIPT_DIR/access_hook.sh" <<'PY_ACCESS'
+  python3 - "$settings_path" "$SCRIPT_DIR/access_hook.sh" "$CLAUDE_OUTPUT_STYLE" <<'PY_ACCESS'
 import json
 import sys
 from pathlib import Path
 
-settings_path, hook = sys.argv[1:3]
-Path(settings_path).write_text(json.dumps({
-    "hooks": {
-        "PreToolUse": [
-            {"matcher": "*", "hooks": [{"type": "command", "command": hook}]}
-        ]
-    },
-}, indent=2) + "\n")
+settings_path, hook, output_style = sys.argv[1:4]
+settings = {}
+if output_style:
+    settings["outputStyle"] = output_style
+settings["hooks"] = {"PreToolUse": [
+    {"matcher": "*", "hooks": [{"type": "command", "command": hook}]},
+]}
+Path(settings_path).write_text(json.dumps(settings, indent=2) + "\n")
 PY_ACCESS
 }
 
@@ -504,13 +513,13 @@ write_scoped_settings() {
   # An --extra-dir is granted to a scoped role the same way it is to a writing
   # one. A manager isolated in a worktree still has to write its own cycle
   # records, and those live with the run, not with the code.
-  python3 - "$settings_path" "$SCOPED_POLICY" "$SCRIPT_DIR/access_hook.sh" "${EXTRA_DIRS[@]}" <<'PY'
+  python3 - "$settings_path" "$SCOPED_POLICY" "$SCRIPT_DIR/access_hook.sh" "$CLAUDE_OUTPUT_STYLE" "${EXTRA_DIRS[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-settings_path, policy_json, hook = sys.argv[1:4]
-extra_dirs = sys.argv[4:]
+settings_path, policy_json, hook, output_style = sys.argv[1:5]
+extra_dirs = sys.argv[5:]
 policy = json.loads(policy_json)
 
 allow = []
@@ -530,16 +539,17 @@ for entry in policy.get("deny", []):
     for tool in ("Edit", "Write", "NotebookEdit"):
         deny.append(f"{tool}({pattern})")
 
-Path(settings_path).write_text(json.dumps({
-    "permissions": {"defaultMode": "default", "allow": allow, "deny": deny},
-    # The scoped tier isolates settings sources, so the observation hook has to
-    # be carried in here or it is stripped along with everything else.
-    "hooks": {
-        "PreToolUse": [
-            {"matcher": "*", "hooks": [{"type": "command", "command": hook}]}
-        ]
-    },
-}, indent=2) + "\n")
+settings = {}
+if output_style:
+    settings["outputStyle"] = output_style
+settings["permissions"] = {"defaultMode": "default", "allow": allow, "deny": deny}
+# The scoped tier isolates settings sources, so the observation hook and the
+# output style have to be carried in here or they are stripped along with
+# everything else.
+settings["hooks"] = {"PreToolUse": [
+    {"matcher": "*", "hooks": [{"type": "command", "command": hook}]},
+]}
+Path(settings_path).write_text(json.dumps(settings, indent=2) + "\n")
 PY
 }
 
