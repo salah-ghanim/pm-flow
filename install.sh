@@ -533,6 +533,7 @@ install_instructions_file() {
   local project_key="$7"
   local target="$repo_root/$name"
   local stem="${name%.md}"
+  local rendered_block="$TEMPLATE_CACHE_DIR/rendered-instructions/$name"
 
   if [[ -f "$target" && "$force" != "1" ]]; then
     if [[ ! -f "$repo_root/$stem.pre-pm-flow.md" ]]; then
@@ -540,7 +541,7 @@ install_instructions_file() {
     fi
     render_template \
       "template/$name" \
-      "$repo_root/$stem.pm-flow.template.md" \
+      "$rendered_block" \
       "$project_name" \
       "$repo_root" \
       "$primary_mission" \
@@ -548,7 +549,7 @@ install_instructions_file() {
       "$project_key"
     merge_managed_block \
       "$target" \
-      "$repo_root/$stem.pm-flow.template.md"
+      "$rendered_block"
   else
     render_template \
       "template/$name" \
