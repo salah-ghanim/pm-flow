@@ -1265,12 +1265,13 @@ record_blocked_external() {
   local blocker="$3"
   local section_key summary handoff
   section_key="$(basename "$section_dir")"
-  summary="Blocked on an external dependency: ${blocker}"
-  summary="${summary//$'\n'/ }"
+  local outcome="Blocked on an external dependency: ${blocker}"
+  outcome="${outcome//$'\n'/ }"
+  summary="$outcome"
   (( ${#summary} <= 200 )) || summary="${summary[1,197]}..."
   handoff="$cycle_dir/blocked_handoff.md"
   {
-    printf '## Outcome\n\n- %s\n\n' "$summary"
+    printf '## Outcome\n\n- %s\n\n' "$outcome"
     printf '## Decisions\n\n- The section manager stopped scoping cycles because no assignment\n'
     printf '  available to it can satisfy the acceptance criteria.\n\n'
     printf '## Interfaces\n\n- Nothing new. Dependent sections must assume this capability is unavailable.\n\n'
@@ -1419,10 +1420,19 @@ do_review() {
 
   context="$(context_bullet_list "$cycle_dir/assignment.md" "$cycle_dir/result.md" \
     "$section_dir/brief.md" "$section_dir/workplan.md" "$cycle_dir/verdict_feedback.md")"
+  # Where the developer's changes are. Under isolation that is the section's
+  # worktree beside the repository, and the validation commands have to run
+  # there, not in the main checkout the reviewer is launched in.
+  local review_tree="$PROJECT_ROOT"
+  if worktree_isolation_enabled; then
+    review_tree="$(section_worktree_path "$(basename "$section_dir")")" || review_tree="$PROJECT_ROOT"
+    [[ -d "$review_tree" ]] || review_tree="$PROJECT_ROOT"
+  fi
   prompt="$cycle_dir/review_prompt.md"
   compose_role_task pm "$(task_file section_review)" \
     "SECTION_KEY=$(basename "$section_dir")" \
     "CYCLE=$cycle_number" \
+    "WORKTREE=$review_tree" \
     "CONTEXT_FILES=$context" > "$prompt"
 
   dispatch_role pm "$prompt" "$cycle_dir/review.md" "" "review $(basename "$section_dir") $cycle_number"
@@ -1903,9 +1913,17 @@ do_review_rescue() {
 
   context="$(context_bullet_list "$section_dir/brief.md" "$escalation_dir/adjudication.md" "$escalation_dir/rescue_result.md")"
   prompt="$escalation_dir/review_prompt.md"
+  # The rescue worked in its own worktree(s); the first one is where the
+  # adopted path was built, and a parallel rescue's trees sit beside it.
+  local rescue_tree="$PROJECT_ROOT"
+  if worktree_isolation_enabled; then
+    rescue_tree="$(section_worktree_path "$(basename "$section_dir")-rescue-1")" || rescue_tree="$PROJECT_ROOT"
+    [[ -d "$rescue_tree" ]] || rescue_tree="$PROJECT_ROOT"
+  fi
   compose_role_task pm "$(task_file section_review)" \
     "SECTION_KEY=$(basename "$section_dir")" \
     "CYCLE=rescue" \
+    "WORKTREE=$rescue_tree" \
     "CONTEXT_FILES=$context" > "$prompt"
 
   dispatch_role pm "$prompt" "$escalation_dir/review.md" "" "review rescue $(basename "$section_dir")"
@@ -2562,8 +2580,11 @@ perform_action() {
 #
 # Lexical order took the first line of a directory listing, so one section that
 # happened to sort first took every dispatch while a zero-dependency section
-# with four dependents got none. The order is: how many other sections are
-# waiting on this one, then how long since it was last dispatched, then the key.
+# with four dependents got none. The order is: must-have before nice-to-have,
+# then how many other sections are waiting on this one, then how long since it
+# was last dispatched, then the key. Priority first, because a nice-to-have
+# that sorts earlier otherwise takes the tick a must-have was waiting for, and
+# the officer's only lever against that was to cut it.
 actionable_sections() {
   local section_dir action listing=""
   [[ -d "$SECTIONS_DIR" ]] || return 0
@@ -2613,7 +2634,16 @@ def last_dispatch(path):
         return 0
 
 
-candidates.sort(key=lambda path: (-dependents[path.name], last_dispatch(path), path.name))
+def priority_rank(path):
+    stamp = path / "priority.txt"
+    if not stamp.is_file():
+        return 0
+    first = stamp.read_text(errors="replace").splitlines()[:1]
+    return 1 if first and first[0].strip().lower().startswith("nice-to-have") else 0
+
+
+candidates.sort(key=lambda path: (priority_rank(path), -dependents[path.name],
+                                  last_dispatch(path), path.name))
 print("\n".join(str(path) for path in candidates))
 ' "$SECTIONS_DIR"
 }
@@ -3140,11 +3170,23 @@ HEADER = [
     "",
 ]
 
+# The log is the officer's memory and it is not only reviews: panel
+# adjudications and owner decisions are written here by hand, under their own
+# headings. Only `## Review NNN` blocks are this writer's to reorder and
+# compact; every other `##` block is carried over verbatim, after them, or the
+# first review would erase the adjudication that explains why a section is
+# shaped the way it is. The title and preamble are the driver's own.
 existing = []
+others = []
 if Path(log_md).is_file():
     body = Path(log_md).read_text()
-    parts = re.split(r"(?m)^(?=##\s+Review\s)", body)
-    existing = [part.rstrip() for part in parts[1:] if part.strip()]
+    for part in re.split(r"(?m)^(?=##\s+)", body):
+        if not part.strip():
+            continue
+        if re.match(r"##\s+Review\s", part):
+            existing.append(part.rstrip())
+        elif re.match(r"##\s+", part):
+            others.append(part.rstrip())
 
 
 def compact(block):
@@ -3158,7 +3200,9 @@ def compact(block):
 kept = [entry_text for entry_text in existing[: max(keep - 1, 0)]]
 older = [compact(entry_text) for entry_text in existing[max(keep - 1, 0):]]
 Path(log_md).write_text(
-    "\n".join(HEADER + ["\n".join(entry).rstrip(), ""] + [b + "\n" for b in kept + older])
+    "\n".join(HEADER + ["\n".join(entry).rstrip(), ""]
+              + [b + "\n" for b in kept + older]
+              + [b + "\n" for b in others])
 )
 PY
 }
@@ -3176,12 +3220,15 @@ publish_governance_handoff() {
   local next_action="$6"
   local section_key summary handoff
   section_key="$(basename "$section_dir")"
-  summary="$headline: $reason"
-  summary="${summary//$'\n'/ }"
+  # The registry line is capped; the handoff is not, and it is what the next
+  # reader acts on, so it carries the officer's full reason.
+  local outcome="$headline: $reason"
+  outcome="${outcome//$'\n'/ }"
+  summary="$outcome"
   (( ${#summary} <= 200 )) || summary="${summary[1,197]}..."
   handoff="$section_dir/.governance_handoff.md"
   {
-    printf '## Outcome\n\n- %s\n\n' "$summary"
+    printf '## Outcome\n\n- %s\n\n' "$outcome"
     printf '## Decisions\n\n- The product officer decided this in a portfolio review, against the\n'
     printf '  mission and the evidence it probed, not against this section reporting.\n\n'
     printf '## Interfaces\n\n- Nothing new. Any section expecting this capability must be reconciled\n'

@@ -9,6 +9,10 @@ Read:
 
 {{CONTEXT_FILES}}
 
+The developer's changes are checked out at `{{WORKTREE}}`; run every
+validation command against that tree, by absolute path (`zsh
+{{WORKTREE}}/tests/<file>`), not against the checkout you were launched in.
+
 Review only the assigned workplan task. Build an acceptance matrix with one row
 per assigned acceptance ID: expected observation, evidence actually seen, and
 `MET` or `NOT MET`. Run the assignment's validation commands yourself and paste

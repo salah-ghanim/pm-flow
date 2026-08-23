@@ -235,10 +235,13 @@ DEFAULT_SCOPED_BASH = [
     # at its word, so every spelling of the test runner it will reach for has to
     # be here. Bare `python` was missing and cost a real review its evidence.
     "python -m pytest:*",
-    # A suite written in shell is an acceptance check too. Without these a
-    # reviewer spent its whole call inventing ways around the refusal and
-    # never ran the suite it was there to run.
-    "zsh tests/:*", "bash tests/:*", "sh tests/:*", "make test:*",
+    # A suite written in shell is an acceptance check too. A prefix rule cannot
+    # say "this suite, inside that worktree": the reviewer runs the developer's
+    # checkout, which is an absolute path beside the repository, and every
+    # spelling of that was refused until the reviewer gave up. The shells are
+    # granted as runners, the way pytest is; the access hook records what they
+    # reach, and the Edit/Write rules still bound what a scoped role may write.
+    "zsh:*", "bash:*", "sh:*", "make test:*",
     "ls:*", "cat:*", "head:*", "tail:*", "wc:*", "grep:*", "rg:*",
     # Probing the world the criteria describe: a listening port is a fact about
     # whether an external dependency is actually satisfied.

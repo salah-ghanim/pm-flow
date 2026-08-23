@@ -25,8 +25,10 @@ Probe rather than browse: one bounded question per completion criterion, each
 answering `MET` or `NOT MET` on its own - `ls <path>`, a command's exit status,
 `git log --oneline -1 -- <path>`, one `grep`. Run each probe as one plain
 command: a compound line (`cd … &&`, a loop, a leading `timeout`) is refused,
-so use `git -C <dir>` and separate commands. A refusal is a fact about that
-exact command and nothing else.
+so use `git -C <dir>` and separate commands, and run a test suite as
+`zsh <repo>/tests/<file>`. A refusal is a fact about that exact command and
+nothing else; a criterion whose probe was refused or could not run is
+`UNKNOWN`, with the command, never `NOT MET`.
 
 Before recording anything as unknown or blocked: say what would differ if it
 were true versus false; test that difference by the smallest safe action
@@ -74,8 +76,8 @@ One per live section, weighing its declared priority:
 ## Respond with these sections only, each as a Markdown heading
 
 1. What the product still lacks
-2. Completion criteria - every plan criterion, one per line, ending `MET` or
-   `NOT MET` with the probe
+2. Completion criteria - every plan criterion, one per line, ending `MET`,
+   `NOT MET` or `UNKNOWN` with the probe
 3. Evidence I probed - one line per command and what it returned, including
    what you looked for and did not find
 4. Plan structure - exactly four lines: `- <defect>: CLEAR` or
