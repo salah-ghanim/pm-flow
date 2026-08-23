@@ -105,6 +105,8 @@ Change the manifest passages and leave the rest alone.
 - worktree-isolation
 
 ### Acceptance
+
+Stable IDs `A1`–`A8` refer to the bullets below in order.
 - `pip install pm-flow` (or `uv tool install`) into a project venv provides a
   working `pm-flow` command with no file copying.
 - Two repositories can pin different pm-flow versions and both run correctly.
