@@ -1,0 +1,3 @@
+src/pm_flow/quality.py
+template/.agentic/pm_flow/artifact_quality.md
+tests/artifact_quality_test.sh
