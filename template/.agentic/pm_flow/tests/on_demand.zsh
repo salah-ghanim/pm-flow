@@ -257,7 +257,7 @@ eq "D3 the product officer adjudicates last" \
 has "D3 the seat prompt asks for proposals, not a diagnosis" \
     "$(cat "$PANEL/consultant_prompt.md")" "Give at least two proposals"
 has "D3 the seats are told they are blind to each other" \
-    "$(cat "$PANEL/consultant_prompt.md")" "cannot see their answers"
+    "$(cat "$PANEL/consultant_prompt.md")" "cannot see the others"
 has "D3 the seat prompt points at the question" \
     "$(cat "$PANEL/consultant_prompt.md")" "question.md"
 

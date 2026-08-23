@@ -235,6 +235,10 @@ DEFAULT_SCOPED_BASH = [
     # at its word, so every spelling of the test runner it will reach for has to
     # be here. Bare `python` was missing and cost a real review its evidence.
     "python -m pytest:*",
+    # A suite written in shell is an acceptance check too. Without these a
+    # reviewer spent its whole call inventing ways around the refusal and
+    # never ran the suite it was there to run.
+    "zsh tests/:*", "bash tests/:*", "sh tests/:*", "make test:*",
     "ls:*", "cat:*", "head:*", "tail:*", "wc:*", "grep:*", "rg:*",
     # Probing the world the criteria describe: a listening port is a fact about
     # whether an external dependency is actually satisfied.
@@ -605,12 +609,17 @@ build_command() {
       AGENT_ARGV+=(-- "$(/bin/cat "$PROMPT_FILE")")
       ;;
     codex)
-      # codex takes a single working root and offers no second grant, so an
-      # --extra-dir is a prompt-level boundary here rather than an enforced one,
-      # exactly as its scoped access tier already is.
       AGENT_ARGV=(codex exec --json --ephemeral --cd "$PROJECT_ROOT"
                   -c "model_reasoning_effort=$(codex_effort "$AGENT_DIFFICULTY")"
                   -o "$RAW_OUTPUT")
+      # --add-dir makes a second directory writable inside the sandbox. Under
+      # worktree isolation the working root is the section's worktree while
+      # the heartbeat, the assignment and the section state live in the main
+      # checkout; without this grant every heartbeat write was refused and a
+      # long developer run died as stalled with nothing to show for it.
+      for extra_dir in "${EXTRA_DIRS[@]}"; do
+        AGENT_ARGV+=(--add-dir "$extra_dir")
+      done
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(-m "$AGENT_MODEL")
       case "$AGENT_ACCESS" in
         # codex makes the working root writable and offers no way to narrow

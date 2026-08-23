@@ -34,19 +34,30 @@ p.write_text(json.dumps(c, indent=2))
 }
 set_config escalation.failures_before_consultant 2
 set_config escalation.cycles_before_convergence_review 0
-set_config escalation.scope_history_cycles 2
+set_config escalation.scope_history_cycles 1
 
 cat > "$FLOW/agent_exec.sh" <<'STUB'
 #!/bin/zsh -f
 set -euo pipefail
 OUT=""
+PROMPT_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output) OUT="$2"; shift 2 ;;
-    --prompt-file|--heartbeat|--label|--seat) shift 2 ;;
+    --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
+    --heartbeat|--label|--seat) shift 2 ;;
     *) shift ;;
   esac
 done
+# A manager writes the section's workplan during its scope call. The stub
+# stands in for that by retiring the scaffold marker, so the assignment it
+# returns validates against a plan rather than the template.
+if [[ "$PROMPT_FILE" == */scope_prompt.md ]]; then
+  WP="${PROMPT_FILE:h:h:h}/workplan.md"
+  if [[ -f "$WP" ]]; then
+    grep -v 'pm-flow-workplan-template' "$WP" > "$WP.tmp"; mv "$WP.tmp" "$WP"
+  fi
+fi
 [[ -z "${STUB_DIRTY:-}" ]] || printf 'developer left this behind\n' >> "$STUB_DIRTY"
 if [[ "${STUB_EXIT:-0}" != "0" ]]; then
   printf 'stub: simulated fatal dispatch failure\n' >&2
@@ -300,9 +311,9 @@ done
 PM_FLOW_STUB="$SCOPE_OK" PM_FLOW_SECTION=gamma "$FLOWSH" tick >/dev/null
 prompt="$FLOW/demo/sections/gamma/cycles/005/scope_prompt.md"
 cited="$(grep -c 'cycles/00[0-9]/result.md' "$prompt" || true)"
-eq     "F12 only the last two cycles are cited (window of 2)" "$cited" "2"
+eq     "F12 only the last cycle is cited (window of 1)" "$cited" "1"
 has    "F12 the newest cycle is included"  "$(cat "$prompt")" "cycles/004/result.md"
-absent "F12 cycle 001 is no longer carried" "$(cat "$prompt")" "cycles/001/result.md"
+absent "F12 cycle 003 is no longer carried" "$(cat "$prompt")" "cycles/003/result.md"
 has    "F12 state.md is still in the context" "$(cat "$prompt")" "state.md"
 
 printf '\n===== F17: a handoff over budget gets feedback, then gives up cleanly =====\n'

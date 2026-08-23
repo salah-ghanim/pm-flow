@@ -69,7 +69,7 @@
     "failures_before_consultant": 2,
     "max_rescue_attempts": 1,
     "cycles_before_convergence_review": 6,
-    "scope_history_cycles": 2,
+    "scope_history_cycles": 1,
     "failure_brief_cycles": 3,
     "max_maintenance_attempts": 2
   },

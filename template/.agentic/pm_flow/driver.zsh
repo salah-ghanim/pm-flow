@@ -952,14 +952,23 @@ dispatch_role() {
   local staged="${output_md}.staging"
 
   # Check the exact generated prompt before spending model budget. Structural
-  # defects fail here; size and density warnings are recorded in the adjacent
-  # manifest and are elevated by the strict CI audit.
+  # defects stop the dispatch here; size and density warnings are recorded in
+  # the adjacent manifest and are elevated by the strict CI audit.
+  #
+  # Checked explicitly: this call sits under `if` and `||` contexts in which
+  # zsh suppresses ERR_EXIT, so a bare invocation recorded the error in the
+  # manifest and dispatched anyway - the gate existed and never closed.
   local prompt_audit_args=(audit)
   [[ "${PM_FLOW_PROMPT_AUDIT_STRICT:-0}" != "1" ]] || prompt_audit_args+=(--strict)
-  python3 "$SCRIPT_DIR/prompt_quality.py" "${prompt_audit_args[@]}" \
-    --repo-root "$PROJECT_ROOT" \
-    --manifest "${prompt_file%.md}.manifest.json" \
-    "$prompt_file" >/dev/null
+  local audit_report="${prompt_file%.md}.audit.txt"
+  if ! python3 "$SCRIPT_DIR/prompt_quality.py" "${prompt_audit_args[@]}" \
+      --repo-root "$PROJECT_ROOT" \
+      --manifest "${prompt_file%.md}.manifest.json" \
+      "$prompt_file" > "$audit_report" 2>&1; then
+    fail "the $label prompt failed its quality audit; nothing was dispatched:
+$(/bin/cat "$audit_report")"
+  fi
+  rm -f "$audit_report"
 
   assert_within_budget "$section_key"
 
@@ -1216,14 +1225,14 @@ open_or_resume_cycle() {
   printf '%s\n' "$cycle_dir"
 }
 
-# Recent history only.
+# Recent history only: the previous cycle's assignment, result and review.
 #
-# This used to append assignment + result + review for every prior cycle
-# forever, so the scope context grew linearly and the scope call's cost grew
-# with it. `state.md` is the manager's own durable summary and is already in the
-# scope context; that is what the older cycles are for.
+# `workplan.md` and `state.md` are the durable record and are always in the
+# scope context; anything older than the last cycle has to be summarised there,
+# so the window defaults to one and the scope call's cost stops growing with
+# the section's age.
 scope_history_window() {
-  config_positive_int escalation scope_history_cycles 2 1
+  config_positive_int escalation scope_history_cycles 1 1
 }
 
 cycle_history_files() {
@@ -1520,7 +1529,7 @@ commit_section_state() {
     -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
     -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
     commit --quiet --no-verify \
-    -m "$section_key: accepted cycle $cycle_number (state and handoff)" \
+    -m "chore($section_key): accepted cycle $cycle_number (state and handoff)" \
     -- "$section_dir" >/dev/null 2>&1 || true
   return 0
 }
@@ -1538,7 +1547,7 @@ integrate_section_work() {
   tree_path="$(section_worktree_path "$section_key")" || return 0
   [[ -d "$tree_path" ]] || return 0
   commit_section_worktree "$tree_path" \
-    "$section_key: accepted cycle $cycle_number" || true
+    "chore($section_key): accepted cycle $cycle_number" || true
   merge_status=0
   with_repo_git_lock merge_section_worktree "$section_dir" || merge_status=$?
   with_repo_git_lock commit_section_state "$section_dir" "$section_key" "$cycle_number"
@@ -1998,7 +2007,7 @@ merge_rescue_branch() {
     return 1
   fi
   if ! git_worktree merge --no-ff --no-edit \
-      -m "merge($worktree_key): accepted rescue work" "$branch" >/dev/null 2>&1; then
+      -m "chore($worktree_key): merge accepted rescue work" "$branch" >/dev/null 2>&1; then
     git_worktree merge --abort >/dev/null 2>&1 || true
     printf 'the main working tree has changes %s would overwrite; nothing merged\n' "$branch" \
       > "$section_dir/merge_blocked.txt"
@@ -2036,7 +2045,8 @@ do_complete() {
   cycle_dir="$(cycle_dir_for "$section_dir" "$newest")"
   claim_step "$cycle_dir/.claim-complete"
 
-  context="$(context_bullet_list "$section_dir/brief.md" "$section_dir/state.md" "$cycle_dir/scope.md")
+  context="$(context_bullet_list "$section_dir/brief.md" "$section_dir/workplan.md" \
+    "$section_dir/state.md" "$cycle_dir/scope.md")
 $(cycle_history_files "$section_dir" "$newest" "$(scope_history_window)")"
   prompt="$cycle_dir/handoff_prompt.md"
   compose_role_task pm "$(task_file section_handoff)" \
@@ -2057,7 +2067,7 @@ $report"
     {
       printf '\n---\n\n# Your previous handoff was rejected\n\n'
       printf 'You already wrote this handoff once and it did not fit:\n\n%s\n\n' "$report"
-      printf 'Write it again, shorter, with the same five headings and nothing else.\n'
+      printf 'Write it again, shorter, with the same six headings and nothing else.\n'
     } >> "$prompt"
   done
 
@@ -2325,7 +2335,7 @@ sync_section_worktree() {
   git -C "$tree_path" \
     -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
     -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
-    merge --no-edit -m "sync: bring the section up to $base" "$base" >/dev/null 2>&1 || {
+    merge --no-edit -m "chore($(basename "$tree_path")): sync with $base" "$base" >/dev/null 2>&1 || {
       git -C "$tree_path" merge --abort >/dev/null 2>&1 || true
     }
   return 0
@@ -2388,7 +2398,7 @@ merge_section_worktree() {
     return 1
   fi
   if ! git_worktree merge --no-ff --no-edit \
-      -m "merge($section_key): accepted work from $branch" "$branch" >/dev/null 2>&1; then
+      -m "chore($section_key): merge accepted work from $branch" "$branch" >/dev/null 2>&1; then
     # merge-tree said it was clean, so this is a local-changes refusal: git
     # stops before writing anything rather than overwrite an edit in progress.
     git_worktree merge --abort >/dev/null 2>&1 || true
@@ -3562,8 +3572,9 @@ cmd_proposals() {
 
   local consultant_persona="$panel_dir/consultant_prompt.md"
   {
+    printf '<!-- pm-flow-prompt version=2 role=consultant phase=consultant_panel commit_owner=none -->\n\n'
     compose_role_prompt consultant
-    printf '\n---\n\n# The question\n\n'
+    printf '\n---\n\n# Task: answer the panel question\n\n'
     printf 'Panel: %s\n\n' "$name"
     printf 'Read `%s` for the question you are answering' \
       "$(repo_relative_path "$panel_dir/question.md")"
@@ -3571,9 +3582,7 @@ cmd_proposals() {
       printf ', and `%s` for what the product is for' "$(repo_relative_path "$STATE_DIR/plan.md")"
     fi
     printf '.\n\n'
-    printf 'You are one seat of a panel answering that question at the same time as\n'
-    printf 'the others. You cannot see their answers and they cannot see yours, so\n'
-    printf 'answer the question you were asked rather than covering every position.\n\n'
+    printf 'Answer the question you were asked rather than covering every position.\n\n'
     printf 'Respond with these sections only, each as a Markdown heading:\n'
     printf '1. What the question turns on\n2. Prior art considered\n3. Proposals\n'
     printf '4. What would prove each one\n5. Recommendation\n\n'

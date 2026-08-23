@@ -440,8 +440,9 @@ cmd_consult_panel() {
 
   local consultant_persona="$panel_dir/consultant_prompt.md"
   {
+    printf '<!-- pm-flow-prompt version=2 role=consultant phase=consultant_panel commit_owner=none -->\n\n'
     compose_role_prompt consultant
-    printf '\n---\n\n# The section that failed\n\n'
+    printf '\n---\n\n# Task: propose a path for the section that failed\n\n'
     printf 'Section: %s\n\n' "$(basename "$section_dir")"
     printf 'Read `%s` for the section brief and `%s` for the failure history.\n\n' \
       "$(repo_relative_path "$section_dir/brief.md")" \
@@ -1050,6 +1051,16 @@ print("\n".join(out).rstrip())
 '
 }
 
+# An assignment binds to exactly one workplan task. The ID is read from the
+# first line under `## Workplan task`, however the manager spelled it - bare,
+# in backticks, bold, or followed by the task's title - because the workplan's
+# own headings read `## Task T3 — …` and a manager that echoed that form was
+# being sent back as UNPARSED for the punctuation. Two IDs on that line is
+# still a refusal: one cycle, one task.
+#
+# A workplan that still carries the scaffold marker has not been written, so
+# the ID it would validate against is the placeholder's; that is refused with
+# the reason, rather than handing a developer "Replace this line".
 validate_scoped_assignment() {
   local assignment="$1"
   local workplan="$2"
@@ -1060,16 +1071,29 @@ import sys
 from pathlib import Path
 
 text = os.environ["ASSIGNMENT_TEXT"]
-match = re.search(
-    r"(?im)^##\s+Workplan task\s*$\s*^\s*(?:[-*]\s*)?`?(T[0-9]+)`?\s*$",
-    text,
-)
-if not match:
-    raise SystemExit("assignment needs a Workplan task heading containing one T<number> ID")
-task_id = match.group(1)
+heading = re.search(r"(?im)^##\s+Workplan task\s*:?\s*$", text)
+if not heading:
+    raise SystemExit("assignment needs a `## Workplan task` heading naming one T<number> ID")
+body = text[heading.end():]
+next_heading = re.search(r"(?m)^##\s", body)
+body = body[:next_heading.start()] if next_heading else body
+lines = [line.strip() for line in body.splitlines() if line.strip()]
+if not lines:
+    raise SystemExit("the Workplan task heading is empty; it needs one T<number> ID")
+ids = re.findall(r"\bT[0-9]+\b", lines[0])
+if len(ids) != 1:
+    raise SystemExit(
+        "the Workplan task line must name exactly one T<number> ID, got: " + lines[0]
+    )
+task_id = ids[0]
 path = Path(sys.argv[1])
 workplan_text = path.read_text() if path.is_file() else ""
-if not re.search(rf"(?im)^#{{2,4}}\s+(?:Task\s+)?{re.escape(task_id)}(?:\s|[-—:])", workplan_text):
+if "pm-flow-workplan-template" in workplan_text:
+    raise SystemExit(
+        "workplan.md is still the generated scaffold; write the section's workplan "
+        "and delete the scaffold marker line before assigning"
+    )
+if not re.search(rf"(?im)^#{{2,4}}\s+(?:Task\s+)?{re.escape(task_id)}(?:\s|[-—:]|$)", workplan_text):
     raise SystemExit(f"{task_id} is not defined as a task heading in workplan.md")
 PY
 }
@@ -1096,6 +1120,11 @@ cmd_prompt_audit() {
     --repo-root "$PROJECT_ROOT" "$target"
 }
 
+# The seven legacy headings are always required. A brief in the full shape -
+# recognised by its `Deliverables` heading - is held to the whole contract:
+# every heading present, and every Acceptance bullet opening with its stable
+# ID, because a workplan maps tasks to those IDs and a bullet without one
+# cannot be covered or retired visibly.
 validate_section_brief() {
   local brief="$1"
   assert_matches "$brief" '(?im)^#{1,6}\s+Objective\s*$' "section Objective heading"
@@ -1105,6 +1134,30 @@ validate_section_brief() {
   assert_matches "$brief" '(?im)^#{1,6}\s+Dependencies\s*$' "section Dependencies heading"
   assert_matches "$brief" '(?im)^#{1,6}\s+Acceptance\s*$' "section Acceptance heading"
   assert_matches "$brief" '(?im)^#{1,6}\s+Rejection conditions\s*$' "section Rejection conditions heading"
+  local problems
+  problems="$(BRIEF_TEXT="$brief" python3 - <<'PY'
+import os
+import re
+
+text = os.environ["BRIEF_TEXT"]
+problems = []
+if re.search(r"(?im)^#{1,6}\s+Deliverables\s*$", text):
+    for heading in ("Current baseline", "User-visible scenarios", "Interfaces produced",
+                    "Interfaces consumed", "Non-goals", "Constraints and fixed decisions",
+                    "Open questions"):
+        if not re.search(rf"(?im)^#{{1,6}}\s+{re.escape(heading)}\s*$", text):
+            problems.append(f"a full-shape brief needs the {heading!r} heading")
+    block = re.search(r"(?ims)^#{1,6}\s+Acceptance\s*$(.*?)(?=^#{1,6}\s|\Z)", text)
+    bullets = re.findall(r"(?m)^\s*[-*]\s+(.*)$", block.group(1)) if block else []
+    if not bullets:
+        problems.append("Acceptance has no bullets")
+    for bullet in bullets:
+        if not re.match(r"`?A[0-9]+`?\s*[:.\u2014-]", bullet):
+            problems.append("Acceptance bullet lacks a stable ID such as `A1:` - " + bullet[:60])
+print("\n".join(problems))
+PY
+)"
+  [[ -z "$problems" ]] || fail "$problems"
 }
 
 # A section states what the product loses without it, at the moment it is cut.
@@ -1517,11 +1570,16 @@ cmd_validate() {
   claude --version
 }
 
+# The scaffold a new section starts from. The marker on its second line is
+# what the assignment validator checks for: a manager writes the real workplan
+# over this and deletes the marker, and until that has happened no assignment
+# is accepted against it.
 write_workplan_template() {
   local path="$1"
   local section_name="$2"
   {
-    printf '# %s workplan\n\n' "$section_name"
+    printf '# %s workplan\n' "$section_name"
+    printf '<!-- pm-flow-workplan-template: replace every placeholder below, then delete this line -->\n\n'
     printf '## Design summary\n\n- Replace this line with the chosen approach and the existing components it reuses.\n\n'
     printf '## Interfaces and data changes\n\n- None identified yet.\n\n'
     printf '## Task T1 — Decompose before assignment\n\n'
@@ -1816,6 +1874,12 @@ main() {
     shift || true
   done
   set -- "${args[@]}"
+
+  # Help needs no project; asking for one first turned `help` into an error in
+  # any directory that was not already an install.
+  case "${1:-}" in
+    -h|--help|help|"") usage; return 0 ;;
+  esac
 
   initialize_project_paths
 

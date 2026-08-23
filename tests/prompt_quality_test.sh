@@ -77,3 +77,30 @@ if python3 "$AUDITOR" audit --strict "$QA_ROOT/duplicated.md" > "$QA_ROOT/duplic
 fi
 grep -q duplicate-prose "$QA_ROOT/duplicate.out" || fail "duplication was not reported"
 printf 'PASS: strict mode treats duplicated prose as drift\n'
+
+# The shipped prompts, as the engine actually composes and dispatches them.
+# The fixtures above prove the rules; this proves the templates obey them. The
+# stub suite drives every section phase without model spend and leaves each
+# generated prompt beside its manifest, so the audit runs on the exact text a
+# role would receive.
+GENERATED="$QA_ROOT/generated"
+zsh "$REPO_ROOT/template/.agentic/pm_flow/tests/transitions.zsh" "$GENERATED/transitions" \
+  > "$QA_ROOT/transitions.log" 2>&1 || fail "the transitions suite failed:
+$(tail -n 20 "$QA_ROOT/transitions.log")"
+zsh "$REPO_ROOT/template/.agentic/pm_flow/tests/on_demand.zsh" "$GENERATED/on_demand" \
+  > "$QA_ROOT/on_demand.log" 2>&1 || fail "the on_demand suite failed:
+$(tail -n 20 "$QA_ROOT/on_demand.log")"
+zsh "$REPO_ROOT/template/.agentic/pm_flow/tests/recovery.zsh" "$GENERATED/recovery" \
+  > "$QA_ROOT/recovery.log" 2>&1 || fail "the recovery suite failed:
+$(tail -n 20 "$QA_ROOT/recovery.log")"
+generated_prompts=("${(@f)$(find "$GENERATED" -name '*_prompt.md' -o -name 'prompt.md' | sort)}")
+(( ${#generated_prompts[@]} >= 6 )) || fail "the stub suites generated too few prompts to audit"
+for phase in scope develop review handoff consultant adjudication analysis; do
+  printf '%s\n' "${generated_prompts[@]}" | grep -q "$phase" || \
+    fail "no generated $phase prompt to audit"
+done
+if ! python3 "$AUDITOR" audit --strict "${generated_prompts[@]}" > "$QA_ROOT/generated.out" 2>&1; then
+  fail "a shipped prompt, as composed, fails the strict audit:
+$(grep -v '^PASS' "$QA_ROOT/generated.out")"
+fi
+printf 'PASS: every composed shipped prompt (%d) is clean under strict audit\n' "${#generated_prompts[@]}"

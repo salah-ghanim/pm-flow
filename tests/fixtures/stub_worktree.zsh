@@ -11,6 +11,19 @@
 prompt="${@[-1]}"
 emit() { python3 -c 'import json,sys; print(json.dumps({"is_error":False,"result":sys.argv[1],"session_id":""}))' "$1"; }
 
+# A manager writes the section's workplan during its scope call. The stand-in
+# does the equivalent by retiring the scaffold marker on the workplan the
+# prompt names, so the assignment it returns validates against a plan rather
+# than the template.
+retire_workplan_scaffold() {
+  local wp
+  wp="$(printf '%s\n' "$prompt" | sed -n 's/^- *`\{0,1\}\([^`]*workplan\.md\)`\{0,1\} *$/\1/p' | head -n 1)"
+  [[ -n "$wp" ]] || return 0
+  [[ "$wp" == /* ]] || wp="${PROJECT_ROOT:-$PWD}/$wp"
+  [[ -f "$wp" ]] || return 0
+  grep -v 'pm-flow-workplan-template' "$wp" > "$wp.tmp" && mv "$wp.tmp" "$wp"
+}
+
 state_dir="${PM_STUB_STATE:-${TMPDIR:-/tmp}}"
 mkdir -p "$state_dir"
 
@@ -61,6 +74,7 @@ case "$prompt" in
   *"Task: review the portfolio"*)
     emit_portfolio_review ;;
   *"Task: scope the next assignment"*)
+    retire_workplan_scaffold
     if [[ "$(bump "scope-$section_key")" -gt 1 ]]; then
       emit "## Where the section stands
 The file is written.

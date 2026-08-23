@@ -425,8 +425,12 @@ metrics. Audit a prompt or the project history directly with:
 ```
 
 Structural errors such as unresolved placeholders, false runtime facts, and a
-commit-owner contradiction always stop dispatch. Strict mode also promotes
-size, duplication, and task-density warnings to failures.
+commit-owner contradiction stop the dispatch before any model is called; the
+report is printed and the run ends, because a defective template fails every
+later dispatch the same way. Strict mode also promotes size, duplication, and
+task-density warnings to failures. `tests/prompt_quality_test.sh` in the
+checkout runs the stub suites and audits every prompt they composed in strict
+mode, so a template change that breaks a composed prompt fails there.
 
 ## Sections by hand
 
@@ -437,11 +441,13 @@ The product officer normally creates sections, but you can add one directly:
 ./.agentic/pm_flow/pm_flow.sh list-sections
 ```
 
-A legacy brief needs the headings `Objective`, `Scope`, `Priority`, `Owned
-paths`, `Dependencies`, `Acceptance`, and `Rejection conditions`. New briefs
-also state `Current baseline`, `Deliverables`, `User-visible scenarios`,
-interfaces produced and consumed, `Non-goals`, fixed decisions, and open
-questions. Acceptance bullets carry stable IDs such as `A1`.
+A brief needs the headings `Objective`, `Scope`, `Priority`, `Owned paths`,
+`Dependencies`, `Acceptance`, and `Rejection conditions`. A brief in the full
+shape also states `Current baseline`, `Deliverables`, `User-visible scenarios`,
+`Interfaces produced`, `Interfaces consumed`, `Non-goals`, `Constraints and
+fixed decisions`, and `Open questions`; once it has a `Deliverables` heading
+every one of those is required, and every Acceptance bullet must open with its
+ID, `A1:`. The product officer's decomposition emits the full shape.
 `Priority` is one bullet: `must-have` or `nice-to-have`, then one line naming
 what the product loses without this section. Owned paths must be repo-relative
 and cannot overlap a section that is still live, because sections may run
@@ -449,10 +455,13 @@ concurrently. Each dependency is an existing section key or a
 repo-relative path to its `handoff.md`; the dependency section must be `done`
 before the dependent section becomes actionable.
 
-`init-section` creates `workplan.md`. Before its first assignment the manager
-replaces the template with ordered `T<number>` tasks mapped to the brief's
-acceptance IDs. One cycle may select exactly one of those tasks. `state.md` is
-the current evidence ledger, not a second copy of the plan.
+`init-section` creates `workplan.md` as a scaffold with a marker line. Before
+its first assignment the manager replaces the scaffold with ordered `T<number>`
+tasks mapped to the brief's acceptance IDs and deletes the marker; an
+assignment against a workplan that still carries it is refused as `UNPARSED`
+with the reason. One cycle selects exactly one task, named under
+`## Workplan task` in any spelling. `state.md` is the current evidence ledger,
+not a second copy of the plan.
 
 ## Layout
 

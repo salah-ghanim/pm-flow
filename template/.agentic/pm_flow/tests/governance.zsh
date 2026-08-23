@@ -46,13 +46,24 @@ cat > "$FLOW/agent_exec.sh" <<'STUB'
 #!/bin/zsh -f
 set -euo pipefail
 OUT=""
+PROMPT_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output) OUT="$2"; shift 2 ;;
-    --prompt-file|--heartbeat|--label|--seat) shift 2 ;;
+    --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
+    --heartbeat|--label|--seat) shift 2 ;;
     *) shift ;;
   esac
 done
+# A manager writes the section's workplan during its scope call. The stub
+# stands in for that by retiring the scaffold marker, so the assignment it
+# returns validates against a plan rather than the template.
+if [[ "$PROMPT_FILE" == */scope_prompt.md ]]; then
+  WP="${PROMPT_FILE:h:h:h}/workplan.md"
+  if [[ -f "$WP" ]]; then
+    grep -v 'pm-flow-workplan-template' "$WP" > "$WP.tmp"; mv "$WP.tmp" "$WP"
+  fi
+fi
 python3 -c '
 import json, sys
 from pathlib import Path

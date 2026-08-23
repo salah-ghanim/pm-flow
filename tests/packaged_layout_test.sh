@@ -391,7 +391,7 @@ printf 'PASS: project data is read from the invoked repository\n'
 prompt_output="$(cd "$FIXTURE" && "$PM_FLOW" role-prompt pm)"
 assert_contains "$prompt_output" "Project Manager" "role-prompt applies the packaged generic title"
 # The persona wraps, so the label lands at the start of its own line.
-assert_contains "$prompt_output" "software. You own that section end to end." \
+assert_contains "$prompt_output" "software project. You own that section end to end;" \
   "role-prompt applies the packaged generic label"
 assert_contains "$prompt_output" \
   "The domain has not been specified, so do not assume one." \
@@ -488,6 +488,11 @@ CAPTURED_PROMPT="$TEST_ROOT/dispatched_prompt.txt"
 /bin/cat > "$TEST_ROOT/agent-bin/claude" <<'STUB'
 #!/bin/zsh -f
 printf '%s' "${@[-1]}" > "$PM_FLOW_CAPTURED_PROMPT"
+# A manager writes the workplan during scope; the stand-in retires the scaffold
+# marker on the workplan the prompt names so its assignment validates.
+wp="$(printf '%s\n' "${@[-1]}" | sed -n 's/^- *`\{0,1\}\([^`]*workplan\.md\)`\{0,1\} *$/\1/p' | head -n 1)"
+[[ "$wp" == /* || -z "$wp" ]] || wp="${PROJECT_ROOT:-$PWD}/$wp"
+[[ -z "$wp" || ! -f "$wp" ]] || { grep -v 'pm-flow-workplan-template' "$wp" > "$wp.tmp"; mv "$wp.tmp" "$wp"; }
 python3 -c 'import json, sys; print(json.dumps(
     {"is_error": False, "result": sys.argv[1], "session_id": ""}))' \
 '## Where the section stands

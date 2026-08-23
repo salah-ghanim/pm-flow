@@ -1479,7 +1479,7 @@ assert_file_contains "$WT_REPO/src/beta.txt" "written by beta" \
   "a second section merged back without colliding with the first"
 [[ "$(git -C "$WT_REPO" rev-parse HEAD)" != "$WT_BASE_COMMIT" ]] || \
   fail "the base branch did not advance, so nothing was actually merged"
-assert_contains "$(git -C "$WT_REPO" log --oneline -20)" "merge(alpha)" \
+assert_contains "$(git -C "$WT_REPO" log --oneline -20)" "chore(alpha): merge accepted work" \
   "the merge is recorded on the base branch"
 
 # Finishing a section gives its checkout back, and takes no work with it: the

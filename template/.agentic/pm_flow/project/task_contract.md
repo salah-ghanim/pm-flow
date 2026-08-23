@@ -61,9 +61,12 @@ Rescue engineer:
 
 ## Section definition
 
-A section brief is a stable outcome contract. It must contain these Markdown
-headings (the first seven remain accepted for legacy briefs; new briefs use the
-full shape):
+A section brief is a stable outcome contract, not a record of how it came to
+be: history belongs in the cycle record and the portfolio log. It contains
+these Markdown headings. A brief written before this shape existed may carry
+only `Objective`, `Scope`, `Priority`, `Owned paths`, `Dependencies`,
+`Acceptance` and `Rejection conditions`; a brief with a `Deliverables` heading
+is held to the whole set.
 
 ```markdown
 ## Objective
@@ -83,9 +86,11 @@ full shape):
 ## Open questions
 ```
 
-Each Acceptance bullet starts with a stable ID such as `A1`. IDs are never
-renumbered after work begins; a visibly retired criterion remains traceable.
-The brief says what must be true, not the sequence of code edits.
+Each Acceptance bullet starts with its stable ID, `A1:` and so on, followed by
+an observable outcome in the running system and how it is checked. IDs are
+never renumbered after work begins; a visibly retired criterion keeps its ID.
+"The suite passes" is not a criterion; the command and its expected result
+are.
 
 `Priority` is one bullet: `must-have` or `nice-to-have`, then one line naming
 what the product loses without this section. It belongs to the product officer;
@@ -112,15 +117,27 @@ path to its `handoff.md`. Use `- None.` when there are none.
 - risks and rollback
 - an acceptance coverage table mapping every brief ID to one or more tasks
 
-One cycle assignment selects exactly one eligible workplan task and carries its
-ID. It may narrow that task but cannot combine task IDs or invent work absent
-from the workplan. Update the workplan when evidence changes the decomposition;
-delete superseded prose instead of preserving multiple truths.
+A new section starts from a generated scaffold that carries a marker line; the
+manager replaces the scaffold and deletes the marker before the first
+assignment, and the driver refuses an assignment against a workplan that still
+carries it.
+
+One cycle assignment selects exactly one eligible workplan task and names its
+ID on the line under `## Workplan task`, in any spelling - `T3`, `` `T3` ``,
+`T3 — title`. It may narrow that task but cannot combine task IDs or invent work
+absent from the workplan. Update the workplan when evidence changes the
+decomposition; delete superseded prose instead of preserving multiple truths.
 
 `state.md` is an evidence ledger, not another plan. It contains only the current
 task, completed task and acceptance IDs with observations, active decisions,
-observed blockers, and the next eligible task. Cycle files remain immutable
-history.
+observed blockers, and the next eligible task. The reviewer records an accepted
+task there before it answers; the scope call reads it, with the previous
+cycle's assignment, result and review, and nothing older. Cycle files remain
+immutable history.
+
+A fact lives in one file. The brief states the contract, the workplan the
+tasks, the state the evidence, the handoff the claim upward; none restates
+another.
 
 ## What counts as progress
 

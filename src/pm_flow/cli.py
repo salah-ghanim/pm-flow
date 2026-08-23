@@ -54,10 +54,12 @@ def main(argv=None) -> int:
 
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__.strip())
-        print("\\nUsage:\\n  pm-flow paths [--project <key>] [--shell]"
-              "\\n  pm-flow version"
-              "\\n  pm-flow <command> [args...]   anything else goes to the engine")
-        return 0
+        print("\nUsage:\n  pm-flow paths [--project <key>] [--shell]"
+              "\n  pm-flow version"
+              "\n  pm-flow <command> [args...]   anything else goes to the engine\n")
+        # The engine's own command list follows, so one `help` shows both
+        # halves rather than sending the reader to a second file.
+        return subprocess.call(["zsh", str(_engine_script()), "help"])
 
     if argv[0] == "paths":
         return cmd_paths(argv[1:])

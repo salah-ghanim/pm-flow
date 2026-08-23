@@ -9,7 +9,8 @@ from pathlib import Path
 text = Path(sys.argv[1]).read_text()
 out = []
 for name in ("markdown_verdict_parse", "extract_markdown_decision",
-             "extract_markdown_decision_line", "extract_assignment_sections"):
+             "extract_markdown_decision_line", "extract_assignment_sections",
+             "validate_scoped_assignment"):
     m = re.search(rf"^{name}\(\) \{{\n(.*?)^\}}\n", text, re.S | re.M)
     out.append(m.group(0))
 sys.stdout.write("\n".join(out))
@@ -63,6 +64,40 @@ printf 'line=%s\n' "$line"
 
 printf '\n--- assignment extraction (F20) ---\n'
 extract_assignment_sections $'## Where the section stands\n\nEditorial the developer must never see.\n\n## Assignment\n\nWrite the probe script.\n\n## Acceptance\n\n- `.venv/bin/python -m pytest -q tests/x.py` exits 0\n\n## Rejection conditions\n\n- The probe is mocked.\n\n## Decision\n\nASSIGN\n'
+
+
+# The assignment-to-workplan binding. One task ID per assignment, spelled any
+# way a manager would spell it; a scaffold workplan is refused with the reason.
+WP="$(mktemp -t pm-flow-wp.XXXXXX)"
+printf '# x workplan\n\n## Task T1 — Build it\n\n- Status: pending\n\n## Task T2 — Ship it\n' > "$WP"
+SCAFFOLD="$(mktemp -t pm-flow-wp.XXXXXX)"
+printf '# x workplan\n<!-- pm-flow-workplan-template: replace -->\n\n## Task T1 — Decompose\n' > "$SCAFFOLD"
+bind() {
+  local label="$1" expect="$2" line="$3" workplan="$4" got reason
+  if reason="$(validate_scoped_assignment "## Workplan task
+
+$line
+
+## Assignment
+x" "$workplan" 2>&1)"; then got=ACCEPT; else got=REJECT; fi
+  if [[ "$got" == "$expect" ]]; then
+    printf 'PASS  %-46s -> %s\n' "$label" "$got"; (( pass += 1 ))
+  else
+    printf 'FAIL  %-46s -> %s (expected %s) %s\n' "$label" "$got" "$expect" "$reason"; (( failn += 1 ))
+  fi
+}
+bind "bare id"                       ACCEPT 'T1' "$WP"
+bind "backticked id"                 ACCEPT '`T1`' "$WP"
+bind "bulleted id"                   ACCEPT '- T1' "$WP"
+bind "id with title"                 ACCEPT 'T1 — Build it' "$WP"
+bind "Task prefix"                   ACCEPT 'Task T1' "$WP"
+bind "bold id"                       ACCEPT '**T1**' "$WP"
+bind "id with colon"                 ACCEPT 'T1: Build it' "$WP"
+bind "undefined id"                  REJECT 'T9' "$WP"
+bind "two ids"                       REJECT 'T1 and T2' "$WP"
+bind "empty"                         REJECT '' "$WP"
+bind "scaffold workplan"             REJECT 'T1' "$SCAFFOLD"
+rm -f "$WP" "$SCAFFOLD"
 
 printf '\ntotals: pass=%d fail=%d\n' "$pass" "$failn"
 [[ "$failn" == 0 ]]

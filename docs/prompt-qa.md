@@ -16,7 +16,11 @@ count and size, and all findings.
 
    It fails unresolved placeholders, false history claims, commit-owner
    contradictions, model-family assumptions, leaked incident stories, missing
-   phase facts, and excessive copied prose in strict mode.
+   phase facts, and excessive copied prose in strict mode - first on fixtures
+   that prove each rule, then on every prompt the stub suites compose from the
+   shipped templates, audited in strict mode. A template edit that pushes a
+   composed prompt over budget or into a contradiction fails here, not in a
+   live dispatch.
 
 2. Deterministic state-machine gate on every change:
 
@@ -53,7 +57,8 @@ count and size, and all findings.
 
 - No error or warning findings in manifests created by the canary.
 - Scope assignments carry one real `T<number>` from `workplan.md` and name
-  implementation paths, existing components, acceptance IDs, and commands.
+  implementation paths, existing components, acceptance IDs, and commands. The
+  workplan no longer carries the scaffold marker.
 - The task portion is at least 35% of prompt words; context is no more than
   eight files or roughly 9,000 words; phase word budgets stay green.
 - Responses do not copy prompt policy back as their main content. The standing

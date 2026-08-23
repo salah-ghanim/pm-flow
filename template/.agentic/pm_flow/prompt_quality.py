@@ -18,18 +18,22 @@ PAIR_RE = re.compile(r"([a-z_]+)=([^\s]+)")
 PLACEHOLDER_RE = re.compile(r"{{[A-Z0-9_]+}}")
 TASK_RE = re.compile(r"(?im)^#\s+Task:\s+")
 
+# Whole composed prompt: persona, domain delta, task, and the rendered context
+# list. Set just above what the shipped layers compose to, so growth is a
+# finding rather than a surprise.
 PHASE_WORD_BUDGETS = {
-    "section_scope": 1050,
-    "developer_assignment": 900,
-    "section_review": 1050,
-    "section_handoff": 900,
-    "section_analysis": 1050,
-    "project_decomposition": 1500,
-    "portfolio_review": 1700,
-    "convergence_review": 1100,
-    "section_maintenance": 1100,
-    "section_rescue": 1000,
-    "consultant_panel_adjudication": 1200,
+    "section_scope": 850,
+    "developer_assignment": 650,
+    "section_review": 750,
+    "section_handoff": 700,
+    "section_analysis": 750,
+    "project_decomposition": 950,
+    "portfolio_review": 1100,
+    "convergence_review": 700,
+    "section_maintenance": 700,
+    "section_rescue": 700,
+    "consultant_panel_adjudication": 900,
+    "consultant_panel": 600,
 }
 
 
@@ -100,11 +104,17 @@ def audit_text(text: str, path: Path, repo_root: Path | None) -> dict[str, objec
             "prompt has no pm-flow runtime metadata",
         ))
 
-    lower = text.lower()
+    # Compared on whitespace-folded, punctuation-stripped text: a fact that
+    # wraps across a line or sits in backticks is the same fact.
+    lower = " ".join(re.sub(r"[`*_]", "", text.lower()).split())
     forbidden = {
         "every-history": r"history (?:above )?(?:includes|contains) every previous",
         "model-family-assumption": r"share a model family",
-        "historical-incident": r"\bthis used to\b|\bcodex-usage was accepted\b",
+        "historical-incident": (
+            r"\bthis used to\b|\bused to (?:be|require|append|ship|ask|mean)\b"
+            r"|\bcodex-usage\W+was accepted\b|\bcost a project\b|\bonce waited on\b"
+            r"|\bhave each cost\b"
+        ),
     }
     for code, pattern in forbidden.items():
         if re.search(pattern, lower):
@@ -115,9 +125,10 @@ def audit_text(text: str, path: Path, repo_root: Path | None) -> dict[str, objec
 
     if meta.get("commit_owner") == "driver":
         role_commit = re.search(
-            r"(?im)(?:^|[.!]\s+)(?:you|the (?:manager|reviewer|developer))\s+"
-            r"(?:must\s+|should\s+|will\s+)?commit\b|\bcommit after every accepted",
-            text,
+            r"\b(?:you|the (?:manager|reviewer|developer))\s+"
+            r"(?:must\s+|should\s+|will\s+|may\s+|can\s+)?commit\b"
+            r"|\bcommit after every accepted",
+            lower,
         )
         if role_commit:
             findings.append(Finding(
@@ -157,6 +168,8 @@ def audit_text(text: str, path: Path, repo_root: Path | None) -> dict[str, objec
         "section_review": ("acceptance matrix", "drift", "validation commands"),
     }
     missing = [term for term in requirements.get(phase, ()) if term not in lower]
+    # `lower` is whitespace-folded above, so a fact wrapped across a line
+    # boundary in the template still counts as present.
     if missing:
         findings.append(Finding(
             "error", "missing-task-facts",

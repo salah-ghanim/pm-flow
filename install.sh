@@ -57,6 +57,7 @@ COPIED_ENGINE_FILES=(
   store.py
   telemetry.py
   trace_export.py
+  prompt_quality.py
   watch.py
   upgrade.py
   requirements-telemetry.txt
