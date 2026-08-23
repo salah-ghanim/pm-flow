@@ -55,7 +55,10 @@ def classify(rel: str) -> str:
     if rel == ".agentic/pm_flow/config.json":
         return "seed"
     # Written only if absent; a repository that already has one keeps it.
-    if rel == "CLAUDE.md":
+    # Both instructions files are rendered from their templates, so classing
+    # them engine would let the post-render engine sync copy the raw template,
+    # placeholders and all, back over what the installer just rendered.
+    if rel in {"CLAUDE.md", "AGENTS.md"}:
         return "seed"
     # The installer appends a line per project workspace, so this file is
     # expected to differ from what shipped. Treating it as engine would report

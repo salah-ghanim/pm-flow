@@ -132,6 +132,10 @@ prefetch_templates() {
     "template/.agentic/pm_flow/project/project_state/sections.md"
     "template/.agentic/pm_flow/project/project.json"
     "template/.agentic/pm_flow/project/task_contract.md"
+    # Both instructions files are rendered, so the manifest classes them `seed`
+    # and the manifest-derived list below - which only carries `engine` - will
+    # not add them. They are named here or the render cannot find them.
+    "template/AGENTS.md"
     "template/CLAUDE.md"
     "MANIFEST"
   )
@@ -444,11 +448,18 @@ backup_pre_section_prompt() {
   fi
 }
 
-merge_claude_rules() {
-  local claude_path="$1"
-  local rendered_rules_path="$2"
-  command -v python3 >/dev/null 2>&1 || fail "python3 is required to merge pm-flow rules into CLAUDE.md"
-  python3 - "$claude_path" "$rendered_rules_path" <<'PY'
+# Replace pm-flow's managed block inside a file the repository also owns,
+# leaving everything outside the markers exactly as it was.
+#
+# Named for what it does rather than for the file it used to be the only caller
+# of: the body was already file-neutral, and there are two instructions files
+# now. A second merger would be a second set of marker rules to keep in step.
+merge_managed_block() {
+  local target_path="$1"
+  local rendered_block_path="$2"
+  command -v python3 >/dev/null 2>&1 || \
+    fail "python3 is required to merge the pm-flow managed block into $target_path"
+  python3 - "$target_path" "$rendered_block_path" <<'PY'
 from pathlib import Path
 import os
 import sys
@@ -458,7 +469,7 @@ rendered = Path(sys.argv[2]).read_text().strip()
 begin = "<!-- pm-flow:begin -->"
 end = "<!-- pm-flow:end -->"
 if begin not in rendered or end not in rendered:
-    raise SystemExit("rendered CLAUDE rules are missing managed-block markers")
+    raise SystemExit(f"rendered block for {target.name} is missing managed-block markers")
 
 current = target.read_text() if target.is_file() else ""
 if begin in current or end in current:
@@ -476,6 +487,54 @@ temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
 temp.write_text(merged)
 os.replace(temp, target)
 PY
+}
+
+# One instructions file, installed the same way whatever it is called.
+#
+# `AGENTS.md` is the file agents look for and carries the router and the
+# invariants in full; `CLAUDE.md` is a managed pointer that imports it. Both are
+# rendered from a template, both may already exist in the repository, and both
+# have to survive that - so this is one procedure rather than two that drift.
+#
+# Surviving means: back the file up once, then merge the managed block into it
+# in place. Whatever the repository already told its agents is still there,
+# outside the markers, and a reinstall replaces only what pm-flow wrote.
+install_instructions_file() {
+  local name="$1"
+  local repo_root="$2"
+  local force="$3"
+  local project_name="$4"
+  local primary_mission="$5"
+  local baseline_name="$6"
+  local project_key="$7"
+  local target="$repo_root/$name"
+  local stem="${name%.md}"
+
+  if [[ -f "$target" && "$force" != "1" ]]; then
+    if [[ ! -f "$repo_root/$stem.pre-pm-flow.md" ]]; then
+      atomic_copy_file "$target" "$repo_root/$stem.pre-pm-flow.md"
+    fi
+    render_template \
+      "template/$name" \
+      "$repo_root/$stem.pm-flow.template.md" \
+      "$project_name" \
+      "$repo_root" \
+      "$primary_mission" \
+      "$baseline_name" \
+      "$project_key"
+    merge_managed_block \
+      "$target" \
+      "$repo_root/$stem.pm-flow.template.md"
+  else
+    render_template \
+      "template/$name" \
+      "$target" \
+      "$project_name" \
+      "$repo_root" \
+      "$primary_mission" \
+      "$baseline_name" \
+      "$project_key"
+  fi
 }
 
 main() {
@@ -736,31 +795,19 @@ except Exception:
     "$baseline_name" \
     "$project_key"
 
-  if [[ -f "$abs_target/CLAUDE.md" && "$force" != "1" ]]; then
-    if [[ ! -f "$abs_target/CLAUDE.pre-pm-flow.md" ]]; then
-      atomic_copy_file "$abs_target/CLAUDE.md" "$abs_target/CLAUDE.pre-pm-flow.md"
-    fi
-    render_template \
-      "template/CLAUDE.md" \
-      "$abs_target/CLAUDE.pm-flow.template.md" \
-      "$project_name" \
+  # AGENTS.md first, because CLAUDE.md imports it and a pointer installed
+  # before its target is a broken link for as long as the install takes.
+  local instructions_file
+  for instructions_file in AGENTS.md CLAUDE.md; do
+    install_instructions_file \
+      "$instructions_file" \
       "$abs_target" \
+      "$force" \
+      "$project_name" \
       "$primary_mission" \
       "$baseline_name" \
       "$project_key"
-    merge_claude_rules \
-      "$abs_target/CLAUDE.md" \
-      "$abs_target/CLAUDE.pm-flow.template.md"
-  else
-    render_template \
-      "template/CLAUDE.md" \
-      "$abs_target/CLAUDE.md" \
-      "$project_name" \
-      "$abs_target" \
-      "$primary_mission" \
-      "$baseline_name" \
-      "$project_key"
-  fi
+  done
 
   # Everything the manifest ships that the hand-written lists above do not.
   #
