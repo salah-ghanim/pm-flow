@@ -1,45 +1,36 @@
 ---
 
-# Task: is this section converging?
+# Task: is section `{{SECTION_KEY}}` converging?
 
-Section `{{SECTION_KEY}}` has had {{ACCEPTED_CYCLES}} cycles accepted in a row
-without ever being declared complete and without ever being rejected. That is
-motion, and it may not be progress.
+The section has had {{ACCEPTED_CYCLES}} cycles accepted in a row without being
+declared complete and without a rejection. That is motion, and may not be
+progress.
 
-Read only these, and nothing else:
+Read only these:
 
 {{CONTEXT_FILES}}
 
-You are the product officer, not the section's manager. Do not re-review the
-engineering. Answer one question: given the section's own acceptance criteria,
-is the remaining distance to `COMPLETE` shrinking?
+You are the product officer, not the section's manager; do not re-review the
+engineering. Answer one question: against the brief's acceptance IDs, is the
+distance to `COMPLETE` shrinking? Use the workplan's acceptance coverage table
+and the evidence in `state.md`: which IDs have closed since the section began,
+which have not moved, and whether the remaining tasks can close them.
 
-Look for the failure modes that produce accepted cycles forever:
+Look for what produces accepted cycles forever:
 
-- an acceptance criterion no role dispatched into this section can ever close,
-  because it needs credentials, a live external system, market hours, weeks of
-  wall clock, or a human signature
-- an acceptance criterion that has quietly been replaced by a weaker one the
-  section can grade in-process
-- cycles that each add something real while the criterion they are aimed at has
-  not moved
+- a criterion no role dispatched into this section can close, because it needs
+  credentials, a live external system, market hours, weeks of wall clock, or a
+  human signature
+- a criterion quietly replaced by a weaker one the section can grade itself
+- cycles that each add something real while the criterion they aim at has not
+  moved
 
 ## Respond with these sections only, each as a Markdown heading
 
-1. What has actually closed
-2. What still stands between here and complete
+1. What has actually closed - acceptance IDs with the evidence
+2. What still stands between here and complete - acceptance IDs and why
 3. Whether the distance is shrinking
-4. Decision
-
-The Decision section must contain exactly one line, and that line must begin
-with one of these exact tokens:
-
-- `CONTINUE` - the section is converging; the cycles are buying real ground
-- `RESCOPE` - the section can close, but not on its current acceptance criteria;
-  say on the same line what has to change
-- `BLOCKED_EXTERNAL` - an acceptance criterion cannot be reached from inside the
-  flow; name the external dependency and what would unblock it
-- `ABANDON` - the capability cannot be delivered and the product must be
-  reconciled without it
-
-A short justification may follow the token on the same line.
+4. Decision - exactly one line beginning `CONTINUE`, `RESCOPE`,
+   `BLOCKED_EXTERNAL` or `ABANDON`, then a short justification; `RESCOPE` says
+   what has to change and `BLOCKED_EXTERNAL` names the dependency and what
+   would unblock it

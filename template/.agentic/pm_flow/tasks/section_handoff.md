@@ -2,16 +2,16 @@
 
 # Task: write the section handoff
 
-Section `{{SECTION_KEY}}` has been judged complete. Write the bounded handoff
-that the product officer will read. It is the only thing that leaves this
-section, so it must stand alone.
+Section `{{SECTION_KEY}}` has been judged complete. Write the bounded report
+the product officer and dependent sections will read. It is the only thing
+that leaves this section, so it stands alone.
 
 Read:
 
 {{CONTEXT_FILES}}
 
-Stay under 500 words and 8192 bytes. Do not summarise the transcript; state what
-another section or the product officer needs in order to act.
+Stay under 500 words and 8192 bytes. State what a reader needs in order to act;
+do not summarise the transcript or restate the brief.
 
 ## Respond with exactly these Markdown headings and nothing else
 
@@ -22,16 +22,17 @@ another section or the product officer needs in order to act.
 ## What is unproven
 ## Next action
 
-Under Interfaces, name anything another section now depends on. Under Risks,
-name what could still go wrong and what would reveal it.
+`Outcome` covers every acceptance ID in `brief.md`, one line each, with the
+evidence that closed it and the commit it lives in. `Decisions` lists only the
+choices that still constrain anyone. `Interfaces` names what another section
+now depends on, by path or command. `Risks` names what could still go wrong and
+what would reveal it.
 
-`What is unproven` is the heading that costs you something, so write it first
-and cut it last. List every capability this section claims that has not been
-demonstrated against the real thing: code exercised only against a fake, a
-threshold met on one sample, a path no test covers, an integration that has
-never contacted the system it integrates with. Name the observation that would
-settle each one. `- None; every claim above was demonstrated against the real
-system` is a legitimate answer and you must be able to defend it.
-
-A reader above you treats this section as a claim and goes looking for the
-artifact that proves it. Anything you leave out here, they will find.
+`What is unproven` costs you something, so write it first and cut it last: every
+capability this section claims that was not demonstrated against the real
+thing - code exercised only against a fake, a threshold met on one sample, a
+path no test covers, an integration that never contacted the system it
+integrates with - and the observation that would settle each. `- None; every
+claim above was demonstrated against the real system` is legitimate and must be
+defensible. A reader above you treats this section as a claim and goes looking
+for the artifact; anything left out here, they will find.

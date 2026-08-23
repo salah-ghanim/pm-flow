@@ -4,52 +4,43 @@
 
 {{PANEL_SUBJECT}}
 
-Each consultant saw the same brief and none of them saw the others' work, so
-agreement between them is real evidence and disagreement is information about
-uncertainty, not a tie to be broken arbitrarily.
+Each consultant saw the same brief and none saw the others' work, so agreement
+is evidence and disagreement is information about uncertainty, not a tie to
+break arbitrarily.
 
 Read the brief and every proposal:
 
 {{PANEL_FILES}}
 
-## How to weigh the proposals
+## Weighing the proposals
 
-- Judge each against the product, not against the original design. A path that
-  delivers the value asked for differently is a success, not a compromise.
+- Judge each against the product, not against the original design; a path
+  that delivers the value differently is a success.
 - Where consultants agree on the diagnosis, treat it as probably correct.
-- Where they disagree, ask which one engaged with the evidence in the brief
-  rather than reasoning from first principles.
-- A proposal that names a standard, established solution should be preferred
-  over an invented one, unless there is a specific reason the standard approach
-  does not apply here.
-- Discount confidence that is not backed by a stated way to prove the path works.
+  Where they disagree, prefer the one that engaged with the evidence in the
+  brief over the one reasoning from first principles.
+- Prefer a standard, established solution over an invented one unless a
+  specific reason rules it out here.
+- Discount confidence that names no way to prove the path works.
 
-## Choosing more than one path
-
-If no single proposal is clearly right, you may run several in parallel. Do that
-when the paths are genuinely independent, when each is cheap enough to be worth
-the parallel spend, and when a decisive result on either would settle the
-question. Do not run parallel paths merely to avoid deciding: say what evidence
-will pick the winner and when you expect it.
+You may adopt several paths in parallel when they are genuinely independent,
+each is cheap enough to be worth the spend, and a decisive result on either
+settles the question. Say what evidence picks the winner and when. Do not run
+parallel paths to avoid deciding.
 
 ## Respond with these sections only, each as a Markdown heading
 
 1. Panel assessment
 2. Points of agreement
 3. Points of disagreement
-4. Selected paths
+4. Selected paths - the proposal numbers adopted, one per line, each with one
+   line on what it is expected to produce and which acceptance IDs it closes;
+   for `SYNTHESIZE` describe the combined path; for `ABANDON` state what the
+   product loses and why it still reaches its goal
 5. Rationale
-6. Decision
+6. Decision - exactly one line beginning `ADOPT`, `ADOPT_PARALLEL`,
+   `SYNTHESIZE` or `ABANDON`, then a short justification
 
-`Selected paths` must list the proposal numbers you are adopting, one per line,
-each with a one-line statement of what it is expected to produce. For
-`SYNTHESIZE`, describe the combined path there instead. For `ABANDON`, state
-what the product loses and why it can still reach its goal.
-
-The Decision section must contain exactly one line, and that line must begin
-with one of these exact tokens: ADOPT, ADOPT_PARALLEL, SYNTHESIZE, ABANDON.
-A short justification may follow the token on the same line.
-
-`ABANDON` should be rare. Independent consultants failing to find a path is
-meaningful, but it is still your call whether the product survives without what
-the panel was asked about.
+`ABANDON` should be rare: independent consultants finding no path is
+meaningful, but whether the product survives without this capability is your
+call.

@@ -24,7 +24,7 @@ governs; do not adopt a role merely because it is described here.
   expected of you.
 
 If none of the above applies, you are doing ordinary work in this repository.
-Do not start the pm-flow orchestration unless asked; `pm_flow.sh run` spends
+Do not start the pm-flow orchestration unless asked; `pm-flow run` spends
 real model budget.
 
 ## Repo-wide invariants
@@ -69,6 +69,7 @@ Keep them short: a subject under 72 characters, then at most a few bullets
 saying what changed and why. Reasoning belongs in the code, the section record
 or the handoff, not in a commit body nobody reads twice.
 
-Command reference lives in `.agentic/pm_flow/README.md`. Roles bind to a CLI,
-a model, and a difficulty in `.agentic/pm_flow/config.json`.
+The engine is the installed `pm-flow` package; `pm-flow help` lists its
+commands. Roles bind to a CLI, a model, and a difficulty in
+`.agentic/pm_flow/config.json`.
 <!-- pm-flow:end -->
