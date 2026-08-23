@@ -14,7 +14,12 @@ product officer          cuts the product into sections, adjudicates failures
 
 ## Install
 
+The engine is an installed Python package. It goes into the repository's own
+virtual environment, and `install.sh` writes only the project data beside it:
+
 ```bash
+cd /path/to/repo
+python3 -m venv .venv && .venv/bin/pip install pm-flow
 ./install.sh /path/to/repo --name "My Product" --domain saas
 ```
 
@@ -30,7 +35,7 @@ migration that replaces it can share a flow directory without sharing personas:
 ```bash
 ./install.sh /path/to/repo --project-key platform  --domain infrastructure
 ./install.sh /path/to/repo --project-key migration --domain migration --add-project
-./.agentic/pm_flow/pm_flow.sh --project migration run
+.venv/bin/pm-flow --project migration run
 ```
 
 The flow installs to `.agentic/`, hidden like `.idea` or `.vscode`: it is
@@ -52,39 +57,41 @@ those markers survives every reinstall; everything between them is replaced.
 
 ## Versions and upgrades
 
-An install records the manifest it was made from, so it knows what it is and what
-you have changed since.
+There are two halves and one boundary between them: the engine is the installed
+package, and `.agentic/` holds your project's own mutable data — `config.json`,
+each project's recorded domain, the plan, the section workspaces, your persona
+overlays, and the run history. Nothing of the engine is ever copied into the
+repository, so there is nothing to merge and nothing to detect drift in.
 
 ```bash
-./.agentic/pm_flow/pm_flow.sh version
-./.agentic/pm_flow/pm_flow.sh upgrade --source /path/to/pm-flow
-./.agentic/pm_flow/pm_flow.sh upgrade --source /path/to/pm-flow --apply
+.venv/bin/pm-flow version
+.venv/bin/pip install --upgrade pm-flow
 ```
 
-`upgrade` reports before it acts. Files fall into three lifecycles, and the
-distinction is the whole point:
+`version` reports the package the repository runs and the engine directory it
+resolved inside the venv. Upgrading is the package manager's job, and it changes
+no file inside `.agentic/`: your bindings, budgets, thresholds and tuned personas
+are yours, and an upgraded engine reads exactly the project it read before.
 
-- **engine** — the flow itself. Replaced on upgrade.
-- **seed** — `config.json` and friends. Written once and never touched again,
-  because they hold your model bindings, budgets and thresholds.
-- **edited** — anything you changed after installing. Never overwritten without
-  `--force`. Losing a persona you tuned is worse than running a version behind.
+Because each repository pins the engine in its own virtual environment, two
+repositories can run different versions of pm-flow at the same time, and
+upgrading one leaves the other where it was.
 
-The file list is generated rather than maintained by hand. `manifest.json` sits
-at the repository root beside `VERSION`, records the directory its paths are
-relative to, and is rebuilt with `python3 tools/manifest.py --write` — so adding
-a file to the template is all it takes for the installer to ship it.
+Customise a role by adding a file, never by editing a packaged one: a
+`<project>/roles/<role>.md` in your repository is applied as one more layer over
+the packaged persona, which is why an upgrade cannot take it away.
 
-Reinstalling refreshes the scripts, prompts, and contract while preserving
-`config.json`, each project's recorded domain, the project plan, section
-workspaces, and run history.
+Re-running `./install.sh` refreshes the project scaffolding it owns while
+preserving all of the above. Run against a repository that still holds a copied
+engine from an older release, it migrates: the project data is kept as it stands
+and the copied engine is removed.
 
 ## Run it
 
 ```bash
 cd /path/to/repo
 $EDITOR .agentic/pm_flow/<project>/project_state/plan.md   # what you want built
-./.agentic/pm_flow/pm_flow.sh run
+.venv/bin/pm-flow run
 ```
 
 `run` repeats `tick` until nothing is actionable. Each tick observes the files
@@ -92,8 +99,8 @@ on disk, derives the single next action, performs it, and exits — so an
 interrupted run resumes by being run again, with nothing to clean up first.
 
 ```bash
-./.agentic/pm_flow/pm_flow.sh status   # what each section will do next
-./.agentic/pm_flow/pm_flow.sh tick     # one transition, then stop
+.venv/bin/pm-flow status   # what each section will do next
+.venv/bin/pm-flow tick     # one transition, then stop
 ```
 
 ## Roles are named, not vendors
@@ -155,13 +162,16 @@ whole process group and retried.
 
 ## Repository contents
 
-- `install.sh` installs or upgrades the scaffold.
-- `VERSION` and `manifest.json` — what a release is, and what it ships.
-- `tools/manifest.py` regenerates the manifest from the template.
+Everything under `src/` and `template/` is shipped inside the wheel and is read
+from the venv at runtime; `install.sh` writes only the project data.
+
+- `pyproject.toml` and `VERSION` — what the package is, and which release it is.
+- `src/pm_flow/cli.py` — the `pm-flow` entry point: it resolves the engine inside
+  the installed package and the project data in the repository you invoked it in.
+- `install.sh` creates a repository's project data, and migrates a repository
+  that still holds a copied engine.
 - `template/AGENTS.md` — the instructions file installed at the repository root.
 - `template/CLAUDE.md` — the pointer installed beside it, which imports it.
-- `template/.agentic/pm_flow/upgrade.py` — what is installed, and what an
-  upgrade would change.
 - `template/.agentic/pm_flow/pm_flow.sh` — commands.
 - `template/.agentic/pm_flow/driver.zsh` — the run loop.
 - `template/.agentic/pm_flow/agent_exec.sh` — dispatches one role, supervised.

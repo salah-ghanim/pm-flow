@@ -1333,3 +1333,167 @@ assert_equals "$(cd "$BETA_REPO" && "$BETA_PM" status)" "$beta_status_before" \
   "upgrading one repository changed the other's reported project state"
 
 printf 'PASS: upgrading one repository changes its version, not its data and not the other repository\n'
+
+# --- the documented workflow, run rather than read ---------------------------
+#
+# The last thing a checkout can be wrong about is what it tells a reader to do.
+# Everything above proves the packaged layout works; this proves the README
+# describes *that* layout and no longer describes the copy-versioning machinery
+# that has been deleted.
+#
+# The documented commands are extracted and then executed against the artifacts
+# the blocks above already built, rather than only matched as text: a README that
+# names a command nobody can run is as wrong as one that names a deleted file.
+
+README="$REPO_ROOT/README.md"
+[[ -f "$README" ]] || fail "the checkout has no README.md"
+
+# Instructions, not prose. A sentence may legitimately mention a retired name
+# while explaining what replaced it; a line inside a shell block is something a
+# reader is being told to type.
+readme_commands="$(python3 - "$README" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+for block in re.findall(r"```(?:bash|sh|zsh|console)\n(.*?)```", text, re.S):
+    for line in block.splitlines():
+        # A trailing comment is annotation, not part of the command, and would
+        # otherwise be word-split into the arguments this test runs.
+        line = re.sub(r"\s+#.*$", "", line).strip()
+        if line and not line.startswith("#"):
+            print(line)
+PY
+)"
+[[ -n "$readme_commands" ]] || fail "the README documents no commands at all"
+
+# Whitespace-flattened, so an assertion about a sentence is not really an
+# assertion about where the paragraph happened to wrap.
+readme_flat="$(python3 -c \
+  'import re, sys; print(re.sub(r"\s+", " ", open(sys.argv[1], encoding="utf-8").read()))' \
+  "$README")"
+
+# Nothing a reader is told to type may reach for the machinery this section
+# removed: a copied engine script, the retired runtime upgrade command, a root
+# install record, or the generator that used to write one.
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  case "$line" in
+    *".agentic/pm_flow/pm_flow.sh"*|*"pm_flow.sh "*)
+      fail "a README instruction invokes a copied engine script: $line" ;;
+    *"tools/manifest.py"*|*"manifest.py"*)
+      fail "a README instruction runs the retired manifest generator: $line" ;;
+    *MANIFEST*|*manifest.json*)
+      fail "a README instruction names a root install manifest: $line" ;;
+  esac
+  # `--upgrade pm-flow` is the package manager and is what the README should
+  # say; `pm-flow upgrade` is the retired runtime command, which no longer
+  # exists at all - the migrated repository above proved it is refused.
+  case "$line" in
+    *"pm-flow upgrade"*|*"upgrade --source"*)
+      fail "a README instruction uses the retired upgrade command: $line" ;;
+  esac
+done <<< "$readme_commands"
+assert_not_contains "$readme_flat" "tools/manifest.py" \
+  "the README no longer describes the manifest generator"
+assert_not_contains "$readme_flat" "MANIFEST" \
+  "the README no longer describes a root install manifest"
+assert_not_contains "$readme_flat" "manifest.json" \
+  "the README no longer describes a generated manifest file"
+
+# The boundary, stated where a reader will meet it.
+assert_contains "$readme_flat" "the engine is the installed package" \
+  "the README calls the package the engine"
+assert_contains "$readme_flat" "\`.agentic/\` holds your project's own mutable data" \
+  "the README calls .agentic/ the project's mutable data"
+assert_contains "$readme_flat" "changes no file inside \`.agentic/\`" \
+  "the README says an upgrade does not rewrite project data"
+
+# Run what it documents. The executable path a README writes is a venv-relative
+# one; the command and its arguments are what this executes, through the venv
+# built at the top of this file.
+documented_args() {
+  local -a words
+  words=( ${(z)${1#*pm-flow}} )
+  printf '%s\n' "${words[@]}"
+}
+
+run_documented() {
+  local line="$1" repo="$2"
+  local -a words
+  words=( ${(z)${line#*pm-flow}} )
+  ( cd "$repo" && "$PM_FLOW" "${words[@]}" )
+}
+
+# The first documented line matching a command shape, or empty. `|| true`
+# because a README that documents nothing of the sort is a failure this block
+# reports itself, not a pipeline error that aborts the run before it can.
+documented() {
+  printf '%s\n' "$readme_commands" | grep -E "$1" | /usr/bin/head -n 1 || true
+}
+
+# Version reporting, through the installed command.
+documented_version="$(documented '(^|/)pm-flow version$')"
+[[ -n "$documented_version" ]] || \
+  fail "the README documents no way to report the running version"
+documented_version_output="$(run_documented "$documented_version" "$FIXTURE")" || \
+  fail "the version command the README documents does not run: $documented_version"
+assert_contains "$documented_version_output" "pm-flow " \
+  "the documented version command reports the installed package"
+documented_engine="$(printf '%s\n' "$documented_version_output" | \
+  awk '/^ *engine:/ {sub(/^ *engine: */, ""); print; exit}')"
+case "$documented_engine" in
+  "$VENV_REAL"/*|"$VENV"/*) ;;
+  *) fail "the documented version command reported an engine outside the venv: $documented_engine" ;;
+esac
+
+# Workflow execution, through the installed command, against a real repository.
+documented_status="$(documented '(^|/)pm-flow status')"
+documented_tick="$(documented '(^|/)pm-flow tick')"
+documented_run="$(documented '(^|/)pm-flow (--project [^ ]+ )?run')"
+[[ -n "$documented_status" && -n "$documented_tick" && -n "$documented_run" ]] || \
+  fail "the README does not document status, tick and run through the installed command"
+
+documented_status_output="$(run_documented "$documented_status" "$INIT_REPO")" || \
+  fail "the status command the README documents does not run: $documented_status"
+assert_contains "$documented_status_output" "$INIT_SECTION_KEY" \
+  "the documented status command reports the repository's own section"
+
+drain_project_work "$INIT_REPO" "$TEST_ROOT/init.flag"
+documented_tick_args=( ${(f)"$(documented_args "$documented_tick")"} )
+documented_tick_output="$(cd "$INIT_REPO" && PM_DONE_FLAG="$TEST_ROOT/init.flag" \
+  PATH="$TEST_ROOT/flow-bin:$PATH" "$PM_FLOW" "${documented_tick_args[@]}" 2>&1)" || \
+  fail "the tick command the README documents does not run:"$'\n'"$documented_tick_output"
+assert_contains "$documented_tick_output" "section=$INIT_SECTION_KEY" \
+  "the documented tick advanced the repository's own section"
+assert_data_only "$INIT_FLOW" "the repository driven by the documented commands"
+
+# Upgrades, through the package manager. Asserted on the documented line, and
+# the mechanism itself is what the pinned-version block above already exercised.
+documented_upgrade="$(documented 'pip install (--upgrade|-U)|uv (tool )?(install|upgrade)')"
+[[ -n "$documented_upgrade" ]] || \
+  fail "the README documents no package-manager upgrade"
+assert_contains "$documented_upgrade" "pm-flow" \
+  "the documented upgrade names the package"
+
+# And the checkout has no generator left to regenerate what it stopped
+# describing. Searched by name and by content, so a rename or an equivalent
+# rewrite is caught rather than only the file that used to be there.
+[[ ! -e "$REPO_ROOT/tools/manifest.py" ]] || \
+  fail "the checkout still ships the obsolete root-MANIFEST generator at tools/manifest.py"
+[[ ! -e "$REPO_ROOT/MANIFEST" && ! -e "$REPO_ROOT/manifest.json" ]] || \
+  fail "the checkout still ships a root install manifest"
+manifest_tooling="$(find "$REPO_ROOT" \
+  \( -name .git -o -name tests -o -name .agentic -o -name '__pycache__' \) -prune -o \
+  -type f \( -name 'MANIFEST' -o -name 'manifest.json' -o -name '*manifest*.py' \) -print \
+  2>/dev/null | LC_ALL=C sort | tr '\n' ' ')"
+assert_equals "$manifest_tooling" "" \
+  "the checkout provides no obsolete root-MANIFEST generator"
+manifest_writers="$(grep -rlI 'MANIFEST' "$REPO_ROOT" \
+  --exclude-dir=.git --exclude-dir=tests --exclude-dir=.agentic \
+  --exclude-dir=__pycache__ --exclude=.git 2>/dev/null || true)"
+manifest_writers="$(printf '%s' "$manifest_writers" | LC_ALL=C sort | tr '\n' ' ')"
+assert_equals "$manifest_writers" "" \
+  "no file in the checkout still writes or reads a root MANIFEST"
+
+printf 'PASS: the documented workflow runs through the installed command, and no manifest machinery remains\n'
