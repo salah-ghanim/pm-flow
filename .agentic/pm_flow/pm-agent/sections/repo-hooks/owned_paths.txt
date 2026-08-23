@@ -1,0 +1,4 @@
+.githooks/**
+tools/hooks/**
+.releaserc.json
+tests/repo_hooks_test.sh
