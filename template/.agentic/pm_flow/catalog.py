@@ -33,6 +33,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -277,8 +278,304 @@ def register_clis(connection):
             )
 
 
+# ------------------------------------------------------------- seat swaps
+#
+# A seat's stack is rebuilt from the files on disk at the start of every run, so
+# a swap that only rewrote `seat_personas` would last exactly until the next
+# re-sync undid it. What a swap records instead is an intent - this seat's
+# <layer> is that installed persona - in the `overrides` blob the seat row
+# already carries, and both the stack and the prompt are derived from it.
+#
+# One record with two readers, which is the same reason `read_persona_layers`
+# exists: the prompt a seat is sent and the stack recorded against its attempt
+# must not be able to disagree about which persona was used.
+
+SWAP_OVERRIDE_KEY = "persona_layers"
+
+
+def layer_overrides(raw) -> dict:
+    """The {layer: persona key} a seat has been swapped to, from its overrides."""
+    overrides = store.loads(raw)
+    if not isinstance(overrides, dict):
+        return {}
+    swapped = overrides.get(SWAP_OVERRIDE_KEY)
+    if not isinstance(swapped, dict):
+        return {}
+    return {str(layer): key.strip() for layer, key in swapped.items()
+            if isinstance(key, str) and key.strip()}
+
+
+def with_layer_override(raw, layer, persona_key) -> str:
+    """The seat's overrides with one layer pointed at one persona key.
+
+    Everything else in the blob is carried through untouched: `overrides` is a
+    general per-seat record and a swap owns exactly one key inside it.
+    """
+    overrides = store.loads(raw)
+    if not isinstance(overrides, dict):
+        overrides = {}
+    swapped = layer_overrides(raw)
+    swapped[layer] = persona_key
+    overrides[SWAP_OVERRIDE_KEY] = swapped
+    return store.dumps(overrides)
+
+
+def newest_persona(connection, key):
+    """The newest installed version of a persona key, or None.
+
+    Personas are content-versioned, so a key names a history rather than a row.
+    A swap means the words that key stands for now, which is its newest version.
+    """
+    return connection.execute(
+        "SELECT * FROM personas WHERE key = ? ORDER BY id DESC LIMIT 1", (key,)
+    ).fetchone()
+
+
+def selected_topology(flow_dir) -> str:
+    """The topology this repository dispatches under.
+
+    Resolved the way the driver resolves it - $PM_FLOW_TOPOLOGY, then
+    config.json's telemetry.topology, then `default` - so a swap lands on the
+    seat the next run will actually dispatch rather than on a namesake.
+    """
+    chosen = os.environ.get("PM_FLOW_TOPOLOGY", "").strip()
+    if chosen:
+        return chosen
+    if flow_dir is not None:
+        config_path = Path(flow_dir) / "config.json"
+        if config_path.is_file():
+            try:
+                config = json.loads(config_path.read_text(errors="replace"))
+            except ValueError:
+                config = {}
+            telemetry = config.get("telemetry") if isinstance(config, dict) else None
+            if isinstance(telemetry, dict):
+                topology = telemetry.get("topology")
+                if isinstance(topology, str) and topology.strip():
+                    return topology.strip()
+    return "default"
+
+
+def seat_layer_overrides(connection, project_key, topology_key, role) -> dict:
+    """What the seats of one role in one topology have been swapped to.
+
+    The lowest seat answers for the role: a swap applies to every seat of the
+    role, and the prompt is composed per role rather than per seat.
+    """
+    row = connection.execute(
+        "SELECT ta.overrides FROM topology_agents ta"
+        " JOIN topologies t ON t.id = ta.topology_id"
+        " LEFT JOIN projects p ON p.id = t.project_id"
+        " WHERE t.key = ? AND COALESCE(p.key, '') = ? AND ta.role_key = ?"
+        " ORDER BY ta.seat LIMIT 1",
+        (topology_key, project_key or "", role),
+    ).fetchone()
+    return layer_overrides(row["overrides"]) if row else {}
+
+
+def open_store_if_present(project_dir):
+    """The store this run records into, if it already exists, or None.
+
+    Never created here. Composing a prompt is not a reason to bring a store into
+    existence, and a project that has never recorded anything has no swap to
+    apply. Anything that goes wrong reading it is None as well: the catalogue
+    must not become a way for a dispatch to fail.
+    """
+    named = os.environ.get("PM_FLOW_STORE", "").strip()
+    path = Path(named) if named else (
+        store.default_path(project_dir) if project_dir is not None else None)
+    if path is None or not path.is_file():
+        return None
+    try:
+        return store.connect(path)
+    except (sqlite3.Error, SystemExit, OSError):
+        return None
+
+
+def swapped_layers(layers, role, project_dir, project_key):
+    """`layers` as they are on disk, with any swapped layer replaced.
+
+    One entry changes and it changes in place, so every sibling layer keeps both
+    its wording and its position in the application order. A layer whose
+    replacement has gone missing, or whose replacement is no longer that layer,
+    stays as the file has it rather than dropping out of the prompt.
+    """
+    connection = open_store_if_present(project_dir)
+    if connection is None:
+        return layers
+    try:
+        flow_dir = Path(project_dir).parent if project_dir is not None else None
+        overrides = seat_layer_overrides(
+            connection, project_key or os.environ.get("PM_FLOW_PROJECT", ""),
+            selected_topology(flow_dir), role)
+        if not overrides:
+            return layers
+        applied = []
+        for layer, key, body, path in layers:
+            row = (newest_persona(connection, overrides[layer])
+                   if layer in overrides else None)
+            if row is None or row["layer"] != layer:
+                applied.append((layer, key, body, path))
+                continue
+            applied.append((layer, row["key"], row["body"] or "",
+                            row["source_url"] or row["source_path"] or ""))
+        return applied
+    except sqlite3.Error:
+        return layers
+    finally:
+        connection.close()
+
+
+def swapped_persona_ids(connection, layers, persona_ids, overrides):
+    """The persona ids a seat's stack is made of, with swaps applied.
+
+    The same substitution as `swapped_layers`, one level down: this is what the
+    stack recorded against an attempt is built from, and it is positional for
+    the same reason - a swap takes the slot of the layer it replaces.
+
+    A replacement already present in the stack under another layer would
+    collapse two layers into one row, so the file's own persona is kept there
+    and the seat is left as it was.
+    """
+    if not overrides:
+        return list(persona_ids)
+    stack = []
+    for (layer, _key, _body, _path), persona_id in zip(layers, persona_ids):
+        row = (newest_persona(connection, overrides[layer])
+               if layer in overrides else None)
+        if row is None or row["layer"] != layer or row["id"] in stack:
+            stack.append(persona_id)
+        else:
+            stack.append(row["id"])
+    return stack
+
+
+def set_seat_stack(connection, seat_id, persona_ids) -> None:
+    """Make the seat's stack exactly these personas, in this order.
+
+    Written as a difference rather than a delete-and-reinsert: re-syncing an
+    unchanged seat then leaves the very rows that were there, which is what lets
+    a swap survive a run start.
+    """
+    with connection:
+        if persona_ids:
+            connection.execute(
+                "DELETE FROM seat_personas WHERE topology_agent_id = ? AND"
+                " persona_id NOT IN (" + ", ".join("?" * len(persona_ids)) + ")",
+                [seat_id, *persona_ids],
+            )
+        else:
+            connection.execute(
+                "DELETE FROM seat_personas WHERE topology_agent_id = ?", (seat_id,))
+        for order, persona_id in enumerate(persona_ids):
+            connection.execute(
+                "INSERT INTO seat_personas (topology_agent_id, persona_id, ordering)"
+                " VALUES (?, ?, ?)"
+                " ON CONFLICT (topology_agent_id, persona_id)"
+                " DO UPDATE SET ordering = excluded.ordering",
+                (seat_id, persona_id, order),
+            )
+
+
+def swap_seat_persona(connection, *, project_key, topology_key, role_key,
+                      persona_key) -> dict:
+    """Point one layer of a role's seats at an installed persona.
+
+    The layer is the replacement's own: a base persona replaces a base layer and
+    nothing else, so what a swap can do is bounded by what was installed rather
+    than by an argument that could name the wrong slot.
+
+    Every seat is checked before any seat is written, and the write is one
+    transaction, because a stack that is half swapped is worse than one that was
+    not swapped at all: the next dispatch would compose a prompt nobody chose.
+    """
+    persona = newest_persona(connection, persona_key)
+    if persona is None:
+        raise PackError(f"no installed persona '{persona_key}'; "
+                        f"`persona list` shows what is installed")
+    layer = persona["layer"]
+    topology = connection.execute(
+        "SELECT t.id FROM topologies t LEFT JOIN projects p ON p.id = t.project_id"
+        " WHERE t.key = ? AND COALESCE(p.key, '') = ?",
+        (topology_key, project_key or ""),
+    ).fetchone()
+    if topology is None:
+        raise PackError(f"no topology '{topology_key}' for project "
+                        f"'{project_key or '-'}'; run the flow once so the "
+                        f"catalogue holds its seats")
+    seats = connection.execute(
+        "SELECT id, seat, persona_id, overrides FROM topology_agents"
+        " WHERE topology_id = ? AND role_key = ? ORDER BY seat",
+        (topology["id"], role_key),
+    ).fetchall()
+    if not seats:
+        raise PackError(f"topology '{topology_key}' has no role '{role_key}'")
+
+    planned = []
+    for seat in seats:
+        stack = connection.execute(
+            "SELECT sp.id, sp.persona_id, sp.ordering, p.key, p.layer"
+            " FROM seat_personas sp JOIN personas p ON p.id = sp.persona_id"
+            " WHERE sp.topology_agent_id = ? ORDER BY sp.ordering",
+            (seat["id"],),
+        ).fetchall()
+        target = [row for row in stack if row["layer"] == layer]
+        if not target:
+            raise PackError(
+                f"'{role_key}' seat {seat['seat']} has no {layer} layer to "
+                f"replace, and '{persona_key}' is a {layer} persona; its stack "
+                f"is " + (", ".join(f"{row['layer']}:{row['key']}" for row in stack)
+                          or "empty"))
+        if any(row["persona_id"] == persona["id"] and row["layer"] != layer
+               for row in stack):
+            raise PackError(
+                f"'{persona_key}' is already on '{role_key}' seat "
+                f"{seat['seat']} as another layer")
+        planned.append((seat, target[0]))
+
+    changed = []
+    if connection.in_transaction:
+        connection.commit()
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        for seat, entry in planned:
+            if entry["persona_id"] != persona["id"]:
+                connection.execute(
+                    "UPDATE seat_personas SET persona_id = ? WHERE id = ?",
+                    (persona["id"], entry["id"]),
+                )
+                changed.append(seat["seat"])
+            connection.execute(
+                "UPDATE topology_agents SET overrides = ? WHERE id = ?",
+                (with_layer_override(seat["overrides"], layer, persona_key),
+                 seat["id"]),
+            )
+            # The seat row names the last layer of its stack; sync maintains it
+            # the same way, so swapping the last layer has to move it here too.
+            last = connection.execute(
+                "SELECT persona_id FROM seat_personas WHERE topology_agent_id = ?"
+                " ORDER BY ordering DESC LIMIT 1", (seat["id"],)
+            ).fetchone()
+            if last is not None and last["persona_id"] != seat["persona_id"]:
+                connection.execute(
+                    "UPDATE topology_agents SET persona_id = ? WHERE id = ?",
+                    (last["persona_id"], seat["id"]),
+                )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    return {
+        "layer": layer, "persona_id": persona["id"],
+        "replaced": [entry["key"] for _seat, entry in planned],
+        "seats": [seat["seat"] for seat, _entry in planned],
+        "changed": changed,
+    }
+
+
 def read_persona_layers(engine_dir: Path, role: str, domain: str,
-                        project_dir: Path | None = None, project_key: str = ""):
+                        project_dir: Path | None = None, project_key: str = "",
+                        apply_swaps: bool = True):
     """The persona layers on disk for one role, base first.
 
     The flow already stores prompts this way - a craft persona in `roles/`, an
@@ -295,6 +592,12 @@ def read_persona_layers(engine_dir: Path, role: str, domain: str,
     that goes to the CLI and the provenance recorded against the attempt are
     built from it, so the two cannot disagree about which layers were applied
     or in what order.
+
+    A layer this seat has been swapped to an installed persona is substituted in
+    place - see `swapped_layers`. `apply_swaps` is off for the one caller that
+    must see the files as they are: indexing them is how the disk layers become
+    persona rows in the first place, and indexing a swapped body would file
+    somebody else's words under this repository's own key.
     """
     layers = []
     base = engine_dir / "roles" / f"{role}.md"
@@ -310,6 +613,8 @@ def read_persona_layers(engine_dir: Path, role: str, domain: str,
         if local.is_file():
             layers.append(("style", f"{project_key or 'local'}/{role}",
                            local.read_text(errors="replace"), str(local)))
+    if apply_swaps and layers:
+        layers = swapped_layers(layers, role, project_dir, project_key)
     return layers
 
 
@@ -370,8 +675,11 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
     project_dir = flow_dir / project_key
     for role_key, binding in sorted(roles.items()):
         seats = binding if isinstance(binding, list) else [binding]
+        # The files as they are. A layer this seat has been swapped away from
+        # is still a persona this repository holds, and indexing it is what
+        # keeps it available to swap back to.
         layers = read_persona_layers(engine_dir, role_key, domain,
-                                     project_dir, project_key)
+                                     project_dir, project_key, apply_swaps=False)
         tier = ("write" if role_key in write_roles
                 else "scoped" if role_key in scoped_roles else "read")
 
@@ -403,25 +711,39 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
                 cli_params=cli_params,
             )
             counts["bindings"] += 1
+            # Upserted rather than INSERT OR REPLACE'd. REPLACE deletes the row
+            # it conflicts with, which cascades the seat's stack away and resets
+            # `overrides` to '{}' - so every run start would undo a swap and
+            # then rebuild the stack from the files as if nothing had been
+            # chosen. Updating in place keeps the seat's identity, and with it
+            # everything that was recorded about the seat.
             with connection:
                 connection.execute(
-                    "INSERT OR REPLACE INTO topology_agents"
+                    "INSERT INTO topology_agents"
                     " (topology_id, role_key, persona_id, binding_id, seat, ordering, overrides)"
-                    " VALUES (?, ?, ?, ?, ?, ?, '{}')",
+                    " VALUES (?, ?, ?, ?, ?, ?, '{}')"
+                    " ON CONFLICT (topology_id, role_key, seat) DO UPDATE SET"
+                    " persona_id = excluded.persona_id,"
+                    " binding_id = excluded.binding_id,"
+                    " ordering = excluded.ordering",
                     (topology_id, role_key, persona_ids[-1] if persona_ids else None,
                      binding_id, index, index),
                 )
             seat_row = connection.execute(
-                "SELECT id FROM topology_agents WHERE topology_id = ? AND role_key = ?"
-                " AND seat = ?", (topology_id, role_key, index),
+                "SELECT id, persona_id, overrides FROM topology_agents"
+                " WHERE topology_id = ? AND role_key = ? AND seat = ?",
+                (topology_id, role_key, index),
             ).fetchone()
             if seat_row:
-                with connection:
-                    for order, persona_id in enumerate(persona_ids):
+                stack = swapped_persona_ids(
+                    connection, layers, persona_ids,
+                    layer_overrides(seat_row["overrides"]))
+                set_seat_stack(connection, seat_row["id"], stack)
+                if stack and stack[-1] != seat_row["persona_id"]:
+                    with connection:
                         connection.execute(
-                            "INSERT OR IGNORE INTO seat_personas"
-                            " (topology_agent_id, persona_id, ordering) VALUES (?, ?, ?)",
-                            (seat_row["id"], persona_id, order),
+                            "UPDATE topology_agents SET persona_id = ? WHERE id = ?",
+                            (stack[-1], seat_row["id"]),
                         )
             counts["seats"] += 1
 
@@ -1261,6 +1583,32 @@ def cmd_persona_list(args):
     return 0
 
 
+def cmd_persona_swap(args):
+    connection = store.connect(args.db)
+    project_key = args.project or os.environ.get("PM_FLOW_PROJECT", "")
+    topology_key = args.topology or selected_topology(None)
+    try:
+        result = swap_seat_persona(
+            connection, project_key=project_key, topology_key=topology_key,
+            role_key=args.role, persona_key=args.persona)
+    except PackError as error:
+        # Nothing was written: every seat is checked before the transaction
+        # opens, and the transaction rolls back if it fails inside.
+        raise SystemExit(f"persona swap: {error}")
+    seats = ", ".join(str(seat) for seat in result["seats"])
+    replaced = ", ".join(sorted(set(result["replaced"])))
+    where = f"{args.role} seat(s) {seats} of topology {topology_key}"
+    if result["changed"]:
+        print(f"swapped the {result['layer']} layer of {where}: "
+              f"{replaced} -> {args.persona}")
+    else:
+        print(f"the {result['layer']} layer of {where} is already "
+              f"{args.persona}")
+    print(f"  every other layer of the stack is untouched, and the binding, "
+          f"model and tool grants are unchanged")
+    return 0
+
+
 def persona_wording(row):
     """The stored body of a persona row, verbatim.
 
@@ -1323,6 +1671,14 @@ def main(argv):
     q.set_defaults(func=cmd_persona_add)
     q = persona_sub.add_parser("list", help="installed personas and their provenance")
     q.set_defaults(func=cmd_persona_list)
+    q = persona_sub.add_parser(
+        "swap", help="replace one layer of a role's seat stack")
+    q.add_argument("role", help="the role whose seats are swapped")
+    q.add_argument("persona", metavar="persona-key",
+                   help="an installed persona; its own layer is the one replaced")
+    q.add_argument("--project", help="project key (or $PM_FLOW_PROJECT)")
+    q.add_argument("--topology", help="topology key (or $PM_FLOW_TOPOLOGY)")
+    q.set_defaults(func=cmd_persona_swap)
 
     p = sub.add_parser("compare", help="runs side by side, by topology")
     p.add_argument("--project")
