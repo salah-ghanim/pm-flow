@@ -5,6 +5,21 @@
 - None. T7 (cycle 011) is accepted; the workplan is complete. No product
   source changed in cycle 011, so there is nothing for the driver to merge
   beyond the section's planning artifacts.
+- Cycle 012 (scope): declared `COMPLETE`. Re-verified at `39a1fe4`
+  (`cycles/012/scope_suite.zsh` → `suite.out`): `git diff --stat 2038254 HEAD
+  -- catalog.py store.py` empty, ten `PASS:` lines, `suite_exit=0`. The only
+  engine commit since cycle 011 is `144fd32` (init-section; other paths).
+  `handoff.md` rewritten to cover T6/T7 and the real swap syntax
+  (`persona swap <role> <persona-key>`); the cycle 009 version had predated
+  both.
+- Cycle 012 scope was dispatched a second time (the first response's
+  `state.md`/`handoff.md` edits were still uncommitted). Re-probed on the
+  working tree as it stood, which carried uncommitted edits to
+  `template/.agentic/pm_flow/{driver.zsh,agent_exec.sh}` (read-dir grants;
+  not this section's paths): `cycles/012/scope_suite_rerun.zsh` →
+  `suite_rerun.out`: `head=39a1fe4`, owned paths unchanged vs `2038254` and
+  vs HEAD (both diffs empty), `pass_lines=10`, `suite_exit=0`. Decision
+  unchanged: `COMPLETE`.
 
 ## Completed tasks and evidence
 
@@ -143,5 +158,5 @@
 
 ## Next eligible task
 
-- None. All workplan tasks are done; the section is ready to report
-  `COMPLETE` through `handoff.md`.
+- None. All workplan tasks are done; `COMPLETE` reported through `handoff.md`
+  in cycle 012.
