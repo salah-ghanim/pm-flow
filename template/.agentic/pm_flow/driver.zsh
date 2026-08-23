@@ -1592,8 +1592,21 @@ do_maintain() {
   section_key="$(basename "$section_dir")"
   attempt_dir="$section_dir/maintenance"
   mkdir -p "$attempt_dir"
+  # The number this attempt will carry if the engineer reports, deliberately
+  # not written to attempts.txt yet.
+  #
+  # The budget exists to catch a plumbing problem that survives repeated
+  # repair. A dispatch the environment killed - a usage limit, a crash - is not
+  # a repair that failed, it is a repair that never happened, and spending the
+  # budget on it sends the next HARNESS rejection to a consultant panel: the
+  # precise misrouting this whole path exists to prevent. One usage limit was
+  # enough to burn an attempt that never produced a report.
+  #
+  # The claim is keyed on this same number, so repeated failed dispatches of
+  # the *same* attempt accumulate against the step ceiling rather than each one
+  # looking like new work. That is what bounds the retry now that the counter
+  # no longer advances on its own.
   attempts=$(( $(maintenance_attempts "$section_dir") + 1 ))
-  printf '%d\n' "$attempts" > "$attempt_dir/attempts.txt"
   claim_step "$attempt_dir/.claim-maintain-$attempts"
 
   heartbeat="$attempt_dir/heartbeat.txt"
@@ -1621,7 +1634,26 @@ $(cycle_history_files "$section_dir" "$(latest_cycle "$section_dir")" \
   decision="$(extract_markdown_decision "$(/bin/cat "$attempt_dir/report_$attempts.md")" \
     "CLEARED,NOT_PLUMBING,UNRESOLVED" 2>/dev/null || printf 'UNRESOLVED\n')"
   decision="${decision%%$'\n'*}"
+  # The engineer reported, so the attempt is real and is recorded now, before
+  # the verdict is acted on. dispatch_role does not return from a dead
+  # dispatch, so reaching this line is what makes the attempt worth counting.
+  # CLEARED and NOT_PLUMBING overwrite this below; UNRESOLVED is the case that
+  # is meant to spend one.
+  printf '%d\n' "$attempts" > "$attempt_dir/attempts.txt"
   printf '%s\n' "$decision" > "$attempt_dir/decision.txt"
+
+  # A repair is real work whatever the verdict, so it is committed before the
+  # verdict is acted on rather than inside the CLEARED branch.
+  #
+  # An engineer that ends at NOT_PLUMBING has usually still fixed something on
+  # the way to finding out - one of them repaired a nested codex denied its own
+  # CODEX_HOME and then correctly declined the product question behind it.
+  # Committing only on CLEARED left that repair uncommitted in the main tree
+  # every other section dispatches from, which this repository's own invariant
+  # says does not survive the next fresh process. commit_maintenance_work is a
+  # no-op when the tree is clean, so this costs nothing when nothing was fixed.
+  with_repo_git_lock commit_maintenance_work \
+    "$section_dir" "$section_key" "$attempts" "$decision"
 
   case "$decision" in
     CLEARED)
@@ -1629,7 +1661,6 @@ $(cycle_history_files "$section_dir" "$(latest_cycle "$section_dir")" \
       printf '%s\n' "$(latest_cycle "$section_dir")" \
         > "$section_dir/failure_streak_reset.txt"
       printf '0\n' > "$attempt_dir/attempts.txt"
-      with_repo_git_lock commit_maintenance_work "$section_dir" "$section_key" "$attempts"
       printf 'maintain -> obstruction cleared; %s resumes with its streak reset\n' "$section_key"
       ;;
     NOT_PLUMBING)
@@ -1652,6 +1683,7 @@ commit_maintenance_work() {
   local section_dir="$1"
   local section_key="$2"
   local attempts="$3"
+  local verdict="${4:-CLEARED}"
   worktree_isolation_enabled || return 0
   git -C "$PROJECT_ROOT" add -A >/dev/null 2>&1 || return 0
   if git -C "$PROJECT_ROOT" diff --cached --quiet 2>/dev/null; then
@@ -1661,7 +1693,7 @@ commit_maintenance_work() {
     -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
     -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
     commit --quiet --no-verify \
-    -m "fix(harness): clear the obstruction blocking $section_key (attempt $attempts)" \
+    -m "fix(harness): repair for $section_key (attempt $attempts, $verdict)" \
     >/dev/null 2>&1 || true
   return 0
 }
