@@ -11,22 +11,46 @@
 
 - `cost.py total <project_dir> [section]`, `cost.py report <project_dir>`,
   `cost.py import <project_dir>`; `cost.py one` unchanged.
-- No schema change.
+- No schema change. The store is `<project_dir>/runs/pm_flow.db`
+  (`store.default_path`). `attempts` has no `section_key` column: a section is
+  `attempts.task_id → tasks.key`, NULL meaning `(project)`; that is how
+  `telemetry.py attempt-start --task <section_key>` records live dispatches,
+  and the brief's "`section_key`" means this join. The project row is
+  `projects.key = basename(project_dir)` (the driver runs projects at
+  `$FLOW_DIR/<key>`).
+- `response_path` is the same absolute string in the TSV's sixth column and in
+  `attempts.response_path` (the driver passes `$response_json` to both), so it
+  keys the import without normalisation.
+- Parity rule for A1: the importer reproduces today's `cost.totals()`
+  precedence exactly. A TSV row is authoritative for its `response_path`, even
+  when its cost column is blank (then `cost_usd` is NULL and the envelope is
+  not re-parsed); only envelopes absent from the TSV get `cost_of()`. Any
+  "smarter" re-derivation changes the cents and fails A1.
 
 ## Task T1 — Idempotent legacy import
 
-- Status: pending.
+- Status: done (cycle 001, GO).
 - Outcome: `cost.py import <project_dir>` inserts an `attempts` row for every
   TSV row or envelope not already represented, keyed on `response_path`, and
   reports how many it added; a second run adds zero.
 - Paths: `template/.agentic/pm_flow/cost.py`, `tests/store_ledger_test.sh`.
-- Reuse: `store.py` connection and `attempts` insert; `cost.py cost_of` for
-  envelope amounts.
+- Reuse: `store.connect(store.default_path(project_dir))`; the column list
+  `telemetry.py cmd_attempt_start` / `cmd_attempt_end` write; `cost_of`,
+  `section_of`, `response_files`, `ledger_rows` already in `cost.py`;
+  `telemetry.usage_from_response` for token columns.
+- Row shape: `project_id` from `projects.key = basename(project_dir)` (insert
+  if absent); `task_id` from `tasks (project_id, key=section)` (insert if
+  absent), NULL for `(project)`; `role_key` = TSV column 3 or `"unknown"` for
+  an envelope-only row; `label` = TSV column 4; `started_at` = TSV column 1
+  parsed as UTC, else the envelope's mtime; `status = "imported"`;
+  `cost_usd` per the parity rule; `response_path` = the absolute string;
+  `metadata = {"source": "cost_ledger.tsv"|"envelope"}`.
 - Acceptance IDs: A1, A3.
-- Validation: `zsh tests/store_ledger_test.sh` — a fixture with 5 TSV rows, 2 of
-  them also present as envelopes, imports 5 rows; totals equal the
-  TSV-computed figure to the cent; second import adds 0; a mutation that keys
-  on timestamp instead of `response_path` double-counts and fails.
+- Validation: `zsh tests/store_ledger_test.sh` — a fixture with 5 TSV rows (one
+  with a blank cost), 2 of them also present as envelopes, plus 1 envelope
+  absent from the TSV, imports 6 rows; the store total equals `cost.py total
+  <dir> <tsv>` to the cent; second import prints `imported=0` and the row
+  count is unchanged; a row's section is readable via `tasks.key`.
 - Depends on: None.
 
 ## Task T2 — Readers on the store
