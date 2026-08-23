@@ -1,6 +1,25 @@
 #!/bin/zsh -f
 set -euo pipefail
 
+# install.sh - create the project data a repository needs, and nothing else.
+#
+# This script used to ship the engine: it copied pm_flow.sh, driver.zsh,
+# agent_exec.sh, the personas, the tasks and the domains into every repository,
+# recorded a manifest of what it had copied, and grew drift detection and an
+# upgrade protocol to manage those copies afterwards. All of that machinery
+# existed for one reason - N copies of the engine scattered across N
+# repositories - and none of it is needed now that the engine is an installed
+# Python package resolved through `pm-flow`.
+#
+# So what is left is the half that was always the repository's own: config.json,
+# the project selector, one or more project workspaces, the local override hook,
+# and the repository's agent instructions. Every one of those is mutable data
+# that belongs to the project and is never replaced by an upgrade.
+#
+# Run it against a repository that still holds a copied engine and it migrates:
+# the project data is kept exactly as it stands, and the copied engine, the
+# packaged defaults and the install record are removed.
+
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
 TEMPLATE_DIR="$SCRIPT_DIR/template"
 DEFAULT_MISSION="achieve meaningful progress on the active project objective with explicit validation and controlled scope"
@@ -8,47 +27,82 @@ DEFAULT_BASELINE="TBD"
 TEMPLATE_CACHE_DIR=""
 
 # Named once, so prefetching and installing can never disagree about what the
-# template set contains.
-ROLE_NAMES=(cpo pm developer consultant 10x_developer)
+# template set contains. Only the domains are still listed: the personas and the
+# task prompts ship with the package and are never written into a repository.
 DOMAIN_NAMES=(generic saas prop-trading crypto-trading infrastructure migration distressed-tech)
-TASK_NAMES=(
-  consultant_panel_adjudication
-  convergence_review
-  portfolio_review
-  section_scope
-  section_review
-  section_handoff
-  section_rescue
-  section_analysis
-  developer_assignment
-  project_decomposition
+
+# A domain may replace the project's contract outright rather than only
+# retitling roles, for work that does not resemble building a product at all.
+# Listed explicitly rather than probed for: a remote install fetches by name and
+# cannot ask a URL whether it exists.
+OVERLAY_DOMAINS=(distressed-tech)
+
+# What a copied install left in the flow directory. These are the names the old
+# installer wrote there, and the whole of what migration removes: everything
+# else under .agentic/pm_flow is the repository's own.
+#
+# Listed by name rather than derived from the template, because a remote install
+# cannot list a URL, and because a name that stops being shipped still has to be
+# cleaned out of repositories that received it.
+COPIED_ENGINE_FILES=(
+  pm_flow.sh
+  net_exec.sh
+  agent_exec.sh
+  access_hook.sh
+  fetch.sh
+  heartbeat.sh
+  driver.zsh
+  catalog.py
+  cost.py
+  store.py
+  telemetry.py
+  trace_export.py
+  watch.py
+  upgrade.py
+  requirements-telemetry.txt
+  README.md
 )
 
-# A domain may replace the personas, the task prompts and the contract outright
-# rather than only retitling roles, for work that does not resemble building a
-# product at all. Listed explicitly rather than probed for: a remote install
-# fetches by name and cannot ask a URL whether it exists.
-OVERLAY_DOMAINS=(distressed-tech)
+# Packaged defaults and the install record. `roles`, `domains` and `tasks` here
+# are the *flow-level* copies of packaged files; a project workspace's own
+# `roles/` directory is an overlay the repository wrote and is never touched.
+COPIED_ENGINE_DIRS=(
+  roles
+  domains
+  tasks
+  project
+  tests
+  __pycache__
+  .pm-flow
+)
 
 usage() {
   cat <<'EOF'
 Usage:
   install.sh [target-repo] [--name <project-name>] [--project-key <key>] [--domain <domain>] [--mission <text>] [--baseline <text>] [--repo-raw-base <url>] [--add-project] [--force]
 
-Installs the generic Claude PM flow template into the target repository.
+Creates the pm-flow project data in the target repository. The engine itself is
+not copied: install `pm-flow` into the repository's virtual environment and run
+the `pm-flow` command.
+
+  python3 -m venv .venv && .venv/bin/pip install pm-flow
+  ./install.sh . --name "My Repo"
+  .venv/bin/pm-flow status
 
 Default reinstall behavior:
-- refresh generic `.agentic/pm_flow/*` scripts and docs
 - refresh per-project `task_contract.md`, `start.md`, and `resume.md`
 - back up pre-section start/resume prompts once with a `.pre-sections.md` suffix
-- preserve the project plan, section workspaces, generated registry, and run history
+- preserve the project plan, section workspaces, generated registry, run history,
+  the store, and any project-local persona overlay
 - preserve config.json (cli, model, and difficulty bindings per role)
 - preserve each project's recorded domain unless --domain is given
+- remove any copied engine left by an older install
 - use `--force` only when a full project-template replacement is intended
 
 Domains: generic (default), saas, prop-trading, crypto-trading, infrastructure,
-migration. The domain is recorded per project in <project>/project.json, so one
-flow directory can host projects of different kinds.
+migration, distressed-tech. The domain is recorded per project in
+<project>/project.json, so one flow directory can host projects of different
+kinds.
 
 Use `--add-project` with `--project-key` to create a second project alongside
 the existing ones. Naming a project that already exists is a plain reinstall of
@@ -111,17 +165,12 @@ cleanup_template_cache() {
 # keeps the prefetched cache alive for the rest of the install.
 trap cleanup_template_cache EXIT HUP INT TERM
 
+# Everything is fetched before anything is written, so a template that cannot be
+# reached is an install that never started rather than one that stopped halfway
+# through a repository's own files.
 prefetch_templates() {
   local template_paths=(
-    "template/.agentic/pm_flow/README.md"
-    "template/.agentic/pm_flow/pm_flow.sh"
-    "template/.agentic/pm_flow/net_exec.sh"
-    "template/.agentic/pm_flow/agent_exec.sh"
-    "template/.agentic/pm_flow/fetch.sh"
-    "template/.agentic/pm_flow/heartbeat.sh"
-    "template/.agentic/pm_flow/driver.zsh"
-    "template/.agentic/pm_flow/cost.py"
-    "template/.agentic/pm_flow/watch.py"
+    "template/.agentic/pm_flow/.gitignore"
     "template/.agentic/pm_flow/config.json"
     "template/.agentic/pm_flow/local_env.sh.example"
     "template/.agentic/pm_flow/projects.md"
@@ -137,58 +186,11 @@ prefetch_templates() {
     # not add them. They are named here or the render cannot find them.
     "template/AGENTS.md"
     "template/CLAUDE.md"
-    "MANIFEST"
   )
-  local name
-  for name in "${ROLE_NAMES[@]}"; do
-    template_paths+=("template/.agentic/pm_flow/roles/$name.md")
-  done
-  for name in "${DOMAIN_NAMES[@]}"; do
-    template_paths+=("template/.agentic/pm_flow/domains/$name.json")
-  done
-  for name in "${TASK_NAMES[@]}"; do
-    template_paths+=("template/.agentic/pm_flow/tasks/$name.md")
-  done
   local overlay
   for overlay in "${OVERLAY_DOMAINS[@]}"; do
     template_paths+=("template/.agentic/pm_flow/domains/$overlay/task_contract.md")
-    for name in "${ROLE_NAMES[@]}"; do
-      template_paths+=("template/.agentic/pm_flow/domains/$overlay/roles/$name.md")
-    done
-    for name in "${TASK_NAMES[@]}"; do
-      template_paths+=("template/.agentic/pm_flow/domains/$overlay/tasks/$name.md")
-    done
   done
-
-  # Everything else the manifest ships. The lists above are kept because they
-  # decide what gets *rendered* and what a reinstall preserves, but they are no
-  # longer the definition of what exists - the manifest is, and it is generated
-  # from the template rather than maintained by hand.
-  local manifest_raw
-  if [[ -n "${REPO_RAW_BASE:-}" ]]; then
-    manifest_raw="$(curl --fail --silent --show-error --location \
-      "${REPO_RAW_BASE%/}/MANIFEST" 2>/dev/null || printf '')"
-  else
-    manifest_raw="$(/bin/cat "$SCRIPT_DIR/MANIFEST" 2>/dev/null || printf '')"
-  fi
-  if [[ -n "$manifest_raw" ]]; then
-    # The manifest is line-oriented, so awk reads it directly: `root <dir>` in
-    # the header, then `<class> <exec> <sha256> <path>` per file.
-    local extra
-    for extra in ${(f)"$(printf '%s' "$manifest_raw" | awk '
-      /^#/ || /^[[:space:]]*$/ { next }
-      $1 == "root" { root = $2; next }
-      $1 == "version" { next }
-      $1 == "engine" { print root "/" $4 }
-    ' 2>/dev/null)"}; do
-      [[ -n "$extra" ]] || continue
-      # `:-` matters: under `set -u` a subscript search that finds nothing is an
-      # unset parameter, not an empty string, and would abort the install.
-      if [[ -z "${template_paths[(r)$extra]:-}" ]]; then
-        template_paths+=("$extra")
-      fi
-    done
-  fi
 
   TEMPLATE_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-install.XXXXXX")"
   local rel_path source_path cached_path
@@ -241,9 +243,6 @@ render_template() {
   mv "$tmp_path" "$dst"
 }
 
-# Ship every `engine` file the manifest names that is not already in place or is
-# out of date. Reads the manifest through fetch_template, so a remote install
-# works the same way a local one does.
 # pm-flow used to install to `agentic/`. It installs to `.agentic/` now, for the
 # same reason `.idea` and `.vscode` are hidden: the flow is workspace machinery,
 # not part of the product, and it should not be the first thing in a listing of
@@ -312,34 +311,59 @@ PY_MIGRATE
   printf 'NOTE: scripts - need updating; the flow'"'"'s own files were rewritten.\n' >&2
 }
 
-sync_manifest_engine() {
+# Take the copied engine out of a repository that received one.
+#
+# Only the names an old install wrote at the top of the flow directory are
+# considered, and only at that level: a project workspace is never entered. That
+# matters for `roles/`, which at the flow level is a copy of the packaged
+# personas and inside a workspace is the repository's own overlay - the one
+# thing customisation now depends on.
+#
+# A workspace is recognised by its key rather than by its shape. `project/` is
+# the packaged scaffold and holds a project.json, a task_contract.md and a
+# project_state/ exactly as a real workspace does, so nothing structural tells
+# the two apart; what does is that a real workspace is one the repository has
+# named, in .project-key or in projects.md.
+remove_copied_engine() {
   local flow_dir="$1"
-  local repo_root="$2"
-  local manifest_json rel manifest_root
-  manifest_json="$(fetch_template "MANIFEST" 2>/dev/null || printf '')"
-  [[ -n "$manifest_json" ]] || return 0
-  # The manifest names the directory its paths are relative to, so this does not
-  # have to assume the layout.
-  manifest_root="$(printf '%s' "$manifest_json" | awk '$1 == "root" { print $2; exit }')"
-  [[ -n "$manifest_root" ]] || manifest_root="template"
+  local selected_key="$2"
+  [[ -d "$flow_dir" ]] || return 0
 
-  local -a wanted
-  wanted=(${(f)"$(printf '%s' "$manifest_json" | awk '$1 == "engine" { print $4 }')"})
-
-  for rel in "${wanted[@]}"; do
-    [[ -n "$rel" ]] || continue
-    copy_template "$manifest_root/$rel" "$repo_root/$rel"
-  done
-
-  # Stamp the install so `pm_flow.sh version` and `upgrade` have a baseline to
-  # compare against. Without it an upgrade cannot tell a shipped change from
-  # something you edited.
-  if [[ -f "$flow_dir/upgrade.py" ]]; then
-    printf '%s' "$manifest_json" > "$flow_dir/.pm-flow-new-MANIFEST"
-    python3 "$flow_dir/upgrade.py" record \
-      --new "$flow_dir/.pm-flow-new-MANIFEST" >/dev/null 2>&1 || true
-    rm -f "$flow_dir/.pm-flow-new-MANIFEST"
+  local -a project_keys
+  project_keys=("$selected_key")
+  if [[ -f "$flow_dir/.project-key" ]]; then
+    project_keys+=("$(/usr/bin/head -n 1 "$flow_dir/.project-key" | tr -d '\r')")
   fi
+  if [[ -f "$flow_dir/projects.md" ]]; then
+    local listed
+    for listed in ${(f)"$(sed -n 's/^- `\([^`]*\)`.*/\1/p' "$flow_dir/projects.md")"}; do
+      [[ -n "$listed" ]] && project_keys+=("$listed")
+    done
+  fi
+
+  local removed=0
+  local name target
+  for name in "${COPIED_ENGINE_FILES[@]}"; do
+    target="$flow_dir/$name"
+    [[ -f "$target" || -L "$target" ]] || continue
+    rm -f -- "$target"
+    (( removed += 1 ))
+  done
+  for name in "${COPIED_ENGINE_DIRS[@]}"; do
+    target="$flow_dir/$name"
+    [[ -d "$target" ]] || continue
+    if (( ${project_keys[(Ie)$name]} )); then
+      printf 'WARNING: %s is a named project workspace; leaving it alone.\n' \
+        "$target" >&2
+      continue
+    fi
+    rm -rf -- "$target"
+    (( removed += 1 ))
+  done
+  # Python bytecode the copied modules left behind, wherever it landed.
+  find "$flow_dir" -type d -name __pycache__ -prune -exec rm -rf -- {} + 2>/dev/null || true
+
+  (( removed == 0 )) || printf 'removed_copied_engine=%d\n' "$removed"
 }
 
 copy_template() {
@@ -631,14 +655,17 @@ main() {
     "$force" \
     "$add_project")"
   local project_dir="$flow_dir/$project_key"
-  local flow_exists="0"
-  if [[ -d "$flow_dir" ]]; then
-    flow_exists="1"
-  fi
 
   prefetch_templates
 
   mkdir -p "$flow_dir"
+
+  # The second half of the migration: the project key, the domain and the
+  # history were all read above from the install as it stands, so the copied
+  # engine can now go. Nothing below writes an engine file, so a fresh install
+  # and a migrated one end in exactly the same shape.
+  remove_copied_engine "$flow_dir" "$project_key"
+
   if [[ "$force" == "1" && -d "$project_dir" ]]; then
     rm -rf "$project_dir"
   fi
@@ -647,47 +674,6 @@ main() {
   mkdir -p "$project_dir/project_state"
   mkdir -p "$project_dir/sections"
 
-  render_template \
-    "template/.agentic/pm_flow/README.md" \
-    "$flow_dir/README.md" \
-    "$project_name" \
-    "$abs_target" \
-    "$primary_mission" \
-    "$baseline_name" \
-    "$project_key"
-  copy_template "template/.agentic/pm_flow/pm_flow.sh" "$flow_dir/pm_flow.sh"
-  copy_template "template/.agentic/pm_flow/net_exec.sh" "$flow_dir/net_exec.sh"
-  copy_template "template/.agentic/pm_flow/agent_exec.sh" "$flow_dir/agent_exec.sh"
-  copy_template "template/.agentic/pm_flow/fetch.sh" "$flow_dir/fetch.sh"
-  copy_template "template/.agentic/pm_flow/heartbeat.sh" "$flow_dir/heartbeat.sh"
-  copy_template "template/.agentic/pm_flow/driver.zsh" "$flow_dir/driver.zsh"
-  # driver.zsh calls cost.py on every dispatch and `status` reads it, so an
-  # install without it reports an error where the spend should be.
-  copy_template "template/.agentic/pm_flow/cost.py" "$flow_dir/cost.py"
-  copy_template "template/.agentic/pm_flow/watch.py" "$flow_dir/watch.py"
-  local template_name
-  for template_name in "${ROLE_NAMES[@]}"; do
-    copy_template "template/.agentic/pm_flow/roles/$template_name.md" "$flow_dir/roles/$template_name.md"
-  done
-  for template_name in "${DOMAIN_NAMES[@]}"; do
-    copy_template "template/.agentic/pm_flow/domains/$template_name.json" "$flow_dir/domains/$template_name.json"
-  done
-  for template_name in "${TASK_NAMES[@]}"; do
-    copy_template "template/.agentic/pm_flow/tasks/$template_name.md" "$flow_dir/tasks/$template_name.md"
-  done
-  local overlay_domain
-  for overlay_domain in "${OVERLAY_DOMAINS[@]}"; do
-    for template_name in "${ROLE_NAMES[@]}"; do
-      copy_template \
-        "template/.agentic/pm_flow/domains/$overlay_domain/roles/$template_name.md" \
-        "$flow_dir/domains/$overlay_domain/roles/$template_name.md"
-    done
-    for template_name in "${TASK_NAMES[@]}"; do
-      copy_template \
-        "template/.agentic/pm_flow/domains/$overlay_domain/tasks/$template_name.md" \
-        "$flow_dir/domains/$overlay_domain/tasks/$template_name.md"
-    done
-  done
   # config.json carries the operator's cli/model/difficulty choices, so a
   # reinstall must never overwrite it.
   if [[ ! -f "$flow_dir/config.json" || "$force" == "1" ]]; then
@@ -695,6 +681,10 @@ main() {
       | sed -e "s|{{DOMAIN}}|$(escape_sed_replacement "$domain")|g" > "$flow_dir/.config.json.tmp"
     mv "$flow_dir/.config.json.tmp" "$flow_dir/config.json"
   fi
+  # What the flow writes while working is not what you commit. Shipped into the
+  # flow directory so a repository that installs pm-flow needs no edits of its
+  # own to stay clean.
+  copy_template "template/.agentic/pm_flow/.gitignore" "$flow_dir/.gitignore"
   copy_template "template/.agentic/pm_flow/local_env.sh.example" "$flow_dir/local_env.sh.example"
   if [[ ! -f "$flow_dir/projects.md" || "$force" == "1" ]]; then
     render_template \
@@ -705,10 +695,6 @@ main() {
       "$primary_mission" \
       "$baseline_name" \
       "$project_key"
-  fi
-
-  if [[ ! -f "$flow_dir/pm_flow.sh" || ! -f "$flow_dir/net_exec.sh" || ! -f "$flow_dir/projects.md" ]]; then
-    fail ".agentic/pm_flow exists but is missing required generic files; rerun with --force to repair"
   fi
 
   render_template \
@@ -809,29 +795,6 @@ except Exception:
       "$project_key"
   done
 
-  # Everything the manifest ships that the hand-written lists above do not.
-  #
-  # Those lists were wrong the moment anything was added to the template: four
-  # modules shipped, the installer did not know about them, and a stock install
-  # got a driver that called files which were not there. The manifest is
-  # generated from the template, so adding a file is all it takes to ship it.
-  #
-  # This runs after the explicit copies rather than replacing them, so the
-  # careful preservation logic above still decides what a reinstall keeps. Only
-  # `engine` files are synced here; `seed` and `project` files are yours.
-  sync_manifest_engine "$flow_dir" "$abs_target"
-
-  # Derived from the file rather than listed by hand. The list this replaces
-  # named ten paths and had to be edited every time one was added, which is a
-  # rule nobody remembers: access_hook.sh shipped unexecutable and its hook
-  # silently did nothing. A file that declares an interpreter is meant to be
-  # run, and that declaration is already in the file.
-  local candidate
-  for candidate in "$flow_dir"/*(.N); do
-    [[ "$(/usr/bin/head -c 2 "$candidate" 2>/dev/null)" == "#!" ]] || continue
-    chmod +x "$candidate"
-  done
-
   touch "$project_dir/runs/.gitkeep"
   touch "$project_dir/sections/.gitkeep"
   write_project_key "$flow_dir/.project-key" "$project_key"
@@ -845,21 +808,6 @@ except Exception:
   printf 'project_key=%s\n' "$project_key"
   printf 'project_dir=%s\n' "$project_dir"
 
-  # The shared scripts are refreshed for every workspace in this flow dir, but
-  # only the selected workspace gets a refreshed contract and prompts. Say so,
-  # because the others now run new code against older rules.
-  local other_workspaces=()
-  local candidate
-  for candidate in "$flow_dir"/*(/N); do
-    if [[ -f "$candidate/task_contract.md" && "$(basename "$candidate")" != "$project_key" ]]; then
-      other_workspaces+=("$(basename "$candidate")")
-    fi
-  done
-  if [[ "${#other_workspaces[@]}" -gt 0 ]]; then
-    printf 'WARNING: %d other project workspace(s) share the upgraded scripts but keep their existing task_contract.md, start.md, and resume.md: %s\n' \
-      "${#other_workspaces[@]}" "${(j:, :)other_workspaces}" >&2
-    printf 'WARNING: rerun the installer with --project-key <key> for each one to bring its rules in line.\n' >&2
-  fi
   if [[ -n "$REPO_RAW_BASE" ]]; then
     printf 'install_source=remote\n'
   else
