@@ -170,3 +170,66 @@ has not moved in three. Older entries are compacted to their summary line.
   `agent-bindings` after. Nothing in flight is on that path yet.
 - Unproven after this review: every planned must-have; the suite's exit
   status from this tier; non-zero Codex tokens in the store.
+
+## 2026-08-23 — portfolio review 002
+
+- Decision: OFF_TRACK. $24.88 and 10 dispatches since review 001 closed
+  `persona-packs` (cycles 011-012); the shortest path named in review 001
+  (`store-ledger` T1) has not moved. Two reviews, same head of path, zero
+  cycles on it. The run since 001 was `persona-packs`-only
+  (`runs/persona-packs-run-20260823T145247Z.log`), not a project-wide run.
+- Criteria: worktree isolation MET (`git worktree list`: `codex-usage`
+  checkout under `../.pm-flow-worktrees/`). Suite: `zsh tests/pm_flow_test.sh`
+  exit 0, ten PASS groups, from this tier; `zsh tests/prompt_quality_test.sh`
+  exit 1, pass=8 fail=30, every failure `another pm_flow driver is already
+  running for project 'pm-agent'` — the live driver that dispatched this
+  review — so that half is UNKNOWN from inside a dispatch. Trace, ledger,
+  persona measure, compare, MCP/ACP all NOT MET by the same probes as 001
+  (`git ls-files src/pm_flow` is still `__init__ cli paths`; `cost_ledger.tsv`
+  on disk; `driver.zsh:441-471,839` read and write it).
+- Incident: the `prompt_quality_test.sh` probe wrote six fixture sections
+  (`alpha delta epsilon eta gamma zeta`) and six run dirs into the live
+  `pm-agent` project and regenerated `sections.md`. Cause:
+  `tests/prompt_quality_test.sh:87` runs `template/.agentic/pm_flow/tests/
+  transitions.zsh` without the inherited-selector guard `tests/pm_flow_test.sh:
+  12-19` has, so the driver-under-test honoured `PM_FLOW_PROJECT` and
+  `PM_FLOW_REPO_ROOT` from the dispatching run. Removed exactly those twelve
+  directories and restored `sections.md` from HEAD; `git status` is back to
+  baseline. `run.zsh` has no guard either; `store-ledger` (brief line 94),
+  `codex-usage` A6, `agent-bindings` A2 and `artifact-quality` A6 all name
+  it. Nobody live owns those files (`green-suite`'s `tests/**` is terminal).
+  A reviewer hitting this is a `HARNESS` obstruction, not a section failure.
+- Dispatch order: `driver.zsh:2650-2659` now sorts must-have before
+  nice-to-have (landed in a2aa2a8), so a nice-to-have no longer costs a
+  must-have its tick. It also counts a cancelled section's edge as a
+  dependent (`a2a-binding/dependency_handoffs.txt` still lists
+  `agent-bindings`), which tied `agent-bindings` with `store-ledger` and the
+  name tie-break put `agent-bindings` first.
+- Graph: recorded `agent-bindings` → `store-ledger` through
+  `pm-flow section-dependencies` (validated: no cycle, no overlap). Reason:
+  A5 reads `pm-flow cost` for an ACP attempt, and `store-ledger` A2 rewrites
+  `cost.py` to read the store; the plan's stated order was already
+  "agent-bindings after". `agent-bindings/brief.md` still says
+  `Dependencies: None`; the graph file is authoritative and the manager
+  syncs the brief at its next scope call.
+- Plan structure: unstarted dependency FOUND — `topology-compare` and now
+  `agent-bindings` wait on `store-ledger` (0 cycles), which waits on
+  nothing; the cure is a project-wide run. Unreachable CLEAR:
+  `artifact-quality` names `tests/run.zsh`, which exists, and owns every path
+  it writes. Must-have inflation CLEAR: `codex-usage` is the token column
+  for half the seats in a default install. Linear chain CLEAR: two deep.
+- `artifact-quality` (new, nice-to-have, cut from a request after review
+  001) advances no plan bullet and says so; kept live because it is a
+  separate process that cannot touch the flow, the officer's reading cost is
+  a real bottleneck, and priority ordering makes it free until no must-have
+  is eligible. `persona-cards` likewise.
+- `codex-usage`: `pm-flow/pm-agent/codex-usage` has no commits beyond main;
+  T3 is the whole remaining section.
+- Refused in this tier: `env`, `printenv`, `rm -rf` (cleanup ran through a
+  script in the review workspace), `pm-flow section-dependencies` invoked
+  directly (ran through the same route). Each refusal is about that exact
+  command.
+- Unproven after this review: every planned must-have; `prompt_quality_test.sh`
+  and `run.zsh` green from inside a dispatch; non-zero Codex tokens in the
+  store; that a reviewer's worktree dispatch leaks the same way (inferred from
+  the same unguarded code path, not observed).
