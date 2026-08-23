@@ -18,7 +18,11 @@ every response envelope on disk that the ledger has never seen.
 import json
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import store  # noqa: E402
 
 NESTED_COST = re.compile(r'"total_cost_usd"\s*:\s*([0-9]+(?:\.[0-9]+)?)')
 
@@ -89,11 +93,121 @@ def ledger_rows(ledger_path):
         if len(fields) < 5:
             continue
         rows.append({
+            "ts": fields[0],
             "section": fields[1],
+            "role": fields[2],
+            "label": fields[3],
             "cost": fields[4],
             "response": fields[5] if len(fields) > 5 else "",
         })
     return rows
+
+
+def import_legacy(project_dir):
+    """Import legacy ledger rows and response envelopes into the store."""
+    project = Path(project_dir)
+    connection = store.connect(store.default_path(project))
+    imported = 0
+    telemetry_module = None
+
+    def started_at(stamp, response):
+        if stamp.endswith("Z"):
+            try:
+                return datetime.fromisoformat(stamp[:-1] + "+00:00").timestamp()
+            except ValueError:
+                pass
+        if response:
+            try:
+                return Path(response).stat().st_mtime
+            except OSError:
+                pass
+        return store.now()
+
+    def task_id(project_id, section):
+        if section == "(project)":
+            return None
+        connection.execute(
+            "INSERT OR IGNORE INTO tasks (project_id, key, title, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (project_id, section, section, store.now()),
+        )
+        row = connection.execute(
+            "SELECT id FROM tasks WHERE project_id = ? AND key = ?",
+            (project_id, section),
+        ).fetchone()
+        return row["id"] if row else None
+
+    def usage_for(response):
+        nonlocal telemetry_module
+        if not response or not Path(response).is_file():
+            return {}
+        if telemetry_module is None:
+            import telemetry as telemetry_module_import
+            telemetry_module = telemetry_module_import
+        return telemetry_module.usage_from_response(response)
+
+    def insert_attempt(project_id, section, role, label, stamp, cost,
+                       response, source):
+        nonlocal imported
+        usage = usage_for(response)
+        connection.execute(
+            "INSERT INTO attempts"
+            " (project_id, task_id, role_key, label, started_at, status, cost_usd,"
+            "  input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,"
+            "  cache_write_tokens, total_tokens, response_path, metadata)"
+            " VALUES (?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, task_id(project_id, section), role, label,
+             started_at(stamp, response), cost, usage.get("input_tokens"),
+             usage.get("output_tokens"), usage.get("reasoning_tokens"),
+             usage.get("cache_read_tokens"), usage.get("cache_write_tokens"),
+             usage.get("total_tokens"), response, store.dumps({"source": source})),
+        )
+        imported += 1
+
+    try:
+        with connection:
+            project_key = project.resolve().name
+            connection.execute(
+                "INSERT OR IGNORE INTO projects (key, created_at) VALUES (?, ?)",
+                (project_key, store.now()),
+            )
+            project_row = connection.execute(
+                "SELECT id FROM projects WHERE key = ?", (project_key,)
+            ).fetchone()
+            project_id = project_row["id"]
+            existing = {
+                row["response_path"]
+                for row in connection.execute(
+                    "SELECT response_path FROM attempts"
+                    " WHERE response_path IS NOT NULL"
+                )
+            }
+
+            for row in ledger_rows(project / "runs" / "cost_ledger.tsv"):
+                response = row["response"]
+                if response in existing:
+                    continue
+                amount = float(row["cost"]) if row["cost"] else None
+                insert_attempt(
+                    project_id, row["section"], row["role"], row["label"],
+                    row["ts"], amount, response, "cost_ledger.tsv",
+                )
+                existing.add(response)
+
+            for path in response_files(project):
+                response = str(path)
+                if response in existing:
+                    continue
+                insert_attempt(
+                    project_id, section_of(path, project), "unknown", path.name,
+                    "", cost_of(path), response, "envelope",
+                )
+                existing.add(response)
+    finally:
+        connection.close()
+
+    print(f"imported={imported}")
+    return 0
 
 
 def totals(project_dir, ledger_path):
@@ -147,9 +261,12 @@ def main(argv):
             print(f"{section}\t{per_section[section]:.4f}")
         print(f"TOTAL\t{sum(per_section.values()):.4f}")
         return 0
+    if len(argv) == 3 and argv[1] == "import":
+        return import_legacy(argv[2])
     print("usage: cost.py one <response.json>", file=sys.stderr)
     print("       cost.py total <project_dir> <ledger> [section]", file=sys.stderr)
     print("       cost.py report <project_dir> <ledger>", file=sys.stderr)
+    print("       cost.py import <project_dir>", file=sys.stderr)
     return 2
 
 
