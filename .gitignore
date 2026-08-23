@@ -9,9 +9,9 @@ __pycache__/
 
 # The self-hosting instance. pm-flow is installed into its own repository as the
 # `pm-agent` project so it can work on itself. Almost none of it belongs in git:
-# the scripts, roles, domains and tasks under .agentic/ are copies that install.sh
-# renders from template/, and committing a second copy of the engine guarantees
-# the two drift. Reproduce it with:
+# what install.sh writes there is scaffolding it can write again, and what the
+# flow writes there while running is a record, not a definition. Reproduce it
+# with:
 #
 #   ./install.sh . --name "pm-flow self-hosting" --project-key pm_agent
 #

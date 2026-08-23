@@ -46,7 +46,6 @@ CYCLES = "cycles"
 STORE_FILE = "pm_flow.db"
 CONFIG_FILE = "config.json"
 PROJECT_KEY_FILE = ".project-key"
-INSTALL_RECORD = Path(".pm-flow") / "MANIFEST"
 
 
 def engine_root() -> Path:
@@ -125,10 +124,6 @@ class Paths:
     @property
     def config_file(self) -> Path:
         return self.flow_dir / CONFIG_FILE
-
-    @property
-    def install_record(self) -> Path:
-        return self.flow_dir / INSTALL_RECORD
 
     # -- one project ---------------------------------------------------------
 

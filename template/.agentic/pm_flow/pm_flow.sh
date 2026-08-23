@@ -42,8 +42,6 @@ Usage:
   pm_flow.sh [--project <name>] next
   pm_flow.sh [--project <name>] cost
   pm_flow.sh [--project <name>] access [--all]
-  pm_flow.sh version
-  pm_flow.sh upgrade --source <pm-flow checkout> [--apply] [--force]
   pm_flow.sh [--project <name>] [--section <name>] tick
   pm_flow.sh [--project <name>] [--section <name>] run [--max-ticks <n>]
   pm_flow.sh [--project <name>] role-prompt <role>
@@ -1445,46 +1443,6 @@ assert_current_done_completion() {
     fail "section cannot be marked done; latest completion decision is ${completion_decision:-missing}"
 }
 
-# What is installed, and whether anything has been edited since.
-cmd_version() {
-  [[ -f "$SCRIPT_DIR/upgrade.py" ]] || {
-    printf 'this install predates versioning; reinstall to stamp it\n' >&2
-    return 1
-  }
-  python3 "$SCRIPT_DIR/upgrade.py" status "$@"
-}
-
-# Compare against a newer pm-flow and, with --apply, take it.
-#
-# `--source` is a checkout or an unpacked release of pm-flow. Without --apply
-# this only reports, which is the useful default: an upgrade that silently
-# replaced a persona somebody had tuned would be worse than staying behind.
-cmd_upgrade() {
-  local source_dir="" apply=0 force=0
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --source) shift || fail "--source requires a path"; source_dir="${1:-}" ;;
-      --apply)  apply=1 ;;
-      --force)  force=1 ;;
-      *) fail "unknown upgrade argument: $1" ;;
-    esac
-    shift || true
-  done
-  [[ -f "$SCRIPT_DIR/upgrade.py" ]] || fail "upgrade.py is not installed; reinstall first"
-  [[ -n "$source_dir" ]] || fail "upgrade needs --source <path to a pm-flow checkout>"
-  local manifest="$source_dir/MANIFEST"
-  [[ -f "$manifest" ]] || fail "no manifest at $manifest; is that a pm-flow checkout?"
-
-  local -a args
-  if (( apply )); then
-    args=(apply --new "$manifest" --source "$source_dir")
-    (( force )) && args+=(--force)
-  else
-    args=(check --new "$manifest")
-  fi
-  python3 "$SCRIPT_DIR/upgrade.py" "${args[@]}"
-}
-
 cmd_validate() {
   require_command claude
   require_command uuidgen
@@ -1807,14 +1765,6 @@ main() {
     access)
       shift || true
       cmd_access "$@"
-      ;;
-    version)
-      shift || true
-      cmd_version "$@"
-      ;;
-    upgrade)
-      shift || true
-      cmd_upgrade "$@"
       ;;
     role-prompt)
       shift || true

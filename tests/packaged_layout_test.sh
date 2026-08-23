@@ -151,6 +151,15 @@ export PIP_NO_INPUT=1
 [[ -z "${PIP_INDEX_URL:-}${PIP_EXTRA_INDEX_URL:-}${UV_CACHE_DIR:-}" ]] || \
   fail "an inherited PIP_/UV_ setting survived into the build environment"
 
+# The caller's shell startup files, removed for the same reason. This script is
+# `#!/bin/zsh -f`, but the installed entry point starts the engine as a fresh
+# `zsh`, and every zsh reads `$ZDOTDIR/.zshenv` - so on a machine whose .zshenv
+# prepends a toolchain directory to PATH (nvm, cargo, a version manager), that
+# directory lands *ahead* of the deterministic child this test injects, and a
+# real vendor binary answers a dispatch this test believes it stubbed.
+export ZDOTDIR="$TEST_ROOT/zdotdir"
+mkdir -p "$ZDOTDIR"
+
 # `pip download` is never run here. --no-index means the only place a
 # distribution can come from is --find-links, and --require-hashes means it must
 # be byte for byte the file the lock recorded.
@@ -642,3 +651,373 @@ assert_equals "$after_entries" "$flow_entries" \
   "running the installed command added no engine file to the flow directory"
 
 printf 'PASS: packaged layout, engine from the venv and data from the repository\n'
+
+# --- what a repository is allowed to contain ---------------------------------
+#
+# The names an old install copied into a repository. They are listed here rather
+# than derived from the package, so a file that stops being shipped is still
+# checked for in repositories that already received it.
+
+COPIED_ENGINE_FILES=(
+  pm_flow.sh net_exec.sh agent_exec.sh access_hook.sh fetch.sh heartbeat.sh
+  driver.zsh catalog.py cost.py store.py telemetry.py trace_export.py watch.py
+  upgrade.py requirements-telemetry.txt README.md
+)
+COPIED_ENGINE_DIRS=(roles domains tasks project tests .pm-flow)
+
+# A flow directory holds project data and nothing else. Checked by name for the
+# things an install used to write, and by search for the copy-version lifecycle,
+# which could be left anywhere under the repository rather than only at the top.
+assert_data_only() {
+  local flow="$1" label="$2" name
+  for name in "${COPIED_ENGINE_FILES[@]}"; do
+    [[ ! -e "$flow/$name" ]] || fail "$label: a copied engine file survives: $name"
+  done
+  for name in "${COPIED_ENGINE_DIRS[@]}"; do
+    [[ ! -e "$flow/$name" ]] || fail "$label: a packaged resource directory survives: $name"
+  done
+  local stray
+  stray="$(find "$flow/.." \( -name MANIFEST -o -name upgrade.py \) -print 2>/dev/null)"
+  [[ -z "$stray" ]] || \
+    fail "$label: an install record or copy-version file survives:"$'\n'"$stray"
+}
+
+# What the installed package holds, so "the install was not written to" is
+# measured rather than assumed. Bytecode caches are excluded: they are the
+# interpreter's, not the distribution's, and they are not what an upgrade or a
+# migration would be accused of rewriting.
+/bin/cat > "$TEST_ROOT/digest_tree.py" <<'DIGEST'
+import hashlib
+import sys
+from pathlib import Path
+
+base = Path(sys.argv[1])
+for root in sorted(sys.argv[2:]):
+    target = Path(root)
+    paths = sorted(target.rglob("*")) if target.is_dir() else [target]
+    for path in paths:
+        if not path.is_file() or path.suffix == ".pyc" or "__pycache__" in path.parts:
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        try:
+            shown = path.relative_to(base)
+        except ValueError:
+            shown = path
+        print(f"{digest}  {shown}")
+DIGEST
+
+engine_digests() {
+  python3 "$TEST_ROOT/digest_tree.py" "$ENGINE" "$ENGINE"
+}
+engine_before="$(engine_digests)"
+
+# The deterministic child for the runs below: the same offline stub the full
+# suite drives its sections with. It answers every step of a cycle, so a tick
+# after migration can carry the project forward rather than only re-scoping it.
+mkdir -p "$TEST_ROOT/flow-bin"
+/bin/cp "$REPO_ROOT/tests/fixtures/stub_success.zsh" "$TEST_ROOT/flow-bin/claude"
+chmod +x "$TEST_ROOT/flow-bin/claude"
+
+bind_local_roles() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+for role in ("cpo", "pm", "developer", "10x_developer"):
+    config["roles"][role] = {"cli": "claude", "model": "", "difficulty": "low"}
+config["roles"]["consultant"] = [{"cli": "claude", "model": "", "difficulty": "low"}]
+config["isolation"] = {"worktrees": 0}
+config["supervision"] = {
+    "heartbeat_stall_seconds": 30, "max_attempts": 1,
+    "retry_backoff_seconds": 1, "usage_limit_pause_seconds": 1,
+}
+path.write_text(json.dumps(config, indent=2) + "\n")
+PY
+}
+
+section_brief() {
+  printf '## Objective\n\n- %s\n\n' "$1"
+  printf '## Scope\n\n- That work only.\n\n'
+  printf '## Priority\n\n- must-have: the product cannot ship without it\n\n'
+  printf '## Owned paths\n\n- `src/%s/**`\n\n' "$2"
+  printf '## Dependencies\n\n- None.\n\n'
+  printf '## Acceptance\n\n- The bounded result is validated.\n\n'
+  printf '## Rejection conditions\n\n- Scope drift.\n'
+}
+
+# Project-level governance preempts section work, so a tick that lands on a due
+# review spends itself there. `status` is side-effect free, so the queue is
+# drained before anything asserts on a single section's tick.
+drain_project_work() {
+  local repo="$1" done_flag="$2" guard=0
+  while [[ "$(cd "$repo" && "$PM_FLOW" status)" == *"portfolio review due"* ]]; do
+    (( guard += 1 ))
+    (( guard <= 8 )) || fail "the portfolio review queue would not drain"
+    ( cd "$repo" && PM_DONE_FLAG="$done_flag" PATH="$TEST_ROOT/flow-bin:$PATH" \
+      "$PM_FLOW" tick ) > /dev/null 2>&1
+  done
+}
+
+# --- initialising a fresh repository -----------------------------------------
+#
+# install.sh no longer ships an engine. What it writes is the half that was
+# always the repository's own, and the assertion is stated positively: the flow
+# directory is exactly these entries, so a file nobody thought to list here
+# still fails.
+
+INIT_REPO="$TEST_ROOT/init repo"
+mkdir -p "$INIT_REPO"
+git -C "$INIT_REPO" init --quiet
+INIT_FLOW="$INIT_REPO/.agentic/pm_flow"
+INIT_KEY="init-repo"
+INIT_SECTION_KEY="cutover"
+"$REPO_ROOT/install.sh" "$INIT_REPO" --name "Init Project" --domain distressed-tech \
+  > "$TEST_ROOT/init-install.out" 2>&1 || \
+  fail "install.sh failed:"$'\n'"$(/bin/cat "$TEST_ROOT/init-install.out")"
+
+assert_equals "$(/bin/ls -A "$INIT_REPO/.agentic" | LC_ALL=C sort | tr '\n' ' ')" \
+  "pm_flow " "installing puts nothing beside the flow directory"
+assert_equals "$(/bin/ls -A "$INIT_FLOW" | LC_ALL=C sort | tr '\n' ' ')" \
+  ".gitignore .project-key config.json $INIT_KEY local_env.sh.example projects.md " \
+  "a fresh install writes project data only"
+assert_data_only "$INIT_FLOW" "a fresh install"
+assert_equals "$(/bin/ls -A "$INIT_FLOW/$INIT_KEY" | LC_ALL=C sort | tr '\n' ' ')" \
+  "project.json project_state runs sections task_contract.md " \
+  "the project workspace is the project's own files"
+
+# And the repository it wrote is one the installed command can actually drive.
+bind_local_roles "$INIT_FLOW/config.json"
+( cd "$INIT_REPO" && "$PM_FLOW" init-section "$INIT_SECTION_KEY" \
+  <<< "$(section_brief 'Cut the ledger over.' cutover)" ) > "$TEST_ROOT/init-section.out"
+
+INIT_SECTION="$INIT_FLOW/$INIT_KEY/sections/$INIT_SECTION_KEY"
+drain_project_work "$INIT_REPO" "$TEST_ROOT/init.flag"
+init_tick="$(cd "$INIT_REPO" && PM_DONE_FLAG="$TEST_ROOT/init.flag" \
+  PATH="$TEST_ROOT/flow-bin:$PATH" "$PM_FLOW" tick 2>&1)" || \
+  fail "the installed tick failed on a freshly initialised repository:"$'\n'"$init_tick"
+assert_contains "$init_tick" "section=$INIT_SECTION_KEY" "the tick acted on the new section"
+assert_contains "$init_tick" "-> ASSIGN" "the deterministic child's verdict was acted on"
+[[ -f "$INIT_SECTION/cycles/001/assignment.md" ]] || \
+  fail "the tick produced no assignment:"$'\n'"$init_tick"
+
+# Driving it wrote records, and no engine.
+assert_data_only "$INIT_FLOW" "a fresh install after a tick"
+[[ -f "$INIT_FLOW/$INIT_KEY/runs/pm_flow.db" ]] || \
+  fail "the tick recorded no store under the project workspace"
+
+printf 'PASS: a fresh repository holds project data only, and the installed command drives it\n'
+
+# --- migrating a repository that still holds a copied engine ------------------
+#
+# The fixture is a copied install as the old installer produced one: every file
+# the template ships, copied into the repository and made executable, plus the
+# install record and the copy-version module that managed those copies. It is
+# then *run* through its own copied engine, so the project it carries into
+# migration has real run history rather than hand-written files.
+
+LEGACY_REPO="$TEST_ROOT/legacy repo"
+LEGACY_FLOW="$LEGACY_REPO/.agentic/pm_flow"
+LEGACY_KEY="salvage-legacy"
+LEGACY_WS="$LEGACY_FLOW/$LEGACY_KEY"
+LEGACY_SECTION_KEY="ledger-reconstruction"
+LEGACY_SECTION="$LEGACY_WS/sections/$LEGACY_SECTION_KEY"
+mkdir -p "$LEGACY_FLOW"
+git -C "$LEGACY_REPO" init --quiet
+
+/bin/cp -R "$REPO_ROOT/template/.agentic/pm_flow/." "$LEGACY_FLOW/"
+rm -rf "$LEGACY_FLOW/__pycache__"
+for candidate in "$LEGACY_FLOW"/*(.N); do
+  [[ "$(/usr/bin/head -c 2 "$candidate" 2>/dev/null)" == "#!" ]] || continue
+  chmod +x "$candidate"
+done
+[[ -x "$LEGACY_FLOW/pm_flow.sh" ]] || fail "the legacy fixture has no copied engine to migrate"
+
+# The two things this section exists to delete, as an old install left them.
+mkdir -p "$LEGACY_FLOW/.pm-flow"
+printf 'version 0.2.0\nroot template\nengine x deadbeef .agentic/pm_flow/pm_flow.sh\n' \
+  > "$LEGACY_FLOW/.pm-flow/MANIFEST"
+printf '# the copy-version lifecycle this install was managed by\n' \
+  > "$LEGACY_FLOW/upgrade.py"
+
+printf '%s\n' "$LEGACY_KEY" > "$LEGACY_FLOW/.project-key"
+python3 - "$REPO_ROOT/template/.agentic/pm_flow/config.json" "$LEGACY_FLOW/config.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config = json.loads(Path(sys.argv[1]).read_text().replace("{{DOMAIN}}", "generic"))
+for role in ("cpo", "pm", "developer", "10x_developer"):
+    config["roles"][role] = {"cli": "claude", "model": "", "difficulty": "low"}
+config["roles"]["consultant"] = [{"cli": "claude", "model": "", "difficulty": "low"}]
+config["isolation"] = {"worktrees": 0}
+config["supervision"] = {
+    "heartbeat_stall_seconds": 30, "max_attempts": 1,
+    "retry_backoff_seconds": 1, "usage_limit_pause_seconds": 1,
+}
+# An operator's own edit. Nothing in the flow reads it, which is the point: a
+# migration that rewrote config.json rather than leaving it alone would lose it.
+config["operator_note"] = "hand-tuned before the package existed"
+Path(sys.argv[2]).write_text(json.dumps(config, indent=2) + "\n")
+PY
+
+mkdir -p "$LEGACY_WS/project_state" "$LEGACY_WS/runs" "$LEGACY_SECTION" "$LEGACY_WS/roles"
+printf '{\n  "version": 1,\n  "domain": "distressed-tech"\n}\n' > "$LEGACY_WS/project.json"
+printf '# Salvage Legacy Task Contract\n\nOne bounded assignment at a time.\n' \
+  > "$LEGACY_WS/task_contract.md"
+LEGACY_PLAN_MARKER="The ledger predates the registry and only the documents reconcile them."
+printf '# Project plan\n\n%s\n' "$LEGACY_PLAN_MARKER" > "$LEGACY_WS/project_state/plan.md"
+printf '# Sections\n\n| section | priority | status | summary |\n' \
+  > "$LEGACY_WS/project_state/sections.md"
+printf 'Ledger reconstruction\n' > "$LEGACY_SECTION/name.txt"
+printf 'active\n' > "$LEGACY_SECTION/status.txt"
+printf 'must-have\n' > "$LEGACY_SECTION/priority.txt"
+printf 'Nothing handed off yet.\n' > "$LEGACY_SECTION/summary.txt"
+printf '2026-01-01T00:00:00Z\n' > "$LEGACY_SECTION/updated_at.txt"
+section_brief 'Reconstruct the ledger from the source documents.' ledger \
+  > "$LEGACY_SECTION/brief.md"
+LEGACY_OVERLAY_MARKER="Legacy desk house rule: cite the document behind every row."
+printf '## House rules\n\n%s\n' "$LEGACY_OVERLAY_MARKER" > "$LEGACY_WS/roles/pm.md"
+
+# Run it through its own copied engine, so the migration is handed a project
+# with recorded attempts rather than a directory of files.
+legacy_tick="$(cd "$LEGACY_REPO" && PM_DONE_FLAG="$TEST_ROOT/legacy.flag" \
+  PATH="$TEST_ROOT/flow-bin:$PATH" zsh -f "$LEGACY_FLOW/pm_flow.sh" tick 2>&1)" || \
+  fail "the copied engine could not drive its own repository:"$'\n'"$legacy_tick"
+assert_contains "$legacy_tick" "section=$LEGACY_SECTION_KEY" \
+  "the legacy fixture ran its own section"
+[[ -f "$LEGACY_SECTION/cycles/001/assignment.md" ]] || \
+  fail "the legacy fixture produced no cycle to carry through migration"
+LEGACY_STORE="$LEGACY_WS/runs/pm_flow.db"
+[[ -f "$LEGACY_STORE" ]] || fail "the legacy fixture recorded no store"
+
+# What the copied engine reports, before anything is removed.
+legacy_engine() {
+  ( cd "$LEGACY_REPO" && zsh -f "$LEGACY_FLOW/pm_flow.sh" "$@" )
+}
+status_before="$(legacy_engine status)"
+sections_before="$(legacy_engine list-sections)"
+config_before="$(legacy_engine config)"
+cost_before="$(legacy_engine cost)"
+
+# And what it recorded. Read from the attempts table by their own identity, so a
+# store that was replaced with a fresh one cannot match.
+query_attempts() {
+  python3 - "$1" <<'PY'
+import sqlite3
+import sys
+
+connection = sqlite3.connect(sys.argv[1])
+rows = connection.execute(
+    "SELECT role_key, step, cycle, label, status FROM attempts ORDER BY id"
+).fetchall()
+if not rows:
+    raise SystemExit("no attempts were recorded")
+for row in rows:
+    print("|".join("" if value is None else str(value) for value in row))
+PY
+}
+attempts_before="$(query_attempts "$LEGACY_STORE")" || \
+  fail "the legacy fixture recorded no queryable attempt"
+
+# The project data that must survive byte for byte. task_contract.md, the
+# coordinator prompts and the flow-level scaffolding are deliberately absent:
+# install.sh refreshes those on every run and always has.
+preserved_digests() {
+  python3 "$TEST_ROOT/digest_tree.py" "$LEGACY_FLOW" \
+    "$LEGACY_WS/project_state/plan.md" "$LEGACY_WS/project_state/sections.md" \
+    "$LEGACY_WS/project.json" "$LEGACY_WS/roles" "$LEGACY_WS/sections" \
+    "$LEGACY_WS/runs" "$LEGACY_FLOW/config.json"
+}
+preserved_before="$(preserved_digests)"
+
+# --- migrate ------------------------------------------------------------------
+
+"$REPO_ROOT/install.sh" "$LEGACY_REPO" --name "Salvage Legacy" \
+  > "$TEST_ROOT/legacy-migrate.out" 2>&1 || \
+  fail "migrating the copied install failed:"$'\n'"$(/bin/cat "$TEST_ROOT/legacy-migrate.out")"
+
+assert_data_only "$LEGACY_FLOW" "the migrated repository"
+assert_equals "$(/bin/ls -A "$LEGACY_FLOW" | LC_ALL=C sort | tr '\n' ' ')" \
+  ".gitignore .project-key config.json local_env.sh.example projects.md $LEGACY_KEY " \
+  "the migrated flow directory holds project data only"
+
+# Nothing was lost. The digests cover the plan, the registry, the recorded
+# domain, every section file, the run records, the store, the operator's config
+# and the project-local persona overlay.
+# Stated as "every file that was there is still there, with the same bytes"
+# rather than as string equality, because install.sh legitimately *adds* to a
+# workspace - the .gitkeep markers that keep an empty runs/ and sections/ in
+# git. Losing or rewriting one of the files below is what this forbids, and the
+# failure names the file rather than printing two hundred digests.
+assert_preserved() {
+  local after="$1" before="$2" label="$3" line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    [[ "$after" == *"$line"* ]] || \
+      fail "$label: this file was lost or rewritten: ${line#* }"
+  done <<< "$before"
+}
+assert_preserved "$(preserved_digests)" "$preserved_before" \
+  "migration left the project's own files byte for byte unchanged"
+assert_file_marker() {
+  local path="$1" expected="$2" label="$3"
+  [[ -f "$path" ]] || fail "$label: $path is gone"
+  assert_contains "$(/bin/cat "$path")" "$expected" "$label"
+}
+assert_file_marker "$LEGACY_WS/project_state/plan.md" "$LEGACY_PLAN_MARKER" \
+  "the project plan survived migration"
+assert_file_marker "$LEGACY_WS/roles/pm.md" "$LEGACY_OVERLAY_MARKER" \
+  "the project-local persona overlay survived migration"
+assert_file_marker "$LEGACY_WS/project.json" '"domain": "distressed-tech"' \
+  "the recorded domain survived migration"
+assert_file_marker "$LEGACY_FLOW/config.json" "hand-tuned before the package existed" \
+  "the operator's configuration survived migration"
+
+# The same four observations, now produced by the wheel-installed command
+# against a repository with no engine in it at all.
+installed() {
+  ( cd "$LEGACY_REPO" && "$PM_FLOW" "$@" )
+}
+assert_equals "$(installed status)" "$status_before" \
+  "status reports the same project after migration"
+assert_equals "$(installed list-sections)" "$sections_before" \
+  "list-sections reports the same registry after migration"
+assert_equals "$(installed config)" "$config_before" \
+  "config resolves the same bindings and domain after migration"
+assert_equals "$(installed cost)" "$cost_before" \
+  "cost reports the same spend after migration"
+
+assert_equals "$(query_attempts "$LEGACY_STORE")" "$attempts_before" \
+  "previously recorded attempts remain queryable after migration"
+
+# The obsolete command is gone rather than merely unused.
+retired_upgrade="$(expect_failure "the retired upgrade command" \
+  zsh -c 'cd "$1" && "$2" upgrade --source "$3"' zsh "$LEGACY_REPO" "$PM_FLOW" "$REPO_ROOT")"
+assert_contains "$retired_upgrade" "unknown command: upgrade" \
+  "the runtime upgrade command is no longer accepted"
+
+# And the project carries on: the next step of the cycle the copied engine
+# opened is taken by the installed command.
+drain_project_work "$LEGACY_REPO" "$TEST_ROOT/legacy.flag"
+migrated_tick="$(cd "$LEGACY_REPO" && PM_DONE_FLAG="$TEST_ROOT/legacy.flag" \
+  PATH="$TEST_ROOT/flow-bin:$PATH" "$PM_FLOW" tick 2>&1)" || \
+  fail "the installed command could not continue the migrated project:"$'\n'"$migrated_tick"
+assert_contains "$migrated_tick" "section=$LEGACY_SECTION_KEY" \
+  "the migrated project's own section was advanced"
+assert_contains "$migrated_tick" "develop 001 -> result" \
+  "the installed tick took the next step of the cycle the copied engine opened"
+[[ -f "$LEGACY_SECTION/cycles/001/result.md" ]] || \
+  fail "the continued cycle produced no result:"$'\n'"$migrated_tick"
+assert_data_only "$LEGACY_FLOW" "the migrated repository after a tick"
+
+printf 'PASS: a copied-engine repository migrates losslessly and keeps running\n'
+
+# --- the installed package was never written to ------------------------------
+
+assert_equals "$(engine_digests)" "$engine_before" \
+  "neither initialisation nor migration changed a file inside the installed package"
+
+printf 'PASS: initialisation and migration leave the installed package untouched\n'

@@ -34,7 +34,10 @@ pm-flow = "pm_flow.cli:main"
 Homepage = "https://github.com/salah-ghanim/pm-flow"
 
 [tool.hatch.version]
-# One source of truth, already read by tools/manifest.py and the installer.
+# One source of truth. It used to be read by the manifest generator and the
+# installer as well, because the engine was copied into every repository and
+# something had to record which copy was which. Nothing copies the engine now,
+# so the version this file holds is the package's and nothing else's.
 path = "VERSION"
 pattern = "^(?P<version>.+?)\\s*$"
 
