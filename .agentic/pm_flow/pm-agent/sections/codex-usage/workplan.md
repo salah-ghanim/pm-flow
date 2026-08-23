@@ -52,7 +52,8 @@
 
 ## Task T3 — Track the replay test
 
-- Status: done (cycle 007, GO; awaiting the driver's commit). Cycle 006 built
+- Status: done (cycle 007, GO; committed `3660ae7`, merged to `main`
+  `09cded8`; re-run rc=0 on `main` in the cycle 008 scope). Cycle 006 built
   the test on a worktree 63 commits behind `main`, where the stub's scope
   answer was `UNPARSED`; cycle 007 gave the stub `main`'s scope answer
   (`retire_workplan_scaffold`, `## Workplan task` / `T1`), dropped the

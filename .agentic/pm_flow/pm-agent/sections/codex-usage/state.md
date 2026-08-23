@@ -2,9 +2,10 @@
 
 ## Current task
 
-- None. T3 accepted in cycle 007 (GO); the driver commits
-  `tests/codex_usage_test.sh` from the section worktree. Every workplan task
-  is done; the next scope should answer COMPLETE.
+- None. Section complete (cycle 008 scope, 2026-08-23). T3 is committed:
+  `tests/codex_usage_test.sh` landed at `3660ae7` and was merged to `main` at
+  `09cded8`; `git ls-files` tracks both the test and the fixture and
+  `git status --short tests template` is empty.
 
 ## Completed tasks and evidence
 
@@ -52,6 +53,11 @@
   - Drift: `git status --short` shows only `?? tests/codex_usage_test.sh`;
     fixture and engine unchanged. The stub's ASSIGN text equals
     `stub_success.zsh:74-90` except the emitter (`print -r --` vs `emit`).
+  - Post-commit re-run (cycle 008 scope, `main` at `8c6a9cb`): `zsh
+    tests/codex_usage_test.sh` rc=0, store under
+    `$TMPDIR/codex-usage-test.yXKzRw`, `result=scope 001 -> ASSIGN`, the same
+    six rows, `event-only dispatch ran 6s past the 3s budget`, both mutation
+    PASS lines.
 
 ## Active decisions
 
@@ -75,15 +81,10 @@
 
 ## Blockers
 
-- None. The cycle-006 blocker cleared on 2026-08-23: the section worktree
-  (`.pm-flow-worktrees/pm-flow/pm-agent/codex-usage`) is at `ec8130f` =
-  `main`, `git status --short` shows only `?? tests/codex_usage_test.sh`; the
-  stale `driver.zsh` / `telemetry.py` edits are gone, so the driver's own
-  `sync_section_worktree` can fast-forward from now on.
+- None.
 
 ## Next eligible task
 
-- None. T1–T3 are done and A1, A3–A6 are evidenced (A2 retired). The next
-  scope answers COMPLETE once the driver has committed cycle 007; the
-  handoff should name the tracked test as the permanent proof and the live
-  probe as the schema-drift check.
+- None. T1–T3 are done and committed; A1, A3–A6 are evidenced (A2 retired).
+  The tracked test is the permanent proof; `cycles/006/pm_probe_store.zsh`
+  against a live Codex dispatch is the schema-drift check.
