@@ -746,10 +746,59 @@ PY
 }
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-agent.XXXXXX")"
+
+# codex keeps its session state, logs, caches and credentials under $CODEX_HOME
+# (default $HOME/.codex) and opens them before it does anything else. A codex
+# role sandboxes every command it runs to the workspace and $TMPDIR, so a
+# *nested* codex - the only way a role can exercise a real codex dispatch, which
+# is what codex token accounting has to be checked against - cannot write that
+# directory and dies before emitting a single event:
+#
+#   Error: failed to initialize in-process app-server client:
+#   Operation not permitted (os error 1)
+#
+# Widening the sandbox to reach $HOME/.codex would hand every role write access
+# to the user's real credentials, so the dispatch gets a disposable home inside
+# the work dir instead. The child inherits CODEX_HOME and lands inside the
+# writable area the sandbox already grants, and the real home stops being
+# mutable state any role can touch at all. Credentials are seeded in and copied
+# back if codex refreshed them, because that is the one thing in there the next
+# dispatch needs; everything else is per-dispatch and goes with the work dir.
+CODEX_HOME_SOURCE=""
+prepare_codex_home() {
+  [[ "$AGENT_CLI" == "codex" ]] || return 0
+  local source_home="${CODEX_HOME:-$HOME/.codex}"
+  [[ -d "$source_home" ]] || return 0
+  CODEX_HOME_SOURCE="$source_home"
+  export CODEX_HOME="$WORK_DIR/codex-home"
+  mkdir -p "$CODEX_HOME"
+  local name
+  for name in auth.json config.toml; do
+    [[ -f "$CODEX_HOME_SOURCE/$name" ]] || continue
+    /bin/cp -p "$CODEX_HOME_SOURCE/$name" "$CODEX_HOME/$name"
+  done
+}
+
+# Sections run in parallel, so several dispatches can finish holding refreshed
+# credentials at once. Writing the real auth.json in place would let one of them
+# be read half-written by a dispatch that is only just starting, and the failure
+# mode is the whole run losing its login. Land it by rename instead: a reader
+# sees either the old file or the new one, never a partial one.
+save_codex_credentials() {
+  [[ -n "$CODEX_HOME_SOURCE" && -f "${CODEX_HOME:-}/auth.json" ]] || return 0
+  /usr/bin/cmp -s "$CODEX_HOME/auth.json" "$CODEX_HOME_SOURCE/auth.json" && return 0
+  local staged="$CODEX_HOME_SOURCE/.auth.json.$$"
+  /bin/cp -p "$CODEX_HOME/auth.json" "$staged" || return 0
+  /bin/mv -f "$staged" "$CODEX_HOME_SOURCE/auth.json" || /bin/rm -f "$staged"
+}
+
 cleanup_work_dir() {
+  save_codex_credentials
   [[ -n "${WORK_DIR:-}" && -d "$WORK_DIR" ]] && rm -rf -- "$WORK_DIR"
 }
 trap cleanup_work_dir EXIT HUP INT TERM
+
+prepare_codex_home
 
 RAW_OUTPUT="$WORK_DIR/raw.txt"
 # codex reports token usage nowhere the response envelope can reach, so the
