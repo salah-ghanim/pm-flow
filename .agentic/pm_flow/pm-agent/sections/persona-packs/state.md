@@ -2,8 +2,10 @@
 
 ## Current task
 
-- None in flight. T6 accepted in cycle 010 (pending the driver's merge); T7
-  is the next assignment.
+- T7 assigned in cycle 011: the chained end-to-end proof on one store. T6 is
+  merged on `main` (`e2eb511`; `cmd_persona_update` and
+  `acquire_install_and_report` are at `catalog.py:1557` / `:1513`), so the
+  prerequisite is met.
 
 ## Completed tasks and evidence
 
@@ -20,8 +22,8 @@
   `dc38523` on `main`.
 - T5 / A5: saved regressions and all ten engine suite groups passed in cycle
   009 at `dc38523`.
-- T6 / A3, A4: `persona update [pack-name]` accepted in cycle 010 (review GO).
-  Change: `catalog.py` only (+71/−26); `persona add`'s acquire-then-install
+- T6 / A3, A4: `persona update [pack-name]` accepted in cycle 010 (review GO),
+  merged as `e2eb511`. Change: `catalog.py` only (+71/−26); `persona add`'s acquire-then-install
   body became `acquire_install_and_report(db, source, verb, expected_name)`,
   which both commands call; `cmd_persona_update` reads `persona_packs`
   (`name, source_url`), re-acquires each pack through that helper, reports a
@@ -68,6 +70,17 @@
   `persona_packs.source_url` so the user never has to remember the URL.
 - A swap records a key, not a version id; after `persona update` the next
   dispatch of a swapped seat carries the new version with no further command.
+- The command surface is `python3 <flow>/catalog.py --db <store> persona
+  {add,list,update,swap}` (since T1). `pm_flow.sh` has no `persona`
+  subcommand and is outside this section's owned paths, so the brief's literal
+  `pm-flow persona add …` spelling is not delivered here; the handoff names
+  this as the one-line wrapper another section may add.
+- Re-adding identical content from a richer source is adoption, not a
+  version: `persona add <path>` then `persona add file://<same repo>` keeps
+  the persona row id and hash, refreshes `source_url`/`metadata.git_commit`
+  on that row (`~ adopted into pack`), and moves `persona_packs.source_url`
+  and `.ref` to the URL and commit, which is what lets a later `persona
+  update` re-acquire through Git.
 
 ## Blockers
 
@@ -85,5 +98,5 @@
 
 ## Next eligible task
 
-- T7, the chained end-to-end proof on one store, which is the last task
-  before `COMPLETE`. Prerequisite: the driver merges cycle 010's `catalog.py`.
+- T7 (in flight, cycle 011). It is the last task before `COMPLETE`; no
+  product change is expected unless the chain exposes a defect.

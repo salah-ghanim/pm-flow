@@ -113,21 +113,28 @@
 
 ## Task T7 — End-to-end closing proof
 
-- Status: next.
+- Status: in flight (cycle 011).
 - Outcome: one script on one real `install.sh` fixture runs the brief's three
-  scenarios in sequence against a single store — `persona add file://…`,
-  `persona list` with source and commit, edit + commit + `persona update`,
-  `persona swap` of one layer, run-start re-sync, headless dispatch — and
-  reads both the old and the new attribution from that store. Then the full
-  suite.
+  scenarios in sequence against a single store, in this order — `persona add
+  <local path>` of the pack directory, `persona add file://<same repo>` at
+  commit C1 (adoption: same row id and hash, provenance now URL + C1),
+  `persona list` with source and commit, `persona swap` of the `pm` base
+  layer, run-start re-sync and headless dispatch at v1, edit + commit C2 +
+  `persona update`, re-sync and dispatch at v2, a no-op `persona update` —
+  and finally reads both the v1 and v2 attribution from that store's
+  `attempts` rows back to live `personas` rows and their commits. Then the
+  full suite.
 - Paths: no new product paths unless the chain exposes a defect, in which
   case `catalog.py`/`store.py` only.
-- Reuse: cycle 009's fixture (install.sh, three-layer `pm` stack, capturing
-  stub CLI), cycle 008's Git pack repository, T6's update step.
+- Reuse: cycle 010's `acceptance.sh` fixture (install.sh, `distressed-tech`
+  domain, house-style `pm.md`, capturing stub CLI, `drain`/`tick`/`snapshot`,
+  `update-crafts` Git pack with `install.sh` marker), cycle 010's
+  `regressions.sh` pattern, T6's update step.
 - Acceptance IDs: A1, A2, A3, A4, A5 (end-to-end).
 - Validation: the chained script exits 0 with every scenario's observation
-  printed; `zsh tests/pm_flow_test.sh` exits 0.
-- Depends on: T6.
+  printed and `assertions_exit=0`; cycles 008–010 regressions exit 0;
+  `zsh tests/pm_flow_test.sh` exits 0 with ten `PASS:` lines.
+- Depends on: T6 (merged, `e2eb511`).
 
 ## Integration and end-to-end validation
 

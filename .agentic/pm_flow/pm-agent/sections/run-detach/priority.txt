@@ -1,0 +1,2 @@
+nice-to-have
+nohup pm-flow run … &!` already works by hand; without this
