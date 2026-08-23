@@ -19,7 +19,11 @@ dispatched process.
   at all and cross-model comparison is impossible.
 
 ### Owned paths
-- template/.agentic/pm_flow/agent_exec.sh
+- `template/.agentic/pm_flow/agent_exec.sh`
+- `template/.agentic/pm_flow/driver.zsh`
+- `template/.agentic/pm_flow/telemetry.py`
+- `tests/fixtures/codex_events_real.jsonl`
+- `tests/codex_usage_test.sh`
 
 ### Dependencies
 - green-suite
@@ -33,6 +37,8 @@ tokens cannot be compared against anything. This section is not about a file
 appearing; it is about the measurement layer having numbers in it.
 
 ### Acceptance
+
+Stable IDs `A1`–`A6` refer to the bullets below in order.
 
 Stated as outcomes in the running system, because the previous version of this
 brief was not and the section passed while delivering nothing usable.
@@ -53,21 +59,16 @@ brief was not and the section passed while delivering nothing usable.
   false `permanent` classification.
 - The suite still passes.
 
-### Known blocker, and it belongs to this section
+### Integration requirement
 
-`telemetry_begin_attempt` and `telemetry_end_attempt` are defined in
-`driver.zsh` and **never called**. Nothing records an attempt, so parsing codex
-tokens correctly still delivers zero of them to the store. Wiring them is in
-scope here: without it the first two criteria above cannot be met, and the
-section is exactly as disconnected as it was before.
-
-A previous attempt at wiring regressed the scheduling tests with no error on any
-stream and the cause was never explained. Re-wire only with a test proving a
-dispatch still happens.
+Event parsing is insufficient unless `driver.zsh` brackets the real dispatch
+with `telemetry_begin_attempt` and `telemetry_end_attempt`. The tracked replay
+must prove both that a dispatch still occurs and that its completed attempt is
+stored; a parser-only test cannot satisfy A1 or A2.
 
 ### Rejection conditions
 - The event stream is written into the attempt log, where it can be misread as
   an error by failure classification.
 - Liveness is left reading only stdout and stderr, so adding `--json` makes a
   working Codex dispatch look stalled.
-- Any file outside agent_exec.sh is modified.
+- Any file outside the Owned paths list is modified.

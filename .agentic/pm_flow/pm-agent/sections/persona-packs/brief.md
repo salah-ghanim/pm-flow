@@ -29,6 +29,8 @@ nor safe to install.
 - installer
 
 ### Acceptance
+
+Stable IDs `A1`–`A5` refer to the bullets below in order.
 - A persona pack can be installed from a local path and from a git URL.
 - Swapping one layer of a seat leaves the other layers intact.
 - An installed persona keeps its provenance and can be updated from source

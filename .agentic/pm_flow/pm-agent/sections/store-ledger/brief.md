@@ -21,9 +21,16 @@ and this runs against a live install with ten workspaces.
 - template/.agentic/pm_flow/watch.py
 
 ### Dependencies
-- trace-commands
+
+- None.
+
+Store accounting is independently implementable. Trace export is a downstream
+consumer of stored telemetry, not a prerequisite for importing or reporting
+attempts.
 
 ### Acceptance
+
+Stable IDs `A1`–`A4` refer to the bullets below in order.
 - Migrated totals equal the totals the old ledger reported, to the cent, on a
   project with existing history.
 - `pm_flow.sh cost` and `watch.py` read the store.

@@ -66,6 +66,8 @@ would add a fourth arm to the `case` it is supposed to remove.
 
 ## Acceptance
 
+Stable IDs `A1`–`A7` refer to the bullets below in order.
+
 Stated as outcomes in the running system, because a criterion that names a
 mechanism can be satisfied by a stub while the feature does nothing.
 

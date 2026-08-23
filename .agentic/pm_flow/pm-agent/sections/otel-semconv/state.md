@@ -1,25 +1,27 @@
 # otel-semconv section PM state
 
-## Objective
+## Current task
 
-- Derive the current objective from `brief.md`.
+- None while the hard dependency `codex-usage` remains incomplete.
 
-## Owned paths
+## Completed tasks and evidence
 
-- Record the files or components this section owns before delegating work.
+- None. Workplan T1–T4 is defined; current telemetry/store fields are inputs,
+  not evidence that conventional spans are emitted.
 
-## Plan
+## Active decisions
 
-- Break the section into bounded developer assignments.
+- Pin one developmental GenAI convention revision in `semconv.py`.
+- Standard literals appear only in the mapping module; pm-flow extensions use a
+  visibly non-standard namespace.
+- Mapping tests, real emission, and stock-backend visibility are distinct gates.
 
-## Decisions and evidence
+## Blockers
 
-- Keep detailed local decisions and validation evidence here, not in the root context.
+- T2 needs telemetry/driver ownership after codex-usage's tracked replay and
+  canary settle those interfaces. T1 can be scoped once the dependency releases.
 
-## Current assignment
+## Next eligible task
 
-- None yet.
-
-## Dependencies
-
-- Read only dependency handoffs explicitly required by `brief.md`.
+- T1 after codex-usage: implement the revision/mapping table and stray-literal
+  guard from upstream convention data.

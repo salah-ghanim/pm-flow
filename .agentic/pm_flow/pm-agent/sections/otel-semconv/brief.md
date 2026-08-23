@@ -50,27 +50,25 @@ its own decision rather than being smuggled in here.
 - `src/pm_flow/semconv.py`
 - `tests/otel_semconv_test.sh`
 
-Deliberately new paths. The files that will *call* this mapping belong to
-`codex-usage`, `trace-commands` and `store-ledger`; build the vocabulary here,
-prove it here, and hand each of those a bounded change rather than editing three
-active sections' files from a fourth.
+The mapping is independently testable in these new paths. Real emission is a
+later workplan task and requires a validated transfer of the telemetry/driver
+paths after `codex-usage`; it must not be faked by testing only this module.
 
 ## Dependencies
 
 - codex-usage
-- store-ledger
 
-Both are real, not sequencing by habit. `codex-usage` owns the attempt record
-that has to carry tokens at all, and until `telemetry_begin_attempt` is actually
-called there is nothing to name. `store-ledger` owns what reads those records
-back. Renaming attributes before either exists would be naming a thing that is
-not yet written.
+`codex-usage` owns the attempt lifecycle and telemetry integration paths. It
+must settle and release those interfaces before this section changes emission.
+`store-ledger` is a downstream reader, not a prerequisite; making it one created
+a dependency cycle through trace export.
 
 ## Acceptance
 
-Stated as outcomes in the running system. A criterion that a fixture can satisfy
-while the feature does nothing is how `codex-usage` passed while recording zero
-tokens; none of these can be met that way.
+Stable IDs `A1`–`A6` refer to the bullets below in order.
+
+Stated as outcomes in the running system; a fixture containing the right strings
+cannot substitute for emitted telemetry.
 
 - A run finished on this machine and opened afterwards in a stock OpenTelemetry
   backend shows a role dispatch as an `invoke_agent` span, with its model calls

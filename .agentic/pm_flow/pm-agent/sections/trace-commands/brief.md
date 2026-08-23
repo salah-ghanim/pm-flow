@@ -18,11 +18,15 @@ Endpoints worth documenting: Phoenix on 6006, Jaeger on 4318, Langfuse on
 ### Owned paths
 - template/.agentic/pm_flow/pm_flow.sh
 - template/.agentic/pm_flow/config.json
+- template/.agentic/pm_flow/trace_export.py
+- tests/trace_commands_test.sh
 
 ### Dependencies
-- green-suite
+- otel-semconv
 
 ### Acceptance
+
+Stable IDs `A1`–`A5` refer to the bullets below in order.
 - `pm_flow.sh trace export --otlp <url>` ships recorded spans and reports a count.
 - `pm_flow.sh trace export --file <path>` writes OTLP/JSON with no dependency
   installed.
@@ -33,4 +37,4 @@ Endpoints worth documenting: Phoenix on 6006, Jaeger on 4318, Langfuse on
 ### Rejection conditions
 - Telemetry failure can abort a run. Every call must be guarded.
 - The OTLP endpoint is hardcoded to one vendor.
-- Any file outside pm_flow.sh and config.json is modified.
+- Any file outside the Owned paths list is modified.

@@ -2,40 +2,36 @@
 
 ## Outcome
 
-- Cycle 004 is accepted and committed. A user can install, inspect and re-add a
-  local persona pack; edited prompt content creates a new attributable version.
+Complete on main through cycle 009. Persona packs install from local paths and
+Git URLs, retain source/commit/content provenance, update without rewriting old
+versions, and swap exactly one seat layer without changing its siblings or
+binding. The next dispatch records the new stack while prior attempts retain
+the old one.
 
 ## Decisions
 
-- The pack format is a JSON index plus indexed Markdown persona files.
-- Pack validation rejects machine-local CLI, model, binding, access and tool
-  fields, path escapes, symlink escapes and non-Markdown indexed files before
-  opening the store.
-- Identical standalone personas are adopted in place, retaining their IDs and
-  measurement references while gaining pack provenance.
-- A second pack claiming an identical installed persona is rejected atomically;
-  the original publisher and measurement references remain unchanged.
-- Focused local, adoption and collision checks pass, their targeted mutations
-  fail, and the hermetic suite passes.
+- A pack is a validated JSON index plus Markdown persona files; nothing from a
+  pack executes at install time.
+- Versions are immutable content rows. Identical standalone personas can be
+  adopted; a second pack cannot claim an already attributed persona.
+- Swap uses existing topology overrides and seat-persona ordering.
 
 ## Interfaces
 
-- `catalog.py --db <store> persona add <local-path>` installs a validated pack.
-- `catalog.py --db <store> persona list` shows the newest version of each key
-  with its layer, pack, manifest version, content hash and source.
+- `catalog.py ... persona add <path|git-url>`, `persona list`, `persona update`,
+  and `persona swap <seat> <layer> <persona>`.
+- Source URL, source commit, manifest version, and content hash remain queryable.
 
 ## Risks
 
-- A pack with one cross-pack collision is rejected whole. This preserves
-  attribution but means its otherwise distinct personas are not installed.
-- Git acquisition must not persist a temporary clone path as provenance.
+- HTTPS/SSH Git transports were not exercised; `file://` used the real Git CLI.
+- Inherited `PM_FLOW_*` variables can misroute a standalone catalog test; clean
+  them in acceptance harnesses.
 
 ## What is unproven
 
-- Git URL acquisition, update from source while retaining old attributable
-  versions, and layer-specific seat swapping remain unimplemented.
+- Remote authenticated Git transports. They do not change pack semantics.
 
 ## Next action
 
-- Add git-URL installation using the real Git CLI, retaining the original URL
-  and installed commit while reusing the accepted pack validation path.
+Mark the section done. Persona-cards may now take catalog integration ownership.

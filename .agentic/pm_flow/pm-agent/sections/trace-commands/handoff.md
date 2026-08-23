@@ -1,35 +1,30 @@
-# trace-commands handoff
+# trace-commands section handoff
 
 ## Outcome
 
-Nothing attempted. The section is blocked on purpose, not stalled.
+The expired packaging-layout blocker is removed. The section is rebaselined
+against the packaged engine and now waits only for otel-semconv.
 
 ## Decisions
 
-This brief was cut against a layout where the engine lives inside the
-repository, so its owned paths point at files that `packaging` is about to
-move or delete. Working it now would be work done twice, and the second time
-would be a merge against a tree that no longer has those paths.
-
-It is marked `blocked` rather than left `planned` so an unscoped run cannot
-spend budget on a scope that is wrong by construction.
+- `trace_export.py` owns selection, serialization, delivery, and checkpoints.
+- File and HTTP exports share one payload; only acknowledged spans are marked.
+- Export/telemetry failures never abort the underlying product run.
 
 ## Interfaces
 
-None yet.
+- Planned: `pm_flow.sh trace export --file|--otlp` and
+  `telemetry.enabled` config.
 
 ## Risks
 
-Re-cutting must be done from this brief's *objective*, not by editing
-`owned_paths.txt`. Scope is captured at `init-section` and never re-derived,
-so a brief and the scope actually enforced can disagree silently. That is a real
-pm-flow defect, found by using it, and it is why this is a re-cut rather than an
-edit.
+- Starting before semantic-convention emission lands would validate the old
+  private payload and bake drift into the public export contract.
 
 ## What is unproven
 
-Everything the brief claims. Nothing here has been attempted.
+- All A1–A5 outcomes; nothing has been implemented.
 
 ## Next action
 
-Re-cut against the packaged layout once `packaging` reports done, then reopen.
+Keep planned/waiting on otel-semconv, then scope workplan T1.

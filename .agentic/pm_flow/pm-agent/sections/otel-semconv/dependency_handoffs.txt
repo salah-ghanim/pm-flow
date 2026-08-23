@@ -1,2 +1,1 @@
 .agentic/pm_flow/pm-agent/sections/codex-usage/handoff.md
-.agentic/pm_flow/pm-agent/sections/store-ledger/handoff.md

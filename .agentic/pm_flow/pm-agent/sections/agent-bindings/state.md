@@ -1,25 +1,25 @@
 # agent-bindings section PM state
 
-## Objective
+## Current task
 
-- Derive the current objective from `brief.md`.
+- T1 — define and test the ACP transport contract in `acp.py`.
 
-## Owned paths
+## Completed tasks and evidence
 
-- Record the files or components this section owns before delegating work.
+- None. The section has been decomposed; no product implementation exists.
 
-## Plan
+## Active decisions
 
-- Break the section into bounded developer assignments.
+- ACP transport and MCP control are separate adapters to the existing state
+  machine. Neither may duplicate project/section transitions.
+- Existing CLI bindings remain the compatibility baseline.
+- T3 requires a validated dispatch-path ownership transfer after codex-usage.
 
-## Decisions and evidence
+## Blockers
 
-- Keep detailed local decisions and validation evidence here, not in the root context.
+- None for T1 or T2. T3 is intentionally not assignable under current ownership.
 
-## Current assignment
+## Next eligible task
 
-- None yet.
-
-## Dependencies
-
-- Read only dependency handoffs explicitly required by `brief.md`.
+- T1. Validate a protocol-faithful initialize/prompt/result exchange, access
+  capability preflight, cancellation, malformed frames, and child failure.

@@ -1,1 +1,1 @@
-Cycle 005; last action rescue.
+Lifecycle works; next task is tracked replay, then host canary and cost verification.

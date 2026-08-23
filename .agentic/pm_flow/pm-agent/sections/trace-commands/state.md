@@ -1,25 +1,25 @@
 # trace-commands section PM state
 
-## Objective
+## Current task
 
-- Derive the current objective from `brief.md`.
+- None while the hard dependency `otel-semconv` is incomplete.
 
-## Owned paths
+## Completed tasks and evidence
 
-- Record the files or components this section owns before delegating work.
+- Nothing attempted. Packaging is complete, so the old layout blocker is gone.
 
-## Plan
+## Active decisions
 
-- Break the section into bounded developer assignments.
+- `trace_export.py` owns selection, OTLP serialization, delivery, and checkpoints;
+  `pm_flow.sh` only routes commands.
+- Successful acknowledgement, not an attempted request, marks spans exported.
+- File and HTTP paths serialize the same vendor-neutral payload.
 
-## Decisions and evidence
+## Blockers
 
-- Keep detailed local decisions and validation evidence here, not in the root context.
+- OTel semantic mapping/emission must land before export E2E can assert the
+  payload. This replaces the expired packaging-layout blocker.
 
-## Current assignment
+## Next eligible task
 
-- None yet.
-
-## Dependencies
-
-- Read only dependency handoffs explicitly required by `brief.md`.
+- T1 after otel-semconv: select unexported spans and prove checkpoint idempotence.

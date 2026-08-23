@@ -1,25 +1,26 @@
 # store-ledger section PM state
 
-## Objective
+## Current task
 
-- Derive the current objective from `brief.md`.
+- T1 — implement deterministic, idempotent legacy TSV import into the store.
 
-## Owned paths
+## Completed tasks and evidence
 
-- Record the files or components this section owns before delegating work.
+- None in this section. The attempts/store schema already exists and is reused.
 
-## Plan
+## Active decisions
 
-- Break the section into bounded developer assignments.
+- SQLite attempts are the only runtime accounting source after import.
+- Cost and watch consume the same query contract.
+- Codex JSONL is parsed by codex-usage; this section reads completed attempts.
+- Import never sums TSV and an already represented attempt twice.
 
-## Decisions and evidence
+## Blockers
 
-- Keep detailed local decisions and validation evidence here, not in the root context.
+- None. The previous trace-commands dependency was a false sequencing edge and
+  is removed in this rebaseline.
 
-## Current assignment
+## Next eligible task
 
-- None yet.
-
-## Dependencies
-
-- Read only dependency handoffs explicitly required by `brief.md`.
+- T1 with golden totals, TSV-only, mixed-source dedupe, idempotence, and a
+  duplicate-detection mutation.

@@ -2,24 +2,29 @@
 
 ## Outcome
 
-- Section initialized; no implementation outcome yet.
+Rebaselined into protocol mapping, inbound binding, outbound service, and
+authenticated regression tasks. No implementation exists.
 
 ## Decisions
 
-- None yet.
+- A2A is remote HTTP transport; Agent Client Protocol remains local subprocess
+  transport and MCP remains a tool/control surface.
+- Inbound and outbound E2Es are separate and require an independent peer.
 
 ## Interfaces
 
-- None identified yet.
+- Planned: one A2A revision/state/access mapping in `a2a.py` built on the
+  agent-bindings adapter contract.
 
 ## Risks
 
-- No implementation evidence exists yet.
+- Integration ownership must be transferred after agent-bindings; editing its
+  paths concurrently would invalidate section isolation.
 
 ## What is unproven
 
-- Everything in the brief; nothing has been attempted yet.
+- All A1–A7 outcomes; nothing has been implemented.
 
 ## Next action
 
-- Awaiting the first scoped assignment.
+Wait for agent-bindings, then scope workplan T1.

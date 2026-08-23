@@ -2,3 +2,4 @@ template/.agentic/pm_flow/agent_exec.sh
 template/.agentic/pm_flow/telemetry.py
 template/.agentic/pm_flow/driver.zsh
 tests/fixtures/codex_events_real.jsonl
+tests/codex_usage_test.sh

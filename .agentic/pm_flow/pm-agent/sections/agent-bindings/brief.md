@@ -50,6 +50,8 @@ sequencing by habit rather than by need.
 
 ## Acceptance
 
+Stable IDs `A1`–`A5` refer to the bullets below in order.
+
 - A seat binds an ACP agent and completes a cycle end to end.
 - The three existing CLI bindings still work, unchanged in behaviour.
 - The access tier is either enforced on an ACP binding or reported as

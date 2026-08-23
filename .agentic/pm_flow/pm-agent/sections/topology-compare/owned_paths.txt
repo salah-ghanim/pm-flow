@@ -1,4 +1,5 @@
 src/pm_flow/topology.py
 src/pm_flow/compare.py
+src/pm_flow/cli.py
 tests/topology_compare_test.sh
 template/.agentic/pm_flow/topologies/**

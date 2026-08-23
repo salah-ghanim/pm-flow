@@ -1,25 +1,26 @@
 # topology-compare section PM state
 
-## Objective
+## Current task
 
-- Derive the current objective from `brief.md`.
+- T1 — define immutable topology documents and pre-dispatch availability checks.
 
-## Owned paths
+## Completed tasks and evidence
 
-- Record the files or components this section owns before delegating work.
+- None. Existing catalog topology records are reuse targets, not completed
+  comparison behavior.
 
-## Plan
+## Active decisions
 
-- Break the section into bounded developer assignments.
+- Topology definitions never mutate shared `config.json`.
+- Every run persists a stable topology identity.
+- Compare reads store-ledger metrics and always prints arm size/inference limits.
+- `src/pm_flow/cli.py` ownership is transferred from completed packaging.
 
-## Decisions and evidence
+## Blockers
 
-- Keep detailed local decisions and validation evidence here, not in the root context.
+- None for T1 or T2. T3 awaits store-ledger's query contract.
 
-## Current assignment
+## Next eligible task
 
-- None yet.
-
-## Dependencies
-
-- Read only dependency handoffs explicitly required by `brief.md`.
+- T1 with immutable-definition, unavailable-model/binding, and
+  no-attempt-before-validation tests.

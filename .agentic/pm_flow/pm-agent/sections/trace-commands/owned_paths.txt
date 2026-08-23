@@ -1,2 +1,4 @@
 template/.agentic/pm_flow/pm_flow.sh
 template/.agentic/pm_flow/config.json
+template/.agentic/pm_flow/trace_export.py
+tests/trace_commands_test.sh

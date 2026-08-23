@@ -43,14 +43,13 @@ service, and any claim that a two-run difference is significant.
 
 - `src/pm_flow/topology.py`
 - `src/pm_flow/compare.py`
+- `src/pm_flow/cli.py`
 - `tests/topology_compare_test.sh`
 - `template/.agentic/pm_flow/topologies/**`
 
-Deliberately new paths. `packaging` owns `src/**` broadly and is mid-flight, and
-`store.py` belongs to `persona-packs`; claiming either would block a section
-that is already moving. Read the store, do not alter its schema. If a schema
-change turns out to be unavoidable, say so in the handoff and stop rather than
-widening into another section's file.
+`cli.py` is transferred from completed packaging so the installed command can
+route `compare` directly to these Python modules. Read the store but do not alter
+its schema; store-backed metric queries arrive through `store-ledger`.
 
 ## Dependencies
 
@@ -64,6 +63,8 @@ headline promise behind two sections that have each already lost cycles, and
 nothing about the packaged layout changes what a comparison reads.
 
 ## Acceptance
+
+Stable IDs `A1`–`A5` refer to the bullets below in order.
 
 - Two topologies are defined without editing a shared `config.json`, and running
   one does not mutate the other's definition.

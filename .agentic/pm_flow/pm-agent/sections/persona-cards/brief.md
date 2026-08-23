@@ -49,22 +49,21 @@ has already failed the paragraph above.
 - `tests/persona_cards_test.sh`
 
 New paths only. The catalog and store that install a persona belong to
-`persona-packs`; read them, and hand that section a bounded change if a card has
-to be written at install time, rather than editing its files from here.
+`persona-packs`. Workplan T2 requires a validated catalog ownership transfer
+after that section is formally closed; T1 is independently assignable now.
 
 ## Dependencies
 
 - persona-packs
-- a2a-binding
 
-`persona-packs` is the obvious one: there is no card without a persona format to
-attach it to. `a2a-binding` is the less obvious one and is a real dependency
-rather than sequencing, because one acceptance criterion below is that a stock
-A2A client can read a card's skills. Proving that needs an A2A surface to read
-them with; asserting it against a hand-written JSON file is precisely the kind of
-evidence this project has already been burned by.
+`persona-packs` supplies the install/version/provenance lifecycle. A2A service
+support is not a dependency: skill compatibility can be checked against an
+independent pinned A2A schema/client validator without requiring pm-flow's A2A
+server to exist.
 
 ## Acceptance
+
+Stable IDs `A1`–`A7` refer to the bullets below in order.
 
 Stated as outcomes in the running system.
 
@@ -79,9 +78,9 @@ Stated as outcomes in the running system.
   different one, and every field reads back identical.
 - A persona with no card still installs and still runs. Cards are identity, not
   a licence to execute.
-- A stock A2A client reading pm-flow's Agent Card sees a card's skills as A2A
-  skills; where the two formats cannot be reconciled, the difference is written
-  down where the format is defined rather than left for a reader to discover.
+- The card's skill mapping validates with an independent pinned A2A Agent Card
+  schema/client; differences are documented where the format is defined, and no
+  endpoint/runtime fields are added to the persona card.
 - The suite still passes.
 
 ## Rejection conditions

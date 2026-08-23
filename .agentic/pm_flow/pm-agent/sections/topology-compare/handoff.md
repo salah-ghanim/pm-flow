@@ -2,24 +2,28 @@
 
 ## Outcome
 
-- Section initialized; no implementation outcome yet.
+Rebaselined into immutable definitions, persisted run identity, store-backed
+metrics, inference limits, and installed-command E2E. No implementation exists.
 
 ## Decisions
 
-- None yet.
+- Topology definitions do not edit shared config.
+- Compare consumes store-ledger metrics and always states sample limitations.
+- Unavailable bindings/models fail before any dispatch.
 
 ## Interfaces
 
-- None identified yet.
+- Planned: `topology.py`, `compare.py`, and `pm-flow compare` CLI registration.
 
 ## Risks
 
-- No implementation evidence exists yet.
+- CLI ownership is transferred from completed packaging. T3 still waits for
+  store-ledger's query contract.
 
 ## What is unproven
 
-- Everything in the brief; nothing has been attempted yet.
+- All A1–A5 outcomes; nothing has been implemented.
 
 ## Next action
 
-- Awaiting the first scoped assignment.
+Scope workplan T1.

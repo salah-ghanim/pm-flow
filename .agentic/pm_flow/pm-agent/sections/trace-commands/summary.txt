@@ -1,1 +1,1 @@
-Blocked: scoped against a layout packaging replaces; re-cut once packaging lands.
+Rebaselined against packaged layout; waiting on otel-semconv.

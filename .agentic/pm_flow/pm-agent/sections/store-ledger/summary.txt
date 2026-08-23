@@ -1,1 +1,1 @@
-Reopened: its paths are disjoint from packaging and do not move.
+Workplan defined; idempotent legacy import is the next task.

@@ -1,25 +1,26 @@
 # repo-hooks section PM state
 
-## Objective
+## Current task
 
-- Derive the current objective from `brief.md`.
+- T1 — implement the dependency-free commit-message checker and focused tests.
 
-## Owned paths
+## Completed tasks and evidence
 
-- Record the files or components this section owns before delegating work.
+- Packaging is complete and supplies the installed version/migration contract.
+  No hook implementation exists yet.
 
-## Plan
+## Active decisions
 
-- Break the section into bounded developer assignments.
+- Installation uses local `core.hooksPath`; hooks are opt-in and worktree-safe.
+- Driver-generated subjects must become conventional; the checker must not add
+  exemptions for current invalid messages.
+- Project update reuses packaging migration instead of implementing another.
 
-## Decisions and evidence
+## Blockers
 
-- Keep detailed local decisions and validation evidence here, not in the root context.
+- None for T1, T3, or T4. T2 awaits `driver.zsh` ownership after codex-usage.
 
-## Current assignment
+## Next eligible task
 
-- None yet.
-
-## Dependencies
-
-- Read only dependency handoffs explicitly required by `brief.md`.
+- T1. The accepted/rejected table must cover generated, merge, and revert
+  subjects and run offline within the latency bound.

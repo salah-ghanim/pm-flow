@@ -2,24 +2,29 @@
 
 ## Outcome
 
-- Section initialized; no implementation outcome yet.
+Rebaselined into checker, generated-message repair, hook installation, project
+inventory/update, and a real hook-enabled flow E2E. No hooks exist yet.
 
 ## Decisions
 
-- None yet.
+- Use local `core.hooksPath`; installation is opt-in and offline-safe.
+- Repair invalid generated subjects instead of exempting them.
+- Reuse packaging migration for project updates.
 
 ## Interfaces
 
-- None identified yet.
+- Planned: `.githooks/commit-msg`, `tools/hooks/install`, and
+  `tools/hooks/projects`.
 
 ## Risks
 
-- No implementation evidence exists yet.
+- T2/T5 need driver ownership after codex-usage. A green parser unit test cannot
+  substitute for the hook-enabled accepted-cycle scenario.
 
 ## What is unproven
 
-- Everything in the brief; nothing has been attempted yet.
+- All A1–A7 outcomes; nothing has been implemented.
 
 ## Next action
 
-- Awaiting the first scoped assignment.
+Scope workplan T1.

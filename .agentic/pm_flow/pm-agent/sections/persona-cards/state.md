@@ -1,25 +1,28 @@
 # persona-cards section PM state
 
-## Objective
+## Current task
 
-- Derive the current objective from `brief.md`.
+- T1 — define the portable optional card schema and validation contract.
 
-## Owned paths
+## Completed tasks and evidence
 
-- Record the files or components this section owns before delegating work.
+- persona-packs is complete and supplies install/version/provenance primitives.
+  No card implementation exists yet.
 
-## Plan
+## Active decisions
 
-- Break the section into bounded developer assignments.
+- Reuse A2A identity/skills vocabulary, not endpoint/runtime fields.
+- Author/provenance is a claim unless separately verified.
+- Uncarded personas remain valid and executable.
+- T2 requires catalog ownership transfer; T4 consumes topology output without
+  editing topology-owned code.
 
-## Decisions and evidence
+## Blockers
 
-- Keep detailed local decisions and validation evidence here, not in the root context.
+- None for T1. T2 awaits catalog ownership transfer from completed persona-packs;
+  T4 awaits topology-compare's output contract.
 
-## Current assignment
+## Next eligible task
 
-- None yet.
-
-## Dependencies
-
-- Read only dependency handoffs explicitly required by `brief.md`.
+- T1 with canonical round trip, forbidden-field matrix, optional-card fallback,
+  and provenance-claim labeling.

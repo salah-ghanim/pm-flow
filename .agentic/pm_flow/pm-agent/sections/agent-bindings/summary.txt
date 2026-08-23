@@ -1,1 +1,1 @@
-Section created; its PM sub-agent has not been launched yet.
+Workplan defined; ACP transport contract is the next task.

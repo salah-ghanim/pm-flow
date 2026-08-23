@@ -1,25 +1,25 @@
 # a2a-binding section PM state
 
-## Objective
+## Current task
 
-- Derive the current objective from `brief.md`.
+- None while the hard dependency `agent-bindings` is incomplete.
 
-## Owned paths
+## Completed tasks and evidence
 
-- Record the files or components this section owns before delegating work.
+- None. Workplan T1–T4 is defined; no product implementation exists.
 
-## Plan
+## Active decisions
 
-- Break the section into bounded developer assignments.
+- A2A is remote HTTP agent-to-agent transport, not local ACP and not MCP.
+- Inbound remote-seat dispatch and outbound pm-flow service are separate E2Es
+  sharing one protocol/state mapping.
+- At least one E2E side must be an independent implementation.
 
-## Decisions and evidence
+## Blockers
 
-- Keep detailed local decisions and validation evidence here, not in the root context.
+- `agent-bindings` must provide the binding/result/access interfaces and release
+  the required integration paths before T1/T2 can be finalized.
 
-## Current assignment
+## Next eligible task
 
-- None yet.
-
-## Dependencies
-
-- Read only dependency handoffs explicitly required by `brief.md`.
+- T1 after agent-bindings lands: pin the A2A revision and state/access mapping.

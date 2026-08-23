@@ -78,6 +78,8 @@ The commit hook does not depend on `packaging` and can land first.
 
 ## Acceptance
 
+Stable IDs `A1`–`A7` refer to the bullets below in order.
+
 Stated as outcomes, because a hook that exists and is not installed is the
 default failure here.
 

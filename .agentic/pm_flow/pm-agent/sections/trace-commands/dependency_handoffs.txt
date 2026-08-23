@@ -1,1 +1,1 @@
-.agentic/pm_flow/pm-agent/sections/green-suite/handoff.md
+.agentic/pm_flow/pm-agent/sections/otel-semconv/handoff.md

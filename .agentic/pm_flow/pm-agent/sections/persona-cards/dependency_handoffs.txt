@@ -1,2 +1,1 @@
 .agentic/pm_flow/pm-agent/sections/persona-packs/handoff.md
-.agentic/pm_flow/pm-agent/sections/a2a-binding/handoff.md
