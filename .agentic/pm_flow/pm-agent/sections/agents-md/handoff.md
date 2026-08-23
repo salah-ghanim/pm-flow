@@ -1,57 +1,56 @@
-# agents-md handoff
-
 ## Outcome
 
-Cycles 001 and 002 are `NO_GO`. No implementation was returned, accepted, or
-committed. The configured two-failure threshold has been reached.
+The deliverable is on `main` as 4b53d0e and meets every acceptance criterion.
+Verified by installing, not by inspection: a fresh install into a repository
+that already had a `CLAUDE.md` writes a 58-line `AGENTS.md` carrying the role
+router and the repo-wide invariants in full, leaves the pre-existing `CLAUDE.md`
+content intact, and leaves a `CLAUDE.md` that imports it with `@AGENTS.md` and
+keeps no copy of its own. README describes `AGENTS.md` as the instructions file.
+Suite 10 PASS; `manifest.py --check` current at 77 files.
 
 ## Decisions
 
-- The returned section branch has no diff from its base.
-- Independent installs create no `AGENTS.md`; `CLAUDE.md` still contains the
-  full router and invariants. Existing CLAUDE content is preserved.
-- The isolated full suite exits 0 with all nine PASS groups, so it does not
-  currently test this section's required behavior.
-- Manifest checking exits 1 in the section worktree because its absolute path
-  is below `.git` and the generator excludes any resolved path containing that
-  component.
-- The developer's access evidence shows literal writes throughout that nested
-  worktree are refused as sensitive, while `/tmp` and the main cycle-record
-  directory remain writable. This is an internal dispatch/worktree-placement
-  defect, not an external dependency.
-- Cycle 002 independently reproduced both failed gates: the worktree resolves
-  below `.git`, manifest print contains zero template entries, and manifest
-  check exits 1. The exact isolated suite still exits 0 with all nine PASS
-  groups.
-- Fresh and existing-repository installs still create no `AGENTS.md`, leave the
-  full router and invariants in CLAUDE without an AGENTS pointer, and README does
-  not identify AGENTS. Existing CLAUDE content survives.
-- Mutation evidence cannot be produced against this return: there is no
-  implementation and the feature probe fails before mutation.
+- Cycles 001 and 002 failed for the harness, not the work: this section's
+  worktrees were placed under `.git/`, where `manifest.py` enumerated 0 of 74
+  template files and agent write controls refuse the paths as sensitive. Those
+  worktrees are gone and the branches survive.
+- The rescue that followed succeeded and was lost. It committed a complete
+  implementation to `pm-flow/pm-agent/agents-md-rescue-1` (a9790f2), then was
+  killed before writing its result file, so the driver never reviewed or merged
+  it. Its escalation directory has been archived rather than resumed; a panel
+  now would re-solve a solved problem.
+- Salvaged onto `main`: `AGENTS.md`, the `CLAUDE.md` pointer, the installer's
+  file-neutral `merge_managed_block`, the README.
+- Not salvaged: that branch's `driver.zsh` worktree placement and `manifest.py`
+  path-exclusion fix. `main` reached both independently, with the same
+  reasoning, while the branch sat unmerged.
 
 ## Interfaces
 
-None accepted.
+- `template/AGENTS.md` holds the router and invariants; `template/CLAUDE.md` is
+  a managed pointer importing `@AGENTS.md`, so the two cannot drift.
+- `install_instructions_file` and `merge_managed_block` in `install.sh` render
+  both; a repository that already has either keeps it, backed up once, with the
+  managed block merged between the markers.
+- `tools/manifest.py` classes both instructions files `seed`.
 
 ## Risks
 
-- Re-dispatching the same assignment into the same nested worktree will repeat
-  the refusal without producing new evidence.
-- The green full suite can mask a regression or total absence of AGENTS install
-  behavior until a focused assertion is added or run during review.
-- A third unchanged developer dispatch would repeat an already-confirmed
-  internal mechanism failure and violate the escalation policy.
+- `install.sh` and `MANIFEST` are also claimed by `packaging`, which is
+  mid-flight on both. The work here is committed, so the exposure is a merge
+  conflict on packaging's branch, not a race.
+- `AGENTS.md` had to be classed `seed`. Classed `engine`, the post-render sync
+  copies the raw template back over it and the file exists but is wrong.
 
 ## What is unproven
 
-Every product criterion remains unproven: rendered `AGENTS.md`, compatibility
-pointer-only `CLAUDE.md`, README documentation, generated MANIFEST, and tests
-that detect violations of those guarantees.
+- Behaviour on a repository that already has an `AGENTS.md` rather than a
+  `CLAUDE.md` was not exercised; only the existing-CLAUDE and fresh paths were.
+- No cycle in this section has ever been accepted, so nothing here has been
+  through a section review.
 
 ## Next action
 
-Escalate to a consultant now. Provide both cycle reports and ask for an
-alternative section-execution path that is writable, resolves outside `.git`,
-and lets `tools/manifest.py` enumerate the template tree without bypassing
-controls. Only after that mechanism is established should the bounded
-implementation and focused mutation checks be reassigned.
+Verify the four criteria against the installed artifact and record `COMPLETE`.
+Write no implementation: it exists. A section cannot be marked done without a PM
+completion review, which is the only thing still owed.
