@@ -840,14 +840,41 @@ assert_contains "$panel_prompt" "one of several independent consultants" "consul
 assert_contains "$panel_prompt" "cannot see the others" "panel seats are blind to each other"
 
 mkdir "$TEST_ROOT/panel-bin"
-{
+
+# Concurrency is observed here, never timed. A wall-clock threshold only says
+# the panel was fast, which a loaded machine can falsify while the seats really
+# did overlap, and which a fast enough serial panel can satisfy while they did
+# not. So each seat announces itself and then waits for the other seat's
+# announcement: a seat can only record an overlap marker while the other seat is
+# genuinely still running, because the other seat does not exit until it has
+# either seen this one or given up. The wait carries a ceiling purely so a
+# serialised panel finishes instead of deadlocking - it is deliberately generous
+# and well inside the 60s stall budget configured above, and it is the markers,
+# never the clock, that decide whether this assertion passed.
+PANEL_SYNC="$TEST_ROOT/panel-sync"
+mkdir "$PANEL_SYNC"
+
+panel_seat_rendezvous() {
+  local seat="$1"
+  local other="$2"
   printf '#!/bin/zsh -f\n'
-  printf 'sleep 2\n'
+  printf 'sync=%s\n' "${(q)PANEL_SYNC}"
+  printf 'print -n running > "$sync/started_%s"\n' "$seat"
+  printf 'for _tick in {1..200}; do\n'
+  printf '  if [[ -e "$sync/started_%s" ]]; then\n' "$other"
+  printf '    print -n overlapped > "$sync/overlap_%s"\n' "$seat"
+  printf '    break\n'
+  printf '  fi\n'
+  printf '  sleep 0.1\n'
+  printf 'done\n'
+}
+
+{
+  panel_seat_rendezvous 1 2
   printf 'python3 -c "import json;print(json.dumps({\\"is_error\\":False,\\"result\\":\\"## Diagnosis\\\\nRegime overfit.\\\\n\\\\n## Decision\\\\nALTERNATIVE - walk-forward split\\",\\"session_id\\":\\"\\"}))"\n'
 } > "$TEST_ROOT/panel-bin/claude"
 {
-  printf '#!/bin/zsh -f\n'
-  printf 'sleep 2\n'
+  panel_seat_rendezvous 2 1
   printf 'out=""\n'
   printf 'while [[ $# -gt 0 ]]; do [[ "$1" == "-o" ]] && { out="$2"; shift 2; continue; }; shift; done\n'
   printf 'printf "## Diagnosis\\nFeature leakage.\\n\\n## Decision\\nALTERNATIVE - rebuild features causally\\n" > "$out"\n'
@@ -855,12 +882,18 @@ mkdir "$TEST_ROOT/panel-bin"
 chmod +x "$TEST_ROOT/panel-bin/claude" "$TEST_ROOT/panel-bin/codex"
 printf 'Two attempts failed: overfit in sample, no out-of-sample edge.\n' > "$TEST_ROOT/panel-failure.md"
 
-panel_started="$(date +%s)"
 panel_output="$(PATH="$TEST_ROOT/panel-bin:$PATH" "${ROLE_PM[@]}" \
   consult-panel signal-model --file "$TEST_ROOT/panel-failure.md")"
-panel_elapsed=$(( $(date +%s) - panel_started ))
-# Two 2s seats: parallel lands near 3s with poll overhead, serial cannot beat 4s.
-[[ "$panel_elapsed" -lt 5 ]] || fail "consultant seats did not run in parallel (${panel_elapsed}s)"
+
+# Both directions, because one marker alone only proves the later seat saw an
+# announcement someone left behind; the pair can only exist if each seat was
+# still running when it saw the other.
+[[ -e "$PANEL_SYNC/started_1" && -e "$PANEL_SYNC/started_2" ]] || \
+  fail "a consultant seat never started; concurrency was not exercised"
+[[ -e "$PANEL_SYNC/overlap_1" ]] || \
+  fail "consultant seat 1 never observed seat 2 running: the seats were serialised"
+[[ -e "$PANEL_SYNC/overlap_2" ]] || \
+  fail "consultant seat 2 never observed seat 1 running: the seats were serialised"
 
 assert_contains "$panel_output" "seats=2" "panel dispatched both seats"
 assert_contains "$panel_output" "proposals=2" "both seats delivered a proposal"
