@@ -436,7 +436,7 @@ handoff_after="$(/bin/cat "$PROJECT_DIR/sections/alpha/handoff.md")"
 [[ "$handoff_before" == "$handoff_after" ]] || fail "reinstall overwrote section handoff"
 assert_file_contains "$PROJECT_DIR/sections/alpha/status.txt" "active" "reinstall preserves section status"
 assert_file_contains "$PROJECT_DIR/project_state/plan.md" "Preserve this project plan marker." "reinstall preserves project plan"
-assert_file_contains "$PROJECT_DIR/project_state/start.md" "pm_flow.sh run" "reinstall refreshes the start guide"
+assert_file_contains "$PROJECT_DIR/project_state/start.md" "pm-flow run" "reinstall refreshes the start guide"
 assert_file_contains \
   "$PROJECT_DIR/project_state/start.pre-sections.md" \
   "Legacy coordinator instructions" \

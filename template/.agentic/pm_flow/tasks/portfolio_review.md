@@ -62,7 +62,7 @@ One per live section, weighing its declared priority:
   holds the current position, replaced rather than prepended; the log holds
   this review's findings and reasoning. Nothing in the plan begins "at review
   NNN".
-- The dependency graph, only through `pm_flow.sh section-dependencies <key>
+- The dependency graph, only through `pm-flow section-dependencies <key>
   --file <markdown>`.
 - A section's scope, only as a visible reduction: append to its `brief.md` a
   heading `## Reduced scope, authorized <date>` naming what was cut, what the

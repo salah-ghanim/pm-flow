@@ -350,7 +350,7 @@ observable it names, probed by whoever needs the answer.
   `## Reduced scope, authorized <date>` heading appended to its brief, naming
   what was cut and what the product no longer guarantees. The original
   Acceptance bullets stay.
-- The dependency graph changes only through `pm_flow.sh section-dependencies`,
+- The dependency graph changes only through `pm-flow section-dependencies`,
   which validates existence, cycles and ownership overlap.
 - Cycle artifacts are the audit trail. The officer never writes them.
 

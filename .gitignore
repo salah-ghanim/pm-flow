@@ -27,8 +27,10 @@ __pycache__/
 .agentic/pm_flow/pm-agent/sections/*/cycles/
 .agentic/pm_flow/pm-agent/sections/*/runs/
 
-# The rendered agent-instructions file is generated from template/CLAUDE.md at
-# install time. The template is the source; a rendered copy only drifts from it.
+# The rendered agent-instructions files are generated from template/AGENTS.md
+# and template/CLAUDE.md at install time. The templates are the source; a
+# rendered copy only drifts from them.
+/AGENTS.md
 /CLAUDE.md
 
 # The store is local by construction. Committing it recreates exactly the churn

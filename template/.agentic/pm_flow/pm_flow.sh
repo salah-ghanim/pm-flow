@@ -641,7 +641,7 @@ with lock_path.open("a+") as lock:
         "# Project sections",
         "",
         "This is a generated, bounded portfolio view for the root project coordinator.",
-        "Per-section files are authoritative; run `pm_flow.sh list-sections` to refresh this index.",
+        "Per-section files are authoritative; run `pm-flow list-sections` to refresh this index.",
         "The root coordinator should read this file and the linked handoffs, not section transcripts.",
         "",
         "| Section | Priority | Status | Summary | PM handoff | Run | Updated (UTC) |",

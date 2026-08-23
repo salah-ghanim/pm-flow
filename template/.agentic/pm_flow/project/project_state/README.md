@@ -7,7 +7,7 @@ adjudication.
 - `plan.md` — the mission, constraints, and integration order. **You write
   this.** It is the input the product officer decomposes into sections.
 - `sections.md` — a generated registry of every section, its status, and its
-  one-line summary. Refresh it with `pm_flow.sh list-sections`; per-section
+  one-line summary. Refresh it with `pm-flow list-sections`; per-section
   files are authoritative.
 - `start.md` / `resume.md` — how to start and how to resume a run.
 - `decomposition/` — the officer's section blocks from the run that created

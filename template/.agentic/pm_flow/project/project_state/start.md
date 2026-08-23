@@ -8,7 +8,7 @@
 2. Check which agents will do the work:
 
    ```bash
-   ./.agentic/pm_flow/pm_flow.sh config
+   .venv/bin/pm-flow config
    ```
 
    Roles bind to a CLI, a model, and a difficulty in `.agentic/pm_flow/config.json`.
@@ -17,7 +17,7 @@
 3. Start:
 
    ```bash
-   ./.agentic/pm_flow/pm_flow.sh run
+   .venv/bin/pm-flow run
    ```
 
 With no sections yet, the first action is decomposition: the product officer
@@ -27,8 +27,8 @@ them.
 To watch rather than commit, take one step at a time:
 
 ```bash
-./.agentic/pm_flow/pm_flow.sh status   # what each section will do next
-./.agentic/pm_flow/pm_flow.sh tick     # perform exactly one transition
+.venv/bin/pm-flow status   # what each section will do next
+.venv/bin/pm-flow tick     # perform exactly one transition
 ```
 
 `run --max-ticks <n>` bounds a run. It is a spend control as much as a time

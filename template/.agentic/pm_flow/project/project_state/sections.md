@@ -2,7 +2,7 @@
 
 This is the bounded portfolio view for the root project coordinator.
 
-Run `./.agentic/pm_flow/pm_flow.sh list-sections` after creating or updating a
+Run `pm-flow list-sections` after creating or updating a
 section. The command derives this file from per-section state.
 
 The root coordinator reads this file and the linked section handoffs. It does

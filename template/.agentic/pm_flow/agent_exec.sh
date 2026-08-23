@@ -256,6 +256,13 @@ DEFAULT_SCOPED_BASH = [
     ".agentic/pm_flow/pm_flow.sh list-sections:*",
     "./.agentic/pm_flow/pm_flow.sh status:*",
     ".agentic/pm_flow/pm_flow.sh status:*",
+    # The same commands through the installed package, which is how a packaged
+    # repository spells them. `cost` is read-only and is how a reviewer checks
+    # what the store recorded for a dispatch.
+    "pm-flow section-dependencies:*", ".venv/bin/pm-flow section-dependencies:*",
+    "pm-flow list-sections:*", ".venv/bin/pm-flow list-sections:*",
+    "pm-flow status:*", ".venv/bin/pm-flow status:*",
+    "pm-flow cost:*", ".venv/bin/pm-flow cost:*",
 ]
 
 # The two wrappers every role needs whatever tier it runs in.
