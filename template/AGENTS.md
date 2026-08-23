@@ -53,6 +53,18 @@ for the flow's rules. These are the few that hold for every role:
   makes in the main tree. Uncommitted work does not survive the next fresh
   process, which is why the driver does it rather than asking you to.
 
+## Commit messages
+
+Conventional Commits, so a release can be cut from the log:
+`type(scope): subject`, types `feat` `fix` `docs` `refactor` `perf` `test`
+`build` `ci` `chore`.
+Only `feat` and `fix` are user-visible. A breaking change takes `!` before the
+colon and a `BREAKING CHANGE:` footer.
+
+Keep them short: a subject under 72 characters, then at most a few bullets
+saying what changed and why. Reasoning belongs in the code, the section record
+or the handoff, not in a commit body nobody reads twice.
+
 Command reference lives in `.agentic/pm_flow/README.md`. Roles bind to a CLI,
 a model, and a difficulty in `.agentic/pm_flow/config.json`.
 <!-- pm-flow:end -->

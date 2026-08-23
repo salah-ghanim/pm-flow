@@ -126,7 +126,10 @@ killed, a worktree is cleaned, or the next agent starts.
   across boundaries would pick up another section's half-finished work - which
   is why the driver commits by path rather than everything it finds.
 - The message is `type(scope): short title` on one line under 72 characters,
-  then bullets. `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `plan`.
+  then bullets. Conventional Commits, so a release can be cut from the log:
+  `feat` `fix` `docs` `refactor` `perf` `test` `build` `ci` `chore`. Only
+  `feat` and `fix` are user-visible; a breaking change takes `!` and a
+  `BREAKING CHANGE:` footer. Plan work is `chore(plan)`, not `plan`.
   Scope is the section key.
 - Bullets state what changed, one change each. Not why it was hard, not what was
   tried, not a recap of the cycle. A negative result is a change and belongs in

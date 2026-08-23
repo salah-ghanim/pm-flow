@@ -171,7 +171,9 @@ killed or the next agent starts.
 - Commit only your own owned paths. Desks run concurrently, and a commit that
   reaches across boundaries picks up another desk's half-finished work.
 - The message is `type(scope): short title` on one line under 72 characters,
-  then bullets. `feat`, `fix`, `chore`, `docs`, `plan`. Scope is the desk key.
+  then bullets. Conventional Commits, so a release can be cut from the log:
+  `feat` `fix` `docs` `refactor` `perf` `test` `build` `ci` `chore`. Plan work
+  is `chore(plan)`, not `plan`. Scope is the desk key.
 - Bullets state what changed, one change each. A negative result is a change and
   belongs in a bullet.
 - The research principal commits at the same cadence for programme state: after
