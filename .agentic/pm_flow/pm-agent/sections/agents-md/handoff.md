@@ -1,56 +1,32 @@
 ## Outcome
 
-The deliverable is on `main` as 4b53d0e and meets every acceptance criterion.
-Verified by installing, not by inspection: a fresh install into a repository
-that already had a `CLAUDE.md` writes a 58-line `AGENTS.md` carrying the role
-router and the repo-wide invariants in full, leaves the pre-existing `CLAUDE.md`
-content intact, and leaves a `CLAUDE.md` that imports it with `@AGENTS.md` and
-keeps no copy of its own. README describes `AGENTS.md` as the instructions file.
-Suite 10 PASS; `manifest.py --check` current at 77 files.
+Section `agents-md` is complete on `main` at `4b53d0e`. Installed `AGENTS.md` is the sole full copy of the four-role router and repo-wide invariants; installed `CLAUDE.md` imports it with `@AGENTS.md` and does not duplicate those rules. README names `AGENTS.md` as the instructions file.
+
+Independent validation installed this checkout into fresh Git repositories and repositories with pre-existing instruction files. It proved preservation, one-time backups, managed-block replacement, and same-version reinstall idempotence. Router-removal and rule-duplication mutations were both detected. `zsh tests/pm_flow_test.sh` completed all 10 PASS groups, and `python3 tools/manifest.py --check` reported 77 current files.
 
 ## Decisions
 
-- Cycles 001 and 002 failed for the harness, not the work: this section's
-  worktrees were placed under `.git/`, where `manifest.py` enumerated 0 of 74
-  template files and agent write controls refuse the paths as sensitive. Those
-  worktrees are gone and the branches survive.
-- The rescue that followed succeeded and was lost. It committed a complete
-  implementation to `pm-flow/pm-agent/agents-md-rescue-1` (a9790f2), then was
-  killed before writing its result file, so the driver never reviewed or merged
-  it. Its escalation directory has been archived rather than resumed; a panel
-  now would re-solve a solved problem.
-- Salvaged onto `main`: `AGENTS.md`, the `CLAUDE.md` pointer, the installer's
-  file-neutral `merge_managed_block`, the README.
-- Not salvaged: that branch's `driver.zsh` worktree placement and `manifest.py`
-  path-exclusion fix. `main` reached both independently, with the same
-  reasoning, while the branch sat unmerged.
+- `template/AGENTS.md` owns the complete instructions; `template/CLAUDE.md` is compatibility-only.
+- Both files use one file-neutral installer path and `merge_managed_block`. Existing text outside `<!-- pm-flow:begin -->` / `<!-- pm-flow:end -->` survives; each original file is backed up once.
+- Both instruction templates are manifest `seed` files so post-render engine synchronization cannot overwrite rendered values with raw placeholders.
+- The two failed development cycles were caused by worktrees under `.git`, not product behavior. The worktree-placement and manifest path-exclusion defects are already fixed on `main`; no consultant work remains.
 
 ## Interfaces
 
-- `template/AGENTS.md` holds the router and invariants; `template/CLAUDE.md` is
-  a managed pointer importing `@AGENTS.md`, so the two cannot drift.
-- `install_instructions_file` and `merge_managed_block` in `install.sh` render
-  both; a repository that already has either keeps it, backed up once, with the
-  managed block merged between the markers.
-- `tools/manifest.py` classes both instructions files `seed`.
+- Other sections may depend on root `AGENTS.md` containing the rendered router, invariants, and project task-contract path.
+- Vendor-specific tooling may depend on root `CLAUDE.md` containing `@AGENTS.md`.
+- Installer/packaging must preserve the managed markers, backup names (`AGENTS.pre-pm-flow.md`, `CLAUDE.pre-pm-flow.md`), seed classification, and AGENTS-before-CLAUDE installation order.
 
 ## Risks
 
-- `install.sh` and `MANIFEST` are also claimed by `packaging`, which is
-  mid-flight on both. The work here is committed, so the exposure is a merge
-  conflict on packaging's branch, not a race.
-- `AGENTS.md` had to be classed `seed`. Classed `engine`, the post-render sync
-  copies the raw template back over it and the file exists but is wrong.
+- `packaging` also changes `install.sh` and `MANIFEST`; conflict resolution could drop this contract. Re-running the manifest check, full suite, focused install probes, and both mutations after its merge would reveal regression.
+- Installs retain `*.pm-flow.template.md` prefetch artifacts. This predates the section and is symmetric across both files; packaging should decide whether release cleanup is required.
 
 ## What is unproven
 
-- Behaviour on a repository that already has an `AGENTS.md` rather than a
-  `CLAUDE.md` was not exercised; only the existing-CLAUDE and fresh paths were.
-- No cycle in this section has ever been accepted, so nothing here has been
-  through a section review.
+- No configured real agent CLI was launched to prove automatic `AGENTS.md` discovery or that a CLAUDE-only client follows `@AGENTS.md`. Launch each supported CLI in an installed repository without injecting either file and observe it follow a unique managed instruction.
+- Migration from an actual previously released CLAUDE-only pm-flow install was not exercised. Install the prior release, add user content outside its managed block, upgrade with current `install.sh`, and observe preservation plus a single current block in each instruction file.
 
 ## Next action
 
-Verify the four criteria against the installed artifact and record `COMPLETE`.
-Write no implementation: it exists. A section cannot be marked done without a PM
-completion review, which is the only thing still owed.
+Close `agents-md`; when packaging reconciles its shared paths, require the post-merge checks named under Risks before release.
