@@ -4,6 +4,21 @@
 # checked without a model.
 set -uo pipefail
 
+# --- no inherited selector may reach the fixture -----------------------------
+#
+# A pm-flow run that dispatches this suite exports PM_FLOW_PROJECT and
+# PM_FLOW_REPO_ROOT. Inherited, the driver under test honours them and writes
+# its synthetic sections into the *caller's* live project instead of the work
+# directory below. That is not hypothetical: portfolio review 002 found six
+# fixture sections (alpha delta epsilon eta gamma zeta) and six run directories
+# in the live `pm-agent` project, put there by this code path.
+#
+# The suites set PM_FLOW_STUB and PM_FLOW_SECTION themselves, per command, so
+# clearing the whole namespace here costs them nothing.
+for name in ${(k)parameters[(I)PM_FLOW_*]}; do
+  unset "$name"
+done
+
 TEMPLATE="$(cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
 W="${1:?work dir required}"
 rm -rf "$W"; mkdir -p "$W/src"

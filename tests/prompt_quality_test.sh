@@ -1,6 +1,21 @@
 #!/bin/zsh -f
 set -euo pipefail
 
+# --- no inherited selector may reach the fixture -----------------------------
+#
+# A pm-flow run that dispatches this suite exports PM_FLOW_PROJECT and
+# PM_FLOW_REPO_ROOT. Inherited, the driver under test honours them and writes
+# its synthetic sections into the *caller's* live project instead of the work
+# directory below. That is not hypothetical: portfolio review 002 found six
+# fixture sections (alpha delta epsilon eta gamma zeta) and six run directories
+# in the live `pm-agent` project, put there by this code path.
+#
+# The suites set PM_FLOW_STUB and PM_FLOW_SECTION themselves, per command, so
+# clearing the whole namespace here costs them nothing.
+for name in ${(k)parameters[(I)PM_FLOW_*]}; do
+  unset "$name"
+done
+
 REPO_ROOT="$(cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
 AUDITOR="$REPO_ROOT/template/.agentic/pm_flow/prompt_quality.py"
 QA_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-prompt-quality.XXXXXX")"
