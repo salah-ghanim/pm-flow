@@ -57,8 +57,8 @@
     "worktrees": true
   },
   "budget": {
-    "max_usd": 0,
-    "max_usd_per_section": 0
+    "max_usd": 2000,
+    "max_usd_per_section": 250
   },
   "governance": {
     "portfolio_review_dispatches": 12,
