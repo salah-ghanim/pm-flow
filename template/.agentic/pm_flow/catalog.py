@@ -1504,47 +1504,87 @@ def cmd_persona_add(args):
     # Validate before opening the store, whichever way the pack arrived: a pack
     # that cannot be fetched or cannot be read must not so much as create the
     # database file it was refused from.
-    if looks_like_git_url(args.source):
-        try:
-            with git_checkout(args.source) as (directory, commit):
-                pack = read_pack_from_url(args.source, directory, commit)
-                # Installed while the checkout still exists, because the persona
-                # bodies are read out of it; nothing of it is stored.
-                return install_and_report(args.db, pack)
-        except PackError as error:
-            raise SystemExit(f"persona add: {error}")
     try:
-        pack = read_pack(args.source)
+        return acquire_install_and_report(args.db, args.source, "add")
     except PackError as error:
         raise SystemExit(f"persona add: {error}")
-    return install_and_report(args.db, pack)
 
 
-def install_and_report(db, pack: dict) -> int:
+def acquire_install_and_report(db, source, verb, expected_name=None) -> int:
+    """Acquire a pack exactly once, validate it, and install it while readable."""
+    if looks_like_git_url(source):
+        with git_checkout(source) as (directory, commit):
+            pack = read_pack_from_url(source, directory, commit)
+            if expected_name is not None and pack["name"] != expected_name:
+                raise PackError(
+                    f"manifest names pack '{pack['name']}', not installed pack "
+                    f"'{expected_name}'")
+            # Installed while the checkout still exists, because the persona
+            # bodies are read out of it; nothing of it is stored.
+            return install_and_report(db, pack, verb)
+    pack = read_pack(source)
+    if expected_name is not None and pack["name"] != expected_name:
+        raise PackError(
+            f"manifest names pack '{pack['name']}', not installed pack "
+            f"'{expected_name}'")
+    return install_and_report(db, pack, verb)
+
+
+def install_and_report(db, pack: dict, verb="add") -> int:
     connection = store.connect(db)
-    try:
-        result = install_pack(connection, pack)
-    except PackError as error:
-        # install_pack has already rolled back, so the store is exactly as it
-        # was; the only thing left to do is say why, without a traceback.
-        raise SystemExit(f"persona add: {error}")
-    print(f"pack {pack['name']} {pack['version']} from "
+    result = install_pack(connection, pack)
+    prefix = f"persona {verb}: " if verb == "update" else ""
+    print(f"{prefix}pack {pack['name']} {pack['version']} from "
           f"{pack.get('source_url') or pack['root']}")
     if pack.get("ref"):
-        print(f"  commit {pack['ref']}")
-    print(f"  author {pack['author']} | license {pack['license']} | "
+        print(f"{prefix}  commit {pack['ref']}")
+    print(f"{prefix}  author {pack['author']} | license {pack['license']} | "
           f"tags {', '.join(pack['tags']) or '-'}")
     for key in result["installed"]:
-        print(f"  + {key}")
+        print(f"{prefix}  + {key}")
     for key in result["updated"]:
-        print(f"  ^ {key} (new version; the previous one is kept)")
+        print(f"{prefix}  ^ {key} (new version; the previous one is kept)")
     for key in result["adopted"]:
-        print(f"  ~ {key} (adopted into pack)")
+        print(f"{prefix}  ~ {key} (adopted into pack)")
     for key in result["unchanged"]:
-        print(f"  = {key} (unchanged)")
-    print(f"installed {len(result['installed'])}, updated {len(result['updated'])}, "
+        print(f"{prefix}  = {key} (unchanged)")
+    print(f"{prefix}installed {len(result['installed'])}, "
+          f"updated {len(result['updated'])}, "
           f"adopted {len(result['adopted'])}, unchanged {len(result['unchanged'])}")
     return 0
+
+
+def cmd_persona_update(args):
+    connection = store.connect(args.db)
+    if args.pack:
+        row = connection.execute(
+            "SELECT name, source_url FROM persona_packs WHERE name = ?",
+            (args.pack,),
+        ).fetchone()
+        if row is None:
+            raise SystemExit(
+                f"persona update: no installed pack '{args.pack}'; "
+                "`persona list` shows what is installed")
+        rows = [row]
+    else:
+        rows = connection.execute(
+            "SELECT name, source_url FROM persona_packs ORDER BY name"
+        ).fetchall()
+    if not rows:
+        print("no packs installed")
+        return 0
+
+    failed = False
+    for row in rows:
+        try:
+            acquire_install_and_report(
+                args.db, row["source_url"], "update", expected_name=row["name"])
+        except PackError as error:
+            detail = str(error).replace("\n", "\npersona update: ")
+            print(f"persona update: pack '{row['name']}' from "
+                  f"{row['source_url']}: {detail}", file=sys.stderr)
+            failed = True
+    return 1 if failed else 0
 
 
 def cmd_persona_list(args):
@@ -1671,6 +1711,11 @@ def main(argv):
     q.set_defaults(func=cmd_persona_add)
     q = persona_sub.add_parser("list", help="installed personas and their provenance")
     q.set_defaults(func=cmd_persona_list)
+    q = persona_sub.add_parser(
+        "update", help="reinstall persona packs from their recorded sources")
+    q.add_argument("pack", nargs="?", metavar="pack-name",
+                   help="installed pack to update (default: all packs)")
+    q.set_defaults(func=cmd_persona_update)
     q = persona_sub.add_parser(
         "swap", help="replace one layer of a role's seat stack")
     q.add_argument("role", help="the role whose seats are swapped")
