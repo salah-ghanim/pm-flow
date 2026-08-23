@@ -39,10 +39,17 @@ for the flow's rules. These are the few that hold for every role:
   Checkpoint to `state.md` and `handoff.md`, then launch a fresh agent.
 - Do not count workflow or documentation work as progress unless it directly
   unlocks the same task cycle.
-- Commit whenever a section makes real progress. The section manager commits its
-  own owned paths plus `state.md` and `handoff.md` after every accepted result;
-  the product officer commits plan, registry and brief changes. Uncommitted work
-  does not survive the next fresh process.
+- The driver commits an accepted result, not the role. A `GO` or
+  `GO_WITH_CHANGES` commits the section's worktree, merges it back, and commits
+  `state.md` and `handoff.md` with it; a `NO_GO` commits nothing and leaves the
+  work on the section's branch for the next cycle. No role is asked to commit as
+  a condition of acceptance, and no role may reject work because it could not
+  record one: a linked worktree keeps its object store in the parent repository,
+  outside the directory a dispatch is scoped to, so committing from inside one
+  means writing where the sandbox refuses however the permissions are written.
+  The product officer still commits plan, registry and brief changes, which it
+  makes in the main tree. Uncommitted work does not survive the next fresh
+  process, which is why the driver does it rather than asking you to.
 
 Command reference lives in `.agentic/pm_flow/README.md`. Roles bind to a CLI,
 a model, and a difficulty in `.agentic/pm_flow/config.json`.
