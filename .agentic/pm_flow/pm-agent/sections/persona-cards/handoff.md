@@ -2,29 +2,24 @@
 
 ## Outcome
 
-Rebaselined into schema, catalog integration, round trip, comparison identity,
-and A2A skill compatibility tasks. No card implementation exists.
+- Nothing delivered yet.
 
 ## Decisions
 
-- Cards are optional portable identity, never runtime configuration.
-- A2A identity/skill vocabulary is reused; endpoint/vendor/model/transport fields
-  are rejected.
-- Unverified provenance is displayed as a claim, not trust.
+- None yet.
 
 ## Interfaces
 
-- Planned: `persona_card.py` plus optional card handling in the existing catalog.
+- Planned: the card schema; `persona show`; card fields on `personas`.
 
 ## Risks
 
-- Catalog and compare integrations need ownership/dependency handoffs. T1 is
-  deliberately independent of both.
+- An author field read as a guarantee.
 
 ## What is unproven
 
-- All A1–A7 outcomes; nothing has been implemented.
+- Everything in the brief.
 
 ## Next action
 
-Scope workplan T1, then transfer catalog ownership for T2.
+- Wait for `persona-packs`, then assign T1.

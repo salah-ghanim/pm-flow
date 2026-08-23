@@ -34,4 +34,4 @@ the old one.
 
 ## Next action
 
-Mark the section done. Persona-cards may now take catalog integration ownership.
+Declare the section complete; `persona-cards` then takes `catalog.py`.

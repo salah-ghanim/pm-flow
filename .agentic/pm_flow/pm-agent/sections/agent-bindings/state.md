@@ -2,24 +2,21 @@
 
 ## Current task
 
-- T1 — define and test the ACP transport contract in `acp.py`.
+- None assigned.
 
 ## Completed tasks and evidence
 
-- None. The section has been decomposed; no product implementation exists.
+- None.
 
 ## Active decisions
 
-- ACP transport and MCP control are separate adapters to the existing state
-  machine. Neither may duplicate project/section transitions.
-- Existing CLI bindings remain the compatibility baseline.
-- T3 requires a validated dispatch-path ownership transfer after codex-usage.
+- Transport identity is `bindings.cli` + `cli_params`; no schema change.
+- The MCP server is a façade over the installed command.
 
 ## Blockers
 
-- None for T1 or T2. T3 is intentionally not assignable under current ownership.
+- None.
 
 ## Next eligible task
 
-- T1. Validate a protocol-faithful initialize/prompt/result exchange, access
-  capability preflight, cancellation, malformed frames, and child failure.
+- T1 (T3 is independently eligible).

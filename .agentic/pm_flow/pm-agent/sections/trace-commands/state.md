@@ -2,24 +2,21 @@
 
 ## Current task
 
-- None while the hard dependency `otel-semconv` is incomplete.
+- None assigned.
 
 ## Completed tasks and evidence
 
-- Nothing attempted. Packaging is complete, so the old layout blocker is gone.
+- None.
 
 ## Active decisions
 
-- `trace_export.py` owns selection, OTLP serialization, delivery, and checkpoints;
-  `pm_flow.sh` only routes commands.
-- Successful acknowledgement, not an attempted request, marks spans exported.
-- File and HTTP paths serialize the same vendor-neutral payload.
+- Acknowledgement, not attempt, marks a span exported.
+- `pm_flow.sh` is owned for the `trace` routing only.
 
 ## Blockers
 
-- OTel semantic mapping/emission must land before export E2E can assert the
-  payload. This replaces the expired packaging-layout blocker.
+- None.
 
 ## Next eligible task
 
-- T1 after otel-semconv: select unexported spans and prove checkpoint idempotence.
+- T1.

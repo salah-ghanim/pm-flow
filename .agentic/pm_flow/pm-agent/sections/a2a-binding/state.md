@@ -2,24 +2,20 @@
 
 ## Current task
 
-- None while the hard dependency `agent-bindings` is incomplete.
+- None; waiting on `agent-bindings`.
 
 ## Completed tasks and evidence
 
-- None. Workplan T1–T4 is defined; no product implementation exists.
+- None.
 
 ## Active decisions
 
-- A2A is remote HTTP agent-to-agent transport, not local ACP and not MCP.
-- Inbound remote-seat dispatch and outbound pm-flow service are separate E2Es
-  sharing one protocol/state mapping.
-- At least one E2E side must be an independent implementation.
+- A2A is remote HTTP only; the Agent Client Protocol stays local.
 
 ## Blockers
 
-- `agent-bindings` must provide the binding/result/access interfaces and release
-  the required integration paths before T1/T2 can be finalized.
+- `agent-bindings` is not done.
 
 ## Next eligible task
 
-- T1 after agent-bindings lands: pin the A2A revision and state/access mapping.
+- T1, once `agent-bindings` is done.

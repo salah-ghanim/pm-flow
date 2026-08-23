@@ -2,29 +2,24 @@
 
 ## Outcome
 
-The expired packaging-layout blocker is removed. The section is rebaselined
-against the packaged engine and now waits only for otel-semconv.
+- Nothing delivered yet.
 
 ## Decisions
 
-- `trace_export.py` owns selection, serialization, delivery, and checkpoints.
-- File and HTTP exports share one payload; only acknowledged spans are marked.
-- Export/telemetry failures never abort the underlying product run.
+- None yet.
 
 ## Interfaces
 
-- Planned: `pm_flow.sh trace export --file|--otlp` and
-  `telemetry.enabled` config.
+- Planned: `pm-flow trace export|status`; `config.json` `telemetry` block.
 
 ## Risks
 
-- Starting before semantic-convention emission lands would validate the old
-  private payload and bake drift into the public export contract.
+- A checkpoint written before acknowledgement would lose spans silently.
 
 ## What is unproven
 
-- All A1–A5 outcomes; nothing has been implemented.
+- Everything in the brief.
 
 ## Next action
 
-Keep planned/waiting on otel-semconv, then scope workplan T1.
+- Assign T1.

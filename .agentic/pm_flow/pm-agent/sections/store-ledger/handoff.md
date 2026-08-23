@@ -2,29 +2,24 @@
 
 ## Outcome
 
-Rebaselined into legacy import, store-backed cost, shared watch summaries, and
-migration closeout. No implementation exists; T1 is immediately assignable.
+- Nothing delivered yet.
 
 ## Decisions
 
-- Store attempts are the sole runtime accounting source after one-time import.
-- Cost and watch share a query contract; neither parses Codex events.
-- The previous trace-commands dependency was false and is removed.
+- None yet.
 
 ## Interfaces
 
-- Planned: idempotent importer and store-backed reporting in `cost.py`, reused by
-  `watch.py`.
+- Planned: `cost.py total|report|import <project_dir>`.
 
 ## Risks
 
-- Mixed TSV/envelope history can double-charge without deterministic identity.
-  Import must be transactional and idempotent.
+- Under-reporting spend after import would re-authorise a budget.
 
 ## What is unproven
 
-- All A1–A4 outcomes; nothing has been implemented.
+- Everything in the brief.
 
 ## Next action
 
-Scope workplan T1.
+- Assign T1.

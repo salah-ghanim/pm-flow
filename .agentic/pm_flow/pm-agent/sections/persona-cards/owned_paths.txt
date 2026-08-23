@@ -1,3 +1,4 @@
 src/pm_flow/persona_card.py
 template/.agentic/pm_flow/cards/**
+template/.agentic/pm_flow/catalog.py
 tests/persona_cards_test.sh

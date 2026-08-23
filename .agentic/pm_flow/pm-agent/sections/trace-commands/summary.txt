@@ -1,1 +1,1 @@
-Rebaselined against packaged layout; waiting on otel-semconv.
+Not started; T1 checkpoints export on acknowledgement.

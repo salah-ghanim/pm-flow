@@ -2,7 +2,7 @@
 
 ## Current task
 
-- None. T1–T5 are complete on main; cycle 009 is GO.
+- None; T1–T5 are done on `main`.
 
 ## Completed tasks and evidence
 
@@ -29,5 +29,5 @@
 
 ## Next eligible task
 
-- COMPLETE. Publish the completed handoff and release catalog ownership to
-  persona-cards.
+- None; every acceptance ID has evidence above. The next scope call decides
+  `COMPLETE`.

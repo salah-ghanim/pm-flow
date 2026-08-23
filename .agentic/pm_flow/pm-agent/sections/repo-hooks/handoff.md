@@ -2,29 +2,25 @@
 
 ## Outcome
 
-Rebaselined into checker, generated-message repair, hook installation, project
-inventory/update, and a real hook-enabled flow E2E. No hooks exist yet.
+- Nothing delivered yet.
 
 ## Decisions
 
-- Use local `core.hooksPath`; installation is opt-in and offline-safe.
-- Repair invalid generated subjects instead of exempting them.
-- Reuse packaging migration for project updates.
+- None yet.
 
 ## Interfaces
 
-- Planned: `.githooks/commit-msg`, `tools/hooks/install`, and
-  `tools/hooks/projects`.
+- Planned: `tools/hooks/install|uninstall|projects`;
+  `~/.config/pm-flow/projects.txt`.
 
 ## Risks
 
-- T2/T5 need driver ownership after codex-usage. A green parser unit test cannot
-  substitute for the hook-enabled accepted-cycle scenario.
+- A hook refusing a driver subject would stop the flow.
 
 ## What is unproven
 
-- All A1–A7 outcomes; nothing has been implemented.
+- Everything in the brief.
 
 ## Next action
 
-Scope workplan T1.
+- Assign T1.

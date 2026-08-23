@@ -2,95 +2,90 @@
 
 ## Design summary
 
-- Store immutable named topology definitions outside shared `config.json`.
-  Each run records its topology identity. A compare command queries store-backed
-  outcome metrics for two arms and always reports sample-size limitations.
+- Topologies are JSON documents validated against the configured CLIs. A
+  compare run copies the checkout per arm, drives each with
+  `PM_FLOW_TOPOLOGY=<key>` and the arm's overlay, imports each arm's store
+  rows back under its key, and prints a descriptive table from
+  `store-ledger`'s totals with a mandatory limits sentence.
 
 ## Interfaces and data changes
 
-- `topology.py` validates/loads definitions and checks binding availability.
-- `compare.py` queries cost, tokens, cycles, rescue, abandonment, and escalation.
-- `pm-flow compare <a> <b>` is registered through the Python CLI.
+- `topologies/<key>.json`; `pm-flow compare`; report column contract. No
+  schema change: `runs.topology` exists.
 
-## Task T1 — Define immutable topology documents
+## Task T1 — Topology documents and validation
 
 - Status: pending.
-- Outcome: two topologies are created/validated independently, never mutate
-  shared config, and fail before dispatch when a binding/model is unavailable.
-- Paths: `src/pm_flow/topology.py`,
-  `template/.agentic/pm_flow/topologies/**`, `tests/topology_compare_test.sh`.
-- Reuse: catalog topology/seat/binding records and availability checks.
-- Acceptance IDs: A1, A5.
-- Validation: valid/invalid definitions, content identity, two simultaneous
-  definitions, unavailable binding/model, and no-attempt-before-failure check.
+- Outcome: `topology.py` loads `topologies/<key>.json`, validates role
+  bindings and seat counts against `config.json`'s CLIs and their model
+  lists, and refuses a missing document or unreachable model before
+  dispatch.
+- Paths: `src/pm_flow/topology.py`, `template/.agentic/pm_flow/topologies/**`,
+  `tests/topology_compare_test.sh`.
+- Reuse: `catalog.py` topology and binding records; `config.json` role shape.
+- Acceptance IDs: A4.
+- Validation: `zsh tests/topology_compare_test.sh` — valid `lean` and `heavy`
+  load; missing key and unknown model are refused with the name; the store
+  holds no attempt after a refusal.
 - Depends on: None.
 
-## Task T2 — Run and persist topology identity
+## Task T2 — Run two arms from one commit
 
-- Status: pending; `src/pm_flow/cli.py` ownership transferred in the rebaseline.
-- Outcome: the same project runs under topology A and B; attempts/runs remain
-  distinguishable by stable topology identity.
-- Paths: `topology.py`, `tests/topology_compare_test.sh`, and `src/pm_flow/cli.py`.
-- Reuse: existing topology tables, CLI delegation, run/attempt lifecycle.
-- Acceptance IDs: A1, A2, A5.
-- Validation: two installed-command runs, immutable definitions, store joins,
-  and mutation dropping topology identity.
+- Status: pending.
+- Outcome: `pm-flow compare a b --max-ticks n` copies the checkout per arm,
+  runs each under its topology key, imports rows back, and the store shows
+  runs under both keys.
+- Paths: `src/pm_flow/compare.py`, `src/pm_flow/cli.py`,
+  `tests/topology_compare_test.sh`.
+- Reuse: the stub harness from `tests/pm_flow_test.sh`; `PM_FLOW_TOPOLOGY`.
+- Acceptance IDs: A1, A5.
+- Validation: `zsh tests/topology_compare_test.sh` — two arms with a swapped
+  persona on one seat; `runs` shows both keys; each arm's attempts carry its
+  persona key; a mutation running both arms in one checkout fails.
 - Depends on: T1.
 
-## Task T3 — Compute the comparison table from the store
-
-- Status: waiting on store-ledger's query contract.
-- Outcome: one command reports cost, tokens, cycles-to-done, rescue rate,
-  abandonment rate, and escalation depth for both topologies.
-- Paths: `src/pm_flow/compare.py`, `tests/topology_compare_test.sh`, transferred
-  CLI registration path.
-- Reuse: store-ledger totals and existing run/escalation records; no TSV reader.
-- Acceptance IDs: A3.
-- Validation: seeded hand-computed dataset, missing/failed runs, exact table
-  assertions, and mutation of each metric formula.
-- Depends on: T2, store-ledger.
-
-## Task T4 — State inference limits in every output
+## Task T3 — The report and its limits
 
 - Status: pending.
-- Outcome: comparison output includes arm sizes, descriptive differences, and a
-  plain statement of what the sample can/cannot support; empty/one-run arms do
-  not imply superiority.
+- Outcome: `pm-flow compare --report` prints the column contract from the
+  store via `cost.py` totals and the run/escalation records, with `n_runs`
+  and the limits sentence.
 - Paths: `src/pm_flow/compare.py`, `tests/topology_compare_test.sh`.
-- Reuse: T3 aggregate counts; no invented significance test.
-- Acceptance IDs: A4.
-- Validation: zero/one/many-run snapshots and mutation removing the limitation
-  text or sample size.
-- Depends on: T3.
+- Reuse: `store-ledger`'s `cost.py total`; escalation directories for depth.
+- Acceptance IDs: A2, A3, A5.
+- Validation: `zsh tests/topology_compare_test.sh` — a seeded store with
+  hand-computed metrics matches the table exactly; one run per arm yields the
+  no-inference sentence; removing the sentence fails; each metric formula has
+  a mutation.
+- Depends on: T2, store-ledger done.
 
-## Task T5 — Installed-command E2E closeout
+## Task T4 — End to end through the installed command
 
 - Status: pending.
-- Outcome: define two topologies, run both, compare them through installed
-  `pm-flow`, and retain distinguishable store rows; full suite passes.
-- Paths: all owned topology/compare paths plus approved CLI path.
-- Reuse: packaged-layout harness and T1–T4 fixtures.
-- Acceptance IDs: A1–A5.
-- Validation: `zsh tests/topology_compare_test.sh`, installed artifact E2E,
-  metric/topology-identity mutations, and full suite.
-- Depends on: T4.
+- Outcome: scenarios 1–3 through `.venv/bin/pm-flow`.
+- Paths: `tests/topology_compare_test.sh`.
+- Reuse: the harness in `tests/packaged_layout_test.sh`.
+- Acceptance IDs: A1–A6.
+- Validation: `zsh tests/topology_compare_test.sh`, `zsh tests/pm_flow_test.sh`,
+  `zsh tests/packaged_layout_test.sh` exit 0.
+- Depends on: T3.
 
 ## Integration and end-to-end validation
 
-- T1 is next. CLI ownership is now transferred from completed packaging. T3
-  consumes the store-ledger contract; it must not create its own accounting layer.
+- T4 is the gate; T2 is the first point at which the headline sentence is
+  observable.
 
 ## Risks and rollback
 
-- Small samples invite false claims. Output limitation text is an acceptance
-  requirement. Roll back compare presentation without altering stored runs.
+- Small samples invite false claims; the limits sentence is an acceptance
+  requirement. Rollback removes the `compare` command; stored runs stay.
 
 ## Acceptance coverage
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1 | T1, T2, T5 | Independent immutable definitions and runs |
-| A2 | T2, T5 | Store distinguishes both topology arms |
-| A3 | T3, T5 | Complete store-backed metric table |
-| A4 | T4, T5 | Sample size and inference limit in output |
-| A5 | T1, T2 | Unavailable binding/model fails before dispatch |
+| A1 | T2, T4 | Runs under both keys |
+| A2, A3 | T3, T4 | Table equals fixture; limits sentence present |
+| A4 | T1 | Refusal before dispatch |
+| A5 | T2, T3 | Persona key per arm |
+| A6 | T4 | Three suites exit 0 |

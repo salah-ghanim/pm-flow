@@ -2,25 +2,21 @@
 
 ## Current task
 
-- T1 — implement the dependency-free commit-message checker and focused tests.
+- None assigned.
 
 ## Completed tasks and evidence
 
-- Packaging is complete and supplies the installed version/migration contract.
-  No hook implementation exists yet.
+- None.
 
 ## Active decisions
 
-- Installation uses local `core.hooksPath`; hooks are opt-in and worktree-safe.
-- Driver-generated subjects must become conventional; the checker must not add
-  exemptions for current invalid messages.
-- Project update reuses packaging migration instead of implementing another.
+- Hooks are opt-in via `core.hooksPath`; the driver's subjects already
+  conform and are enumerated by the test rather than exempted.
 
 ## Blockers
 
-- None for T1, T3, or T4. T2 awaits `driver.zsh` ownership after codex-usage.
+- None.
 
 ## Next eligible task
 
-- T1. The accepted/rejected table must cover generated, merge, and revert
-  subjects and run offline within the latency bound.
+- T1 (T3 is independently eligible).

@@ -1,58 +1,69 @@
 ## Objective
 
-- Make the repository enforce its own commit convention, and keep the pm-flow
-  installs we actually run from drifting behind the version this repository is
-  at.
+- The repository enforces its own commit convention, and the pm-flow installs
+  on this machine can be listed, compared with this checkout's version, and
+  brought up to date by one command.
+
+## Current baseline
+
+- `AGENTS.md` requires Conventional Commits under 72 characters; nothing checks
+  a commit. No `.githooks/`, no `core.hooksPath`, no `.releaserc.json`.
+- The driver writes its own commits with `--no-verify`; its subjects are
+  `chore(<section>): …` forms.
+- `install.sh` migrates a copied-engine install to the packaged layout and
+  `pip install -U pm-flow` upgrades the engine; nothing lists which
+  repositories on this machine use pm-flow or which version each has.
+
+## Deliverables
+
+- `.githooks/commit-msg`: a dependency-free checker that refuses a
+  non-conforming subject and names the rule it broke.
+- `tools/hooks/install`: sets `core.hooksPath` for this clone and its
+  worktrees; `tools/hooks/uninstall` clears it.
+- `tools/hooks/projects`: lists the repositories in
+  `~/.config/pm-flow/projects.txt`, each with its installed `pm-flow` version
+  and whether it is behind this checkout's `VERSION`; `tools/hooks/projects
+  update <repo>` upgrades one.
+- `.releaserc.json` aligned with the checker's rules.
+- `tests/repo_hooks_test.sh`.
+
+## User-visible scenarios
+
+1. In a fresh clone, after `tools/hooks/install`, `git commit -m "update
+   stuff"` is refused with `subject needs a type: feat|fix|…`; `git commit -m
+   "fix(hooks): name the rule"` succeeds in under 100 ms of added time.
+2. `tools/hooks/projects` prints one line per registered repository:
+   path, installed version, `current` or `behind <version>`.
+3. `tools/hooks/projects update ~/code/golden-grid` upgrades that repository's
+   venv package and runs `install.sh` there; its plan, sections, run history
+   and recorded domain are unchanged, and `pm-flow status` runs afterwards.
+
+## Interfaces produced
+
+- `tools/hooks/install|uninstall|projects`.
+- `~/.config/pm-flow/projects.txt`: one repository path per line, owned by the
+  user, never written by a hook.
+
+## Interfaces consumed
+
+- `install.sh` and its migration guarantees; `pm-flow version`; `VERSION`.
 
 ## Scope
 
-Two hooks, one section, because both are the same missing thing: this repository
-states rules it does not check.
+- In: the hook, its installer, the inventory/update command, release config,
+  tests.
+- Out: `driver.zsh`, `install.sh`, the packaged layout, any network call from
+  a hook.
 
-**The commit convention is documentation, not a gate.** `AGENTS.md` and the task
-contracts require Conventional Commits under 72 characters. Nothing verifies it,
-there is no `commitlint`, no `.releaserc`, and no `core.hooksPath`. A convention
-nobody can fail is a convention that decays, and the log is what a release would
-be cut from.
+## Non-goals
 
-Read the log before designing the check, because the first thing it will reject
-is us. The driver writes its own commit messages and only one of them parses:
-
-- `fix(harness): repair for <section> (attempt N, VERDICT)` — valid.
-- `<section>: accepted cycle N (state and handoff)` — no type.
-- `sync: bring the section up to <base>` — `sync` is not a type.
-- `merge(<section>): accepted work from <branch>` — `merge` is not a type.
-
-Three of the four are emitted on every accepted cycle and every merge-back, from
-`driver.zsh`, which belongs to `codex-usage`. A hook that refuses them stops the
-flow dead. Either the driver's messages are corrected first through a bounded
-change handed to that section, or the hook is written to exempt exactly those
-generated messages and says so out loud. Deciding that is part of this work;
-discovering it at the first rejected merge-back is not.
-
-**The installs drift.** pm-flow is used by real projects on this machine —
-`golden-grid` carries about ten workspaces — and today an update reaches them by
-being copied. `packaging` replaces that: the engine becomes an installed wheel
-and a repository holds project data only. Once it lands, keeping a project
-current is `pip install -U` into its venv plus the one-time legacy migration
-`packaging` already built and proved, not a file-copying protocol.
-
-So this section is about the *rollout*, not the mechanism: something that knows
-which internal projects exist, what version each is pinned to, and whether that
-matches this repository. `packaging` owns migration; do not rebuild it here.
-
-Be careful what "on each commit" means. A hook that reaches into other
-repositories and mutates them, or that needs the network, turns every local
-commit into a slow and occasionally destructive operation, and it will be
-disabled within a week. The safe shape is a hook that *observes and reports*
-drift cheaply and offline, with the update itself an explicit command a person
-or a scheduled job runs. If a cheap in-hook check is genuinely impossible, say
-so and move the work to the explicit command entirely.
+- Re-implementing migration; the update command delegates to `install.sh`.
+- A hook that inspects or mutates other repositories.
 
 ## Priority
 
-- nice-to-have. Nothing is blocked on it. Without it the convention erodes and
-  every internal project is updated by hand, which is how they got out of step.
+- nice-to-have: nothing is blocked on it; without it the convention erodes and
+  installs are updated by hand.
 
 ## Owned paths
 
@@ -61,58 +72,48 @@ so and move the work to the explicit command entirely.
 - `.releaserc.json`
 - `tests/repo_hooks_test.sh`
 
-New paths only. `driver.zsh` belongs to `codex-usage` and `install.sh`,
-`README.md` and the packaged layout belong to `packaging`; hand either a bounded
-change rather than editing from here.
-
 ## Dependencies
 
 - packaging
 
-Real, not sequencing. The migration half is defined against the packaged layout:
-until a repository holds project data only and the engine comes from a wheel,
-"is this project up to date" has no version to compare and the answer is a
-file-tree diff, which is the thing being deleted.
+## Constraints and fixed decisions
 
-The commit hook does not depend on `packaging` and can land first.
+- Hooks are opt-in per clone through `core.hooksPath`; nothing is copied into
+  `.git/hooks`.
+- The checker accepts the driver's `chore(<scope>): …` subjects, merge and
+  revert subjects, and `--no-verify` remains the documented emergency bypass.
+- The update command never runs during a commit and never touches a
+  repository not named on its command line.
 
 ## Acceptance
 
-Stable IDs `A1`–`A7` refer to the bullets below in order.
-
-Stated as outcomes, because a hook that exists and is not installed is the
-default failure here.
-
-- In a fresh clone, after running the documented setup step and nothing else, a
-  commit whose message does not follow the convention is refused, and the
-  refusal names which rule it broke.
-- A conforming commit is not refused, and the check adds no perceptible delay to
-  an ordinary commit.
-- Every commit message the driver generates today either passes the hook, or is
-  changed to pass it — and a full section cycle runs end to end with the hook
-  installed, reaching an accepted merge-back without the hook stopping it. A
-  green suite is not evidence for this; the flow itself has to run.
-- Someone who has not read this repository can list the internal projects, see
-  which pm-flow version each is on and which are behind, and bring one up to
-  date, from one documented command.
-- Bringing a project up to date preserves its project data — plan, sections, run
-  history, recorded domain, local overrides — and the project runs afterwards.
-  Reuse `packaging`'s migration proof rather than writing a second one.
-- Committing still works with no network, with the hooks uninstalled, and in a
-  worktree.
-- The suite still passes.
+- A1: In a fresh clone with the hook installed, a subject without a type or
+  over 72 characters is refused and the refusal names the rule; a conforming
+  subject is accepted.
+- A2: The hook adds under 100 ms to a commit, measured in the test, and
+  invokes no network client: the test greps the hook for `curl`, `wget`, `nc`
+  and `urllib` and finds none.
+- A3: Every subject `driver.zsh` generates, enumerated by the test from its
+  `-m` arguments, passes the checker; the transitions stub suite runs to its
+  accepted merge-back with the hook installed in the test repository.
+- A4: `tools/hooks/projects` lists two disposable repositories registered in a
+  temporary `projects.txt`, one on an older wheel, as `behind` and `current`.
+- A5: `tools/hooks/projects update <repo>` on the `behind` one leaves its
+  project data byte-identical except the engine, and `pm-flow status` exits 0
+  there afterwards.
+- A6: Committing still works offline, with `tools/hooks/uninstall` applied,
+  and from a linked worktree.
+- A7: `zsh tests/repo_hooks_test.sh` and `zsh tests/pm_flow_test.sh` exit 0.
 
 ## Rejection conditions
 
-- The hook exists in the tree but a fresh clone does not have it installed, so
-  the convention is still unenforced.
-- The hook refuses the driver's own commits, or the flow is left unable to
-  complete a cycle.
-- A commit triggers a network call, a package install, or a write to any
-  repository other than the one being committed to.
-- Migration logic is reimplemented here instead of reusing `packaging`'s.
-- An internal project is updated in a way that loses project state or its
-  recorded domain.
-- The hook cannot be bypassed for a genuine emergency, or bypassing it is
-  undocumented.
-- The suite is weakened, or made to exit zero without running to completion.
+- The hook exists in the tree but a documented fresh-clone setup does not
+  install it.
+- The hook refuses a driver-generated subject.
+- A commit triggers a network call, a package install, or a write to another
+  repository.
+- Migration logic is re-implemented instead of delegated to `install.sh`.
+
+## Open questions
+
+- None.

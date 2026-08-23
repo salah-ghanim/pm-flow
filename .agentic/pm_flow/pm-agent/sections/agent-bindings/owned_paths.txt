@@ -1,3 +1,4 @@
 src/pm_flow/acp.py
 src/pm_flow/mcp_server.py
+template/.agentic/pm_flow/agent_exec.sh
 tests/agent_bindings_test.sh

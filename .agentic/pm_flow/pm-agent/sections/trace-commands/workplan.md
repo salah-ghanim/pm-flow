@@ -2,84 +2,81 @@
 
 ## Design summary
 
-- Expose the existing durable telemetry through bounded export commands. Use
-  `trace_export.py` for selection/serialization/delivery and keep `pm_flow.sh`
-  as command routing. Export checkpoints make successful delivery idempotent;
-  telemetry failure remains non-fatal to product runs.
+- `trace_export.py` keeps selection, serialisation, delivery and checkpoints,
+  and reads the `telemetry` block for defaults; `pm_flow.sh` only routes
+  `trace` to it.
+  Acknowledgement marks a span exported; anything else leaves it retryable.
 
 ## Interfaces and data changes
 
-- `pm_flow.sh trace export --file <path>` writes OTLP JSON.
-- `pm_flow.sh trace export --otlp <url>` posts to a caller-selected endpoint.
-- Config controls recording; the store records export checkpoints only after
-  successful delivery.
+- `pm-flow trace export --otlp <url> [--header k=v]…`, `--file <path>`;
+  `pm-flow trace status`.
+- `config.json` `telemetry: {enabled, otlp_endpoint, headers}`.
+- No schema change; `spans.exported_at` already exists.
 
-## Task T1 — Rebaseline ownership and export selection
+## Task T1 — Checkpoint on acknowledgement
 
 - Status: pending.
-- Outcome: packaged-layout paths are authoritative and the exporter selects
-  recorded, not-yet-exported spans without changing run records.
+- Outcome: `trace_export.py` marks spans exported only after a 2xx; 4xx, 5xx
+  and timeouts leave them selected for the next run; the command prints the
+  acknowledged count.
 - Paths: `template/.agentic/pm_flow/trace_export.py`,
   `tests/trace_commands_test.sh`.
-- Reuse: existing telemetry/store schema and trace IDs.
-- Acceptance IDs: A3.
-- Validation: seed two traces, export one batch, rerun selection, and mutation-
-  remove checkpointing to prove the duplicate assertion fails.
-- Depends on: packaging (complete), otel-semconv.
+- Reuse: `fetch_spans`, `mark_exported`, `export_to_otlp`.
+- Acceptance IDs: A1, A3.
+- Validation: `zsh tests/trace_commands_test.sh` — a standard-library receiver
+  scripted to answer 200, then 503, then timeout: first run exports N and
+  prints N, second prints 0, after 503 and timeout the spans remain unexported
+  and a later 200 run delivers them; a mutation marking before the response
+  fails.
+- Depends on: None.
 
-## Task T2 — Add file export and recording toggle
+## Task T2 — Command surface and config block
 
 - Status: pending.
-- Outcome: file export writes valid OTLP JSON without network dependencies;
-  `telemetry.enabled: false` suppresses recording without affecting the run.
-- Paths: `pm_flow.sh`, `config.json`, `trace_export.py`,
-  `tests/trace_commands_test.sh`.
-- Reuse: existing config loader and non-fatal telemetry wrappers.
+- Outcome: `pm-flow trace export|status` route to `trace_export.py`, which
+  reads `telemetry.otlp_endpoint` and `headers` as defaults; with
+  `telemetry.enabled: false` a tick records no span and `status` reports it;
+  `--file` works with no OpenTelemetry package importable.
+- Paths: `template/.agentic/pm_flow/pm_flow.sh`, `template/.agentic/pm_flow/config.json`,
+  `template/.agentic/pm_flow/trace_export.py`, `tests/trace_commands_test.sh`.
+- Reuse: `driver.zsh telemetry_enabled` (unchanged); the stub harness from
+  `tests/pm_flow_test.sh`.
 - Acceptance IDs: A2, A4.
-- Validation: JSON/schema assertions, disabled/enabled paired runs, and a broken
-  exporter mutation that must not abort the underlying project run.
+- Validation: `zsh tests/trace_commands_test.sh` — a venv without the SDK
+  writes a file that passes both schema checks; a disabled-telemetry tick
+  records no span and `status` prints `recording: disabled`; a mutation that
+  raises inside the exporter does not change the tick's exit status.
 - Depends on: T1.
 
-## Task T3 — Add vendor-neutral OTLP delivery
+## Task T3 — End to end through the installed command
 
 - Status: pending.
-- Outcome: caller-selected OTLP HTTP endpoint receives a valid batch and the
-  command reports exactly how many spans were acknowledged.
-- Paths: `pm_flow.sh`, `trace_export.py`, `tests/trace_commands_test.sh`.
-- Reuse: T1 selection/checkpointing and T2 serialization.
-- Acceptance IDs: A1, A3.
-- Validation: local HTTP collector captures request path/headers/body; 2xx marks
-  exported, 4xx/5xx/timeout leaves spans retryable, no vendor URL is defaulted.
-- Depends on: T2.
-
-## Task T4 — Installed-artifact E2E and regression closeout
-
-- Status: pending.
-- Outcome: an installed `pm-flow` records, exports to file and HTTP, reports
-  counts, retries failures, skips acknowledged spans, and still passes the suite.
-- Paths: all owned trace paths and `tests/trace_commands_test.sh`.
-- Reuse: packaged-layout harness and OTel backend fixture.
+- Outcome: a packaged install records a stub run, exports to the receiver and
+  to a file, reports counts, and re-exports nothing.
+- Paths: `tests/trace_commands_test.sh`.
+- Reuse: the harness in `tests/packaged_layout_test.sh`.
 - Acceptance IDs: A1–A5.
-- Validation: `zsh tests/trace_commands_test.sh`, packaged artifact scenario,
-  duplicate/checkpoint mutation, telemetry-failure scenario, and full suite.
-- Depends on: T3.
+- Validation: `zsh tests/trace_commands_test.sh`, `zsh tests/pm_flow_test.sh`,
+  `zsh tests/packaged_layout_test.sh` exit 0.
+- Depends on: T2.
 
 ## Integration and end-to-end validation
 
-- Export success is based on collector acknowledgement, not attempted writes.
-  The file and HTTP paths must serialize the same semantic payload.
+- T3 proves scenarios 1–3 through `.venv/bin/pm-flow`.
 
 ## Risks and rollback
 
-- Endpoint failure must affect only the export command. Disable export/recording
-  via config; never delete stored spans during rollback.
+- A checkpoint written on a failed send silently loses spans; T1's failure
+  matrix is the guard. Rollback removes the `trace` routing; stored spans are
+  untouched.
 
 ## Acceptance coverage
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1 | T3, T4 | Local OTLP endpoint receives batch and count |
-| A2 | T2, T4 | Dependency-free OTLP JSON file |
-| A3 | T1, T3, T4 | Acknowledged spans are not re-exported |
-| A4 | T2, T4 | Disabled recording leaves run successful |
-| A5 | T4 | Full suite completes |
+| A1 | T1, T3 | Receiver count equals printed count; rerun prints 0 |
+| A2 | T2, T3 | SDK-less file passes both schema checks |
+| A3 | T1 | 5xx/timeout leave spans retryable |
+| A4 | T2 | Disabled recording: no span, status says so |
+| A5 | T3 | Three suites exit 0 |

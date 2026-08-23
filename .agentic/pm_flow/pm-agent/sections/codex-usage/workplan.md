@@ -2,106 +2,78 @@
 
 ## Design summary
 
-- Capture Codex JSONL separately from diagnostics, treat event-file growth as
-  liveness, parse real `turn.completed.usage`, and bracket every dispatch with
-  the existing telemetry attempt lifecycle. Keep replay deterministic and use
-  a host canary only for the authenticated external contract.
+- The engine work is on `main` (event capture, liveness, stderr-only
+  classification, attempt lifecycle, real-usage mapping). What remains is to
+  make its proof permanent: one tracked test that drives the public driver
+  with a stubbed `codex` replaying `tests/fixtures/codex_events_real.jsonl`
+  and asserts the stored attempt, liveness, and classification.
 
 ## Interfaces and data changes
 
-- `<response>.events.jsonl` is the Codex event stream; stderr remains the
-  attempt log and sole failure-classification input.
-- `TRACEPARENT` is inherited by the child.
-- `attempts` stores Codex identity and token columns; cost presentation remains
-  owned by `store-ledger`.
+- None. The test reads `attempts` through the store module and the
+  `.events.jsonl` file beside the response envelope.
 
 ## Task T1 — Capture events without changing failure semantics
 
-- Status: completed (cycles 001–002; `07848d3`).
-- Outcome: `codex exec --json` writes adjacent JSONL, event-only activity keeps
-  the process alive, stderr alone drives classification, and supervisor output
-  stays parseable.
-- Paths: `template/.agentic/pm_flow/agent_exec.sh`.
-- Reuse: `usage_from_codex_events` and existing supervision loop.
-- Acceptance IDs: A3, A4, A5.
-- Validation: fixture dispatch, event-only liveness past the stall threshold,
-  stderr classification probe, exact four-record supervisor output.
+- Status: done (cycle 002, `07848d3`).
+- Outcome: `codex exec --json` writes adjacent JSONL; event-only activity keeps
+  the process alive; stderr alone drives classification.
+- Paths: `template/.agentic/pm_flow/agent_exec.sh` (released since).
+- Reuse: the supervision loop.
+- Acceptance IDs: A4, A5.
+- Validation: superseded by T3's tracked test.
 - Depends on: green-suite.
 
-## Task T2 — Persist the real attempt lifecycle and tokens
+## Task T2 — Persist the attempt lifecycle and real tokens
 
-- Status: completed technically (cycles 004–005; present on `main`).
-- Outcome: begin/end lifecycle calls create one attempt and map real Codex usage
-  into the schema's existing token columns.
-- Paths: `driver.zsh`, `telemetry.py`, real event fixture.
-- Reuse: `runs`, `attempts`, topology/persona/binding tables.
-- Acceptance IDs: A1, A3, A6.
-- Validation: the developer host canary stored input 76195, output 1274,
-  cached input 62464, reasoning 402, total 77469 matching one real event; schema
-  and lifecycle-removal mutations produced no completed attempt.
+- Status: done (on `main`; cycles 004–005 NO_GO on harness grounds only: the
+  reviewer could not run Codex inside the nested sandbox).
+- Outcome: every dispatch creates one `attempts` row; Codex usage from
+  `turn.completed` fills its token columns.
+- Paths: `driver.zsh`, `telemetry.py` (released since).
+- Reuse: `attempts` schema unchanged.
+- Acceptance IDs: A1, A3.
+- Validation: superseded by T3's tracked test and the reviewer's A1 probe.
 - Depends on: T1.
 
-## Task T3 — Make deterministic replay permanent
+## Task T3 — Track the replay test
 
 - Status: pending.
-- Outcome: a tracked public-`tick` test proves dispatch, lifecycle, exact token
-  mapping, event liveness, stderr isolation, and telemetry non-fatality using
-  the captured real-Codex stream.
-- Paths: `tests/codex_usage_test.sh`,
-  `tests/fixtures/codex_events_real.jsonl`, and only the owned engine files if a
-  defect is exposed.
-- Reuse: the cycle-005 probe logic and real captured fixture; do not synthesize
-  a private event schema.
+- Outcome: `tests/codex_usage_test.sh` builds a disposable project, installs a
+  stub `codex` on `PATH` that replays the captured stream to its `-o` file and
+  events to stdout, drives one `tick` through the public driver, and asserts:
+  one completed attempt whose token columns equal the stream's
+  `turn.completed.usage` (76195 / 1274 / 62464 / 402 / 77469); no termination
+  when only the event file grows past a shortened `heartbeat_stall_seconds`;
+  classification unchanged by failure-looking event text; two mutations fail
+  (lifecycle call removed; usage read from a field real Codex never emits).
+- Paths: `tests/codex_usage_test.sh`, `tests/fixtures/codex_events_real.jsonl`.
+- Reuse: `driver_tick` and the disposable-project setup from
+  `tests/pm_flow_test.sh`; the probe recorded in `cycles/005/result.md`.
 - Acceptance IDs: A1, A3, A4, A5, A6.
-- Validation: `zsh tests/codex_usage_test.sh` passes; mutations removing
-  lifecycle wiring and reading the wrong usage fields fail.
+- Validation: `zsh tests/codex_usage_test.sh` exits 0 and prints one PASS line
+  per assertion above; `zsh tests/pm_flow_test.sh` exits 0. Reviewer probe for
+  A1: the attempt row of the developer dispatch that delivered this task
+  equals its own `.events.jsonl` `turn.completed` usage.
 - Depends on: T2.
-
-## Task T4 — Run an authenticated host canary
-
-- Status: pending; reviewer sandbox cannot nest the authenticated Codex client.
-- Outcome: one host-level dispatch produces usable role output, a non-empty
-  event stream, a closed run, and one completed attempt whose token columns
-  exactly equal `turn.completed.usage`.
-- Paths: no product write unless T3 exposes a defect; evidence belongs in the
-  cycle record.
-- Reuse: the same assertions as T3 against a real `codex` executable.
-- Acceptance IDs: A1, A4, A6.
-- Validation: run outside the nested reviewer sandbox and record versions,
-  command, event values, store values, and exit status.
-- Depends on: T3 and credentials.
-
-## Task T5 — Verify user-visible cost through store-ledger
-
-- Status: waiting on `store-ledger`; no codex-owned implementation is allowed.
-- Outcome: `pm_flow.sh cost` reports the stored Codex tokens/spend without
-  parsing JSONL.
-- Paths: none in this section; evidence-only verification.
-- Reuse: the completed attempt from T4 and store-ledger's reader.
-- Acceptance IDs: A2.
-- Validation: run `pm_flow.sh cost` for the canary run and match its Codex row
-  to the store.
-- Depends on: T4, store-ledger.
 
 ## Integration and end-to-end validation
 
-- T3 is the next assignable task. T4 is a live canary, not a substitute for
-  replay. T5 verifies the downstream presentation contract without crossing
-  section ownership.
+- T3 is the end-to-end task: it drives the real driver, not the parser.
 
 ## Risks and rollback
 
-- Codex event schemas may change. Replay detects known-schema drift; the host
-  canary detects CLI/service drift. Roll back lifecycle integration without
-  deleting captured events or stored attempts.
+- Codex may change its event schema; the captured fixture pins today's. A
+  drift shows as the replay passing while a live dispatch records nothing,
+  which the reviewer's A1 probe on a live developer dispatch catches.
 
 ## Acceptance coverage
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1 | T2, T3, T4 | Stored tokens exactly match real event usage |
-| A2 | T5 | Cost output reads the stored Codex attempt |
-| A3 | T1, T3 | Real captured fixture drives parser and lifecycle |
-| A4 | T1, T3, T4 | Event-only dispatch is not killed as stalled |
-| A5 | T1, T3 | Only stderr affects classification |
-| A6 | T2, T3, T4 | Deterministic suite and authenticated canary pass |
+| A1 | T2, T3 | Live developer attempt row equals its `turn.completed` usage |
+| A2 | retired | Delivered as store-ledger A2 |
+| A3 | T3 | Replay of the captured stream; two mutations fail |
+| A4 | T3 | Event-only growth past the stall budget is not killed |
+| A5 | T3 | Event text cannot change classification |
+| A6 | T3 | Both suites exit 0 |

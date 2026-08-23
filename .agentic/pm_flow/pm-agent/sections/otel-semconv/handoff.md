@@ -2,28 +2,25 @@
 
 ## Outcome
 
-Rebaselined into mapping, real emission, stock-backend proof, and revision-change
-tasks. No standard-convention implementation exists yet.
+- Nothing delivered yet.
 
 ## Decisions
 
-- Pin one developmental GenAI revision in one mapping module.
-- Unknown fields use a pm-flow namespace; no invented `gen_ai.*` names.
-- Mapping fixtures alone cannot prove emitted/back-end-visible telemetry.
+- None yet.
 
 ## Interfaces
 
-- Planned: `semconv.py` maps attempt/span data and carries the revision on output.
+- Planned: `semconv.REVISION`, `semconv.attributes_for`, span attribute
+  `pm_flow.semconv.revision`.
 
 ## Risks
 
-- Telemetry/driver paths remain owned by codex-usage. T2 cannot be assigned until
-  those interfaces and paths are released.
+- GenAI conventions are developmental; the pin confines churn to one edit.
 
 ## What is unproven
 
-- All A1–A6 outcomes; current private telemetry is not acceptance evidence.
+- Everything in the brief.
 
 ## Next action
 
-After codex-usage completes, scope workplan T1.
+- Assign T1.

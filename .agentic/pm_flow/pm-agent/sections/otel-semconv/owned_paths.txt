@@ -1,2 +1,3 @@
 src/pm_flow/semconv.py
+template/.agentic/pm_flow/telemetry.py
 tests/otel_semconv_test.sh

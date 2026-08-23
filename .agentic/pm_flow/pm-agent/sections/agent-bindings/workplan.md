@@ -2,87 +2,88 @@
 
 ## Design summary
 
-- Introduce one binding/transport interface between a seat and an executable
-  agent. Implement local ACP as one binding and expose existing pm-flow commands
-  through an MCP server. Existing CLI bindings remain adapters to the same
-  interface, not special cases copied into new modules.
+- One ACP client module; one new `case` arm in `agent_exec.sh` that calls it
+  and writes the same response envelope the other arms write; an MCP server
+  that is a thin tool façade over the installed command. Existing arms are
+  untouched.
 
 ## Interfaces and data changes
 
-- `acp.py`: subprocess JSON-RPC session, capability/access declaration, prompt
-  dispatch, streaming progress, cancellation, and final result.
-- `mcp_server.py`: typed tools over existing pm-flow command semantics.
-- Attempts must persist binding identity and transport separately.
+- `acp.run(...)`, binding `cli: acp` with `cli_params.command`; MCP tools
+  `status`, `next`, `tick`, `list_sections`, `cost`. No schema change.
 
-## Task T1 — Define and test the ACP transport contract
+## Task T1 — ACP client and test agent
 
 - Status: pending.
-- Outcome: an ACP subprocess completes initialize/session/prompt/result and
-  reports whether the requested access tier is enforceable.
+- Outcome: `acp.py` completes initialize → session → prompt → result against
+  a protocol-faithful test agent shipped in the test, distinguishes malformed
+  frames, missing capability, cancellation and child exit, and reports
+  whether the tier is enforceable from the agent's declared capabilities.
 - Paths: `src/pm_flow/acp.py`, `tests/agent_bindings_test.sh`.
-- Reuse: current response-envelope fields, timeout/cancellation semantics, and
-  access-tier vocabulary.
-- Acceptance IDs: A1, A3.
-- Validation: a protocol-faithful test server completes one exchange; malformed
-  frames, missing capability, cancellation, and child failure are distinct.
+- Reuse: the envelope fields and timeout semantics in `agent_exec.sh`.
+- Acceptance IDs: A3, A6.
+- Validation: `zsh tests/agent_bindings_test.sh` — one successful exchange
+  returns the agent's text; each failure mode yields a distinct
+  `failure_reason`; an agent declaring no sandbox capability yields
+  `enforceable=false`.
 - Depends on: None.
 
-## Task T2 — Expose pm-flow operations through MCP
+## Task T2 — The `acp` arm in agent_exec.sh
 
 - Status: pending.
-- Outcome: a stock MCP client can list and invoke bounded project/section
-  operations without using a shell.
-- Paths: `src/pm_flow/mcp_server.py`, `tests/agent_bindings_test.sh`.
-- Reuse: the installed `pm-flow` command contract and structured status output;
-  do not duplicate the state machine.
-- Acceptance IDs: A4.
-- Validation: initialize, list tools, drive a disposable project to a terminal
-  section state, and verify command errors are returned as tool errors.
-- Depends on: None.
-
-## Task T3 — Integrate ACP as a seat binding
-
-- Status: blocked on an ownership amendment after codex-usage releases dispatch
-  paths.
-- Outcome: config selects ACP for a seat, a full cycle follows the ordinary
-  scope/develop/review path, and stored attempts identify binding and transport.
-- Paths: not assignable until `agent_exec.sh`, relevant driver/telemetry paths,
-  and any CLI registration path are transferred into this section.
-- Reuse: T1 adapter, current CLI binding adapters, response envelopes, catalog
-  binding records, and attempt lifecycle.
+- Outcome: a binding with `cli: acp` dispatches through `acp.py`, writes the
+  standard response envelope, records `access: enforced|prompt-level` before
+  the agent runs, and a full section cycle completes with an ACP developer.
+- Paths: `template/.agentic/pm_flow/agent_exec.sh`, `tests/agent_bindings_test.sh`.
+- Reuse: `write_access_settings`, the envelope writer, T1's test agent.
 - Acceptance IDs: A1, A2, A3, A5.
-- Validation: run one ACP-bound and one existing CLI-bound cycle; compare outputs
-  and store rows, then mutation-disable ACP selection and transport recording.
-- Depends on: T1 and codex-usage dispatch ownership release.
+- Validation: `zsh tests/agent_bindings_test.sh` — cycle reaches `GO`; access
+  log shows the record before the attempt start; `pm-flow cost` lists
+  `cli=acp`; `zsh tests/pm_flow_test.sh` and the stub suites exit 0.
+- Depends on: T1.
 
-## Task T4 — Cross-interface regression closeout
+## Task T3 — MCP server
 
 - Status: pending.
-- Outcome: ACP, Claude/Codex CLI bindings, and MCP control all drive the same
-  state machine with unchanged local behavior.
-- Paths: `tests/agent_bindings_test.sh` plus paths transferred for T3.
-- Reuse: installed-artifact harness and existing role fixtures.
-- Acceptance IDs: A1–A5.
-- Validation: `zsh tests/agent_bindings_test.sh` and the full suite pass; removing
-  transport persistence or routing ACP through a CLI arm fails focused checks.
+- Outcome: `python -m pm_flow.mcp_server` serves the five tools over stdio;
+  each invokes the installed `pm-flow` command and returns its output or a
+  tool error.
+- Paths: `src/pm_flow/mcp_server.py`, `tests/agent_bindings_test.sh`.
+- Reuse: `pm_flow.cli`; no state machine code.
+- Acceptance IDs: A4, A6.
+- Validation: `zsh tests/agent_bindings_test.sh` — a JSON-RPC client script
+  lists exactly five tools, drives a stub project to `done` via `tick`, and a
+  `tick` while the driver lock is held returns a tool error naming the lock.
+- Depends on: None.
+
+## Task T4 — End to end through the installed command
+
+- Status: pending.
+- Outcome: a packaged install binds an ACP developer, is driven by the MCP
+  client to a terminal section, and `cost` distinguishes the two transports.
+- Paths: `tests/agent_bindings_test.sh`.
+- Reuse: the harness in `tests/packaged_layout_test.sh`.
+- Acceptance IDs: A1–A6.
+- Validation: `zsh tests/agent_bindings_test.sh`, `zsh tests/pm_flow_test.sh`,
+  `zsh tests/packaged_layout_test.sh` exit 0.
 - Depends on: T2, T3.
 
 ## Integration and end-to-end validation
 
-- T1 and T2 are independently assignable. T3 must not be scoped until the brief
-  and `owned_paths.txt` are amended through the ownership validator.
+- T4 proves scenarios 1–3 through `.venv/bin/pm-flow`.
 
 ## Risks and rollback
 
-- ACP protocol revisions and MCP SDK dependencies may move. Keep protocol code
-  isolated and preserve the existing CLI adapter as the rollback path.
+- ACP is young; the client is isolated in one module and the arm can be
+  removed without touching the other three.
 
 ## Acceptance coverage
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1 | T1, T3, T4 | ACP-bound cycle reaches acceptance |
-| A2 | T3, T4 | Existing CLI behavior remains unchanged |
-| A3 | T1, T3 | Access enforcement/caveat reported before dispatch |
-| A4 | T2, T4 | Stock MCP client drives a project without a shell |
-| A5 | T3, T4 | Store distinguishes binding and transport |
+| A1 | T2, T4 | ACP developer cycle reaches `GO` |
+| A2 | T2, T4 | Existing suites exit 0, arms unchanged |
+| A3 | T1, T2 | Access record precedes the attempt |
+| A4 | T3, T4 | MCP client drives a project to `done` |
+| A5 | T2, T4 | `cost` shows `cli=acp` and `cli=claude` |
+| A6 | T1, T3, T4 | Section suite exits 0 |

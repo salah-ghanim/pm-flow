@@ -1,1 +1,1 @@
-Lifecycle works; next task is tracked replay, then host canary and cost verification.
+Engine work on main; T3 tracks the replay test, then complete.

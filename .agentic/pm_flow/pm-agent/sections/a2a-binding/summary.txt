@@ -1,1 +1,1 @@
-Workplan defined; waiting for agent-bindings before the A2A contract task.
+Not started; waits on agent-bindings.

@@ -14,7 +14,7 @@
 
 ## Task T1 — Local pack validation and installation
 
-- Status: completed (cycle 004; `aaaf4b9`, merged by `1b17900`).
+- Status: done (cycle 004, `aaaf4b9`).
 - Outcome: local packs install and list without executing pack content;
   identical re-adds are idempotent and edited prompts create new versions.
 - Paths: `template/.agentic/pm_flow/catalog.py`, `store.py`.
@@ -26,7 +26,7 @@
 
 ## Task T2 — Git acquisition with durable provenance
 
-- Status: completed (cycle 006; cycle 005 harness failure corrected).
+- Status: done (cycle 006).
 - Outcome: a `file://` Git source installs through the real Git CLI while the
   original URL and exact commit, never a temporary clone path, are persisted.
 - Paths: `template/.agentic/pm_flow/catalog.py`.
@@ -38,7 +38,7 @@
 
 ## Task T3 — Source update without history loss
 
-- Status: completed (cycle 008; cycle 007 listing gap corrected).
+- Status: done (cycle 008).
 - Outcome: update installs changed content as a new attributable version and
   retains old persona rows and attempts.
 - Paths: `template/.agentic/pm_flow/catalog.py`.
@@ -50,7 +50,7 @@
 
 ## Task T4 — Swap exactly one seat layer
 
-- Status: completed (cycle 009; `dc38523`).
+- Status: done (cycle 009, `dc38523`).
 - Outcome: swapping a base/domain/style persona changes only that layer,
   survives catalog re-sync, reaches the next dispatch, and keeps old attempts.
 - Paths: `template/.agentic/pm_flow/catalog.py`.
@@ -63,13 +63,13 @@
 
 ## Task T5 — Full regression closeout
 
-- Status: completed (cycle 009).
+- Status: done (cycle 009).
 - Outcome: every accepted pack operation and the full engine suite pass from a
   clean environment.
 - Paths: no new product paths.
 - Reuse: saved cycle acceptance scenarios and engine suite.
 - Acceptance IDs: A5.
-- Validation: cycles 001–008 regressions plus all ten `pm_flow_test.sh` groups.
+- Validation: `zsh tests/pm_flow_test.sh` exits 0 (ten groups).
 - Depends on: T1–T4.
 
 ## Integration and end-to-end validation

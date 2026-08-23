@@ -1,1 +1,1 @@
-Workplan defined; commit-message checker is the next task.
+Not started; T1 is the commit-message checker.

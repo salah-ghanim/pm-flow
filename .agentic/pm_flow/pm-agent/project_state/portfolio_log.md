@@ -60,3 +60,25 @@
   host-level authenticated canary, production-length event-only liveness, and
   non-zero Codex tokens reported by `pm_flow.sh cost` after `store-ledger`; the
   intended graph edge remains unrecorded until the ownership conflict is fixed.
+
+## 2026-08-23 — owner rebaseline of the live sections
+
+- Decision: every nonterminal brief rewritten to the full contract shape with
+  inline acceptance IDs; workplans carry validation commands; state and
+  handoff files hold evidence only. History lives here and in cycle records.
+- `codex-usage` releases `driver.zsh`, `agent_exec.sh` and `telemetry.py`
+  (its remaining work is the tracked replay test). A2 is retired; cost
+  presentation is `store-ledger` A2.
+- Engine ownership now: `store-ledger` holds `driver.zsh` for its five ledger
+  functions; `agent-bindings` holds `agent_exec.sh`; `otel-semconv` holds
+  `telemetry.py`; `trace-commands` holds `pm_flow.sh`, `config.json`,
+  `trace_export.py`; `topology-compare` holds `cli.py`; `persona-cards` takes
+  `catalog.py` once `persona-packs` closes (dependency-gated).
+- Dependencies: `otel-semconv` and `trace-commands` no longer wait on
+  anything; `topology-compare` waits on `store-ledger` for cost totals.
+- The driver's own commit subjects are Conventional Commits on `main`;
+  `repo-hooks` verifies them rather than changing `driver.zsh`.
+- `persona-packs` has evidence for every acceptance ID; its next scope call
+  declares `COMPLETE`.
+- Unproven after this pass: nothing new; the planned sections have no
+  evidence and say so.

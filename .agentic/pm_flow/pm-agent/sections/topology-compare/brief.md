@@ -1,85 +1,114 @@
 ## Objective
 
-- Run the same work under two agent team designs and report what each cost,
-  where each escalated, and how long each took.
+- The same project runs under two named agent team designs and one command
+  reports what each cost, where each escalated, and how long each took, with
+  its inference limits stated.
+
+## Current baseline
+
+- A run is dispatched under a topology key: `PM_FLOW_TOPOLOGY`, else
+  `telemetry.topology` in `config.json`, else `default`; `runs`, `attempts`
+  and `spans` carry it.
+- `config.json` `roles` binds each role to a CLI, model and difficulty;
+  `consultant` is already a list of seats.
+- No topology is a named document, nothing runs a project twice, and nothing
+  puts two records side by side.
+
+## Deliverables
+
+- Topology documents under `template/.agentic/pm_flow/topologies/<key>.json`:
+  role bindings and seat counts only, validated before dispatch.
+- `pm-flow compare <topology-a> <topology-b> [--max-ticks n]`: runs the
+  project from the same starting commit under each, in disposable copies,
+  then prints the comparison.
+- `pm-flow compare --report <run-a> <run-b>`: the table for two finished runs.
+- `tests/topology_compare_test.sh`.
+
+## User-visible scenarios
+
+1. Two files, `topologies/lean.json` and `topologies/heavy.json`, differ in
+   the developer model and the consultant seat count; `pm-flow compare lean
+   heavy --max-ticks 6` runs both and prints one table with a row per metric
+   and a column per arm, followed by the arm sizes and the limits sentence.
+2. `pm-flow compare heavy missing` exits non-zero before any dispatch, naming
+   the absent topology; so does a topology naming a model the configured CLI
+   cannot reach.
+3. `pm-flow cost` after a compare shows attempts from both arms, each with its
+   topology key.
+
+## Interfaces produced
+
+- Topology document schema; `pm-flow compare`; the report's column contract
+  (`cost_usd`, `tokens`, `cycles_to_done`, `rescue_rate`, `abandon_rate`,
+  `escalation_depth`, `wall_clock_s`, `n_runs`).
+
+## Interfaces consumed
+
+- `runs`, `attempts` and their topology keys; `store-ledger`'s cost totals;
+  `PM_FLOW_TOPOLOGY`.
 
 ## Scope
 
-This is the plan's headline sentence and no section delivers it. `plan.md`
-promises that "a person should be able to run the same work under two different
-agent team designs, see what each cost and where each escalated, swap one
-agent's system prompt for somebody else's, re-run, and know whether it helped."
-Everything else in this project is a precondition for that sentence.
+- In: topology documents and validation, running both arms, the report, the
+  limits statement, tests.
+- Out: statistical testing; persona identity in the report (`persona-cards`
+  A3 consumes the report's per-arm persona fields); editing `config.json`.
 
-A topology is already addressable: `config.json` binds each role to a cli, a
-model and a difficulty, `consultant` is already a list of independent seats, and
-the store records a run, its attempts and its spans. What is missing is a way to
-name two of those arrangements, run the same project under each, and put the
-two records side by side.
+## Non-goals
 
-In scope:
-
-- A named topology: a config overlay that renames nothing and replaces only role
-  bindings and seat counts. Stored as data, not as an edited `config.json`.
-- `pm-flow compare <topology-a> <topology-b>` — run the same project under each
-  and emit one table.
-- The metrics `plan.md` already committed to, because they are the ones where
-  the effect size is large and measurement is not a matter of opinion: cost,
-  tokens, cycles-to-done, rescue rate, abandonment rate, escalation depth.
-- The statistical caveat printed with the result, not buried in a document.
-  Separating a real quality difference from model noise takes on the order of
-  ten thousand trajectories per arm; three runs cannot do it, and a user who is
-  not told that will over-read the table.
-
-Out of scope: quality scoring, Inspect AI integration, any hosted comparison
-service, and any claim that a two-run difference is significant.
+- Claiming a winner. The report describes; it does not infer.
+- Running arms concurrently in the same checkout.
 
 ## Priority
 
-- must-have. Without it the project's stated objective is undelivered and pm-flow
-  is one more orchestrator in a field of 150.
+- must-have: this is the plan's headline sentence.
 
 ## Owned paths
 
 - `src/pm_flow/topology.py`
 - `src/pm_flow/compare.py`
 - `src/pm_flow/cli.py`
-- `tests/topology_compare_test.sh`
 - `template/.agentic/pm_flow/topologies/**`
-
-`cli.py` is transferred from completed packaging so the installed command can
-route `compare` directly to these Python modules. Read the store but do not alter
-its schema; store-backed metric queries arrive through `store-ledger`.
+- `tests/topology_compare_test.sh`
 
 ## Dependencies
 
-- None.
+- store-ledger
 
-Deliberately none, and this is a judgement worth recording. The obvious reading
-is that this waits for `packaging` and `store-ledger`. It does not need to:
-comparison reads runs that the store already records, and it can be built and
-proven against runs that exist today. Making it wait would put the project's
-headline promise behind two sections that have each already lost cycles, and
-nothing about the packaged layout changes what a comparison reads.
+## Constraints and fixed decisions
+
+- A topology document never mutates shared `config.json`; the driver is
+  pointed at it through `PM_FLOW_TOPOLOGY` and an overlay the document
+  supplies.
+- Each arm runs in its own disposable copy of the repository from the same
+  starting commit; the store rows it produces are imported back under the
+  arm's topology key.
+- Cost figures come from `store-ledger`'s `cost.py`; no second accounting.
 
 ## Acceptance
 
-Stable IDs `A1`–`A5` refer to the bullets below in order.
-
-- Two topologies are defined without editing a shared `config.json`, and running
-  one does not mutate the other's definition.
-- The same project runs under both and the store holds two distinguishable runs.
-- One command emits a table of cost, tokens, cycles-to-done, rescue rate,
-  abandonment rate and escalation depth for both.
-- The output states, in the output itself, what a difference of this sample size
-  can and cannot support.
-- A topology names no model that the machine does not have without failing
-  clearly, before any dispatch is made.
+- A1: `pm-flow compare a b` on a stub project in the test runs both arms and
+  the store holds runs under both topology keys with the same project key.
+- A2: `pm-flow compare --report` prints every metric in the column contract
+  for both arms with values equal to a hand-computed fixture, plus `n_runs`
+  per arm.
+- A3: The report ends with the limits sentence naming the arm sizes; with one
+  run per arm it states that no difference can be inferred, and a mutation
+  removing the sentence fails the test.
+- A4: A missing topology, or one naming a model the bound CLI does not list,
+  fails before any dispatch: the store holds no new attempt.
+- A5: A persona swapped on one seat in one arm appears in that arm's report
+  column by persona key.
+- A6: `zsh tests/topology_compare_test.sh`, `zsh tests/pm_flow_test.sh` and
+  `zsh tests/packaged_layout_test.sh` exit 0.
 
 ## Rejection conditions
 
-- A topology is expressed by editing `config.json` in place.
-- The comparison reports a quality verdict, or any wording that implies one
-  arrangement is better when the evidence is a handful of runs.
-- Comparison requires a hosted service or a backend the user did not start.
-- The metrics are computed from anything other than the recorded run.
+- A comparison that implies superiority without the limits sentence.
+- A topology definition that edits `config.json` in place.
+- Two arms run in one checkout at once.
+- A second cost calculation.
+
+## Open questions
+
+- None.

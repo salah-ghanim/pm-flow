@@ -2,26 +2,21 @@
 
 ## Current task
 
-- None while the hard dependency `codex-usage` remains incomplete.
+- None assigned.
 
 ## Completed tasks and evidence
 
-- None. Workplan T1–T4 is defined; current telemetry/store fields are inputs,
-  not evidence that conventional spans are emitted.
+- None.
 
 ## Active decisions
 
-- Pin one developmental GenAI convention revision in `semconv.py`.
-- Standard literals appear only in the mapping module; pm-flow extensions use a
-  visibly non-standard namespace.
-- Mapping tests, real emission, and stock-backend visibility are distinct gates.
+- Revision is stamped per span at record time; `trace_export.py` stays with
+  trace-commands.
 
 ## Blockers
 
-- T2 needs telemetry/driver ownership after codex-usage's tracked replay and
-  canary settle those interfaces. T1 can be scoped once the dependency releases.
+- None.
 
 ## Next eligible task
 
-- T1 after codex-usage: implement the revision/mapping table and stray-literal
-  guard from upstream convention data.
+- T1.

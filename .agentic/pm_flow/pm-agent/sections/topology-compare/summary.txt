@@ -1,1 +1,1 @@
-Workplan defined; immutable topology documents are the next task.
+Not started; waits on store-ledger for cost totals.

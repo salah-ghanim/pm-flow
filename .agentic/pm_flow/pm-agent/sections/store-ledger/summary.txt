@@ -1,1 +1,1 @@
-Workplan defined; idempotent legacy import is the next task.
+Not started; T1 is the idempotent legacy import.
