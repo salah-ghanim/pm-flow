@@ -94,16 +94,6 @@ migrates: the project data is kept as it stands and the copied engine is removed
 cd /path/to/repo
 $EDITOR .agentic/pm_flow/<project>/project_state/plan.md   # what you want built
 .venv/bin/pm-flow run
-
-A run is a foreground process of the shell that started it and dies with that
-shell, losing the dispatch in flight. To start one that outlives the terminal:
-
-```bash
-nohup .venv/bin/pm-flow run --max-ticks 20 > .agentic/pm_flow/<project>/runs/run.log 2>&1 < /dev/null &!
-```
-
-Resuming after an interruption is the same command; the driver derives the
-next action from the section files.
 ```
 
 `run` repeats `tick` until nothing is actionable. Each tick observes the files
