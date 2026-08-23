@@ -16,7 +16,6 @@ SELF_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
 SCRIPT_DIR="${PM_FLOW_ENGINE_ROOT:-$SELF_DIR}"
 FLOW_DIR="${PM_FLOW_FLOW_DIR:-$SELF_DIR}"
 PROJECT_ROOT="${PM_FLOW_REPO_ROOT:-$(cd -P -- "$SELF_DIR/../.." && pwd -P)}"
-PM_SYSTEM_PROMPT="You are a section-scoped project management reviewer for another software agent. You are not the acting PM and you have no sub-agents: your entire output is a written review that the calling section PM will act on. Reason only about the assigned project section. Review the proposed engineering step or completion report, critique the reasoning, detect mission drift, suggest improvements, approve or reject the path forward, and name the next bounded assignment. Do not write code, do not edit files, and do not attempt to launch agents or run the flow's commands yourself. Recommend that each implementation assignment go to a fresh developer sub-agent with no inherited conversation, seeded only with the bounded assignment and explicitly allowlisted files. Focus on scope control, validation, sequencing, risks, interfaces, and drift management. Be direct and concrete, and answer only with the requested sections."
 PROJECT_OVERRIDE="${PM_FLOW_PROJECT:-}"
 SECTION_OVERRIDE="${PM_FLOW_SECTION:-}"
 PROJECT_KEY=""
@@ -311,6 +310,19 @@ compose_role_task() {
     "$role" "$phase" "$commit_owner"
   compose_role_prompt "$role"
   printf '\n'
+  # What the scoped tier's shell accepts, said by the engine rather than
+  # learned by refusal: a reviewer spent ten of its turns on `cd … &&`,
+  # `VAR=… cmd` and heredocs before writing a script and running it.
+  case ",$(config_setting access scoped_roles '["pm","cpo"]')," in
+    *"\"$role\""*)
+      printf '## Shell\n\n'
+      printf 'Your shell runs one plain command per call: a command name and its\n'
+      printf 'arguments. `cd … &&`, `;`, pipes, `VAR=… cmd`, `env …`, heredocs and\n'
+      printf 'interpreters other than the test runners are refused. For several\n'
+      printf 'steps, write them to a script in your own workspace and run it with\n'
+      printf '`zsh <script>`; pass absolute paths rather than changing directory.\n\n'
+      ;;
+  esac
   local domain_task=""
   local project_task=""
   [[ -f "$SCRIPT_DIR/domains/$DOMAIN/tasks/$phase.md" ]] && \
