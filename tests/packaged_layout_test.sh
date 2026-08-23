@@ -788,6 +788,34 @@ drain_project_work() {
   done
 }
 
+# Extract the README's shell instructions once. The install fixture below uses
+# the same extraction that the final documentation group validates, so it tests
+# the command a reader is actually given rather than a parallel test-only call.
+README="$REPO_ROOT/README.md"
+[[ -f "$README" ]] || fail "the checkout has no README.md"
+readme_commands="$(python3 - "$README" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+for block in re.findall(r"```(?:bash|sh|zsh|console)\n(.*?)```", text, re.S):
+    for line in block.splitlines():
+        # A trailing comment is annotation, not part of the command, and would
+        # otherwise be word-split into the arguments this test runs.
+        line = re.sub(r"\s+#.*$", "", line).strip()
+        if line and not line.startswith("#"):
+            print(line)
+PY
+)"
+[[ -n "$readme_commands" ]] || fail "the README documents no commands at all"
+
+# The first documented line matching a command shape, or empty. `|| true`
+# because a README that documents nothing of the sort is a failure its caller
+# reports itself, not a pipeline error that aborts the run first.
+documented() {
+  printf '%s\n' "$readme_commands" | grep -E "$1" | /usr/bin/head -n 1 || true
+}
+
 # --- initialising a fresh repository -----------------------------------------
 #
 # install.sh no longer ships an engine. What it writes is the half that was
@@ -801,7 +829,18 @@ git -C "$INIT_REPO" init --quiet
 INIT_FLOW="$INIT_REPO/.agentic/pm_flow"
 INIT_KEY="init-repo"
 INIT_SECTION_KEY="cutover"
-"$REPO_ROOT/install.sh" "$INIT_REPO" --name "Init Project" --domain distressed-tech \
+documented_install="$(documented '(^|/)install\.sh ')"
+[[ -n "$documented_install" ]] || \
+  fail "the README documents no way to initialise a target repository"
+[[ "$documented_install" == *"/path/to/pm-flow-checkout"* && \
+   "$documented_install" == *"/path/to/target-repository"* ]] || \
+  fail "the first documented install command does not name both checkout and target placeholders: $documented_install"
+documented_install_words=( ${(@Q)${(z)documented_install}} )
+for index in {1..${#documented_install_words}}; do
+  documented_install_words[$index]="${documented_install_words[$index]//\/path\/to\/pm-flow-checkout/$REPO_ROOT}"
+  documented_install_words[$index]="${documented_install_words[$index]//\/path\/to\/target-repository/$INIT_REPO}"
+done
+( cd "$INIT_REPO" && "${documented_install_words[@]}" ) \
   > "$TEST_ROOT/init-install.out" 2>&1 || \
   fail "install.sh failed:"$'\n'"$(/bin/cat "$TEST_ROOT/init-install.out")"
 
@@ -1345,28 +1384,6 @@ printf 'PASS: upgrading one repository changes its version, not its data and not
 # the blocks above already built, rather than only matched as text: a README that
 # names a command nobody can run is as wrong as one that names a deleted file.
 
-README="$REPO_ROOT/README.md"
-[[ -f "$README" ]] || fail "the checkout has no README.md"
-
-# Instructions, not prose. A sentence may legitimately mention a retired name
-# while explaining what replaced it; a line inside a shell block is something a
-# reader is being told to type.
-readme_commands="$(python3 - "$README" <<'PY'
-import re
-import sys
-
-text = open(sys.argv[1], encoding="utf-8").read()
-for block in re.findall(r"```(?:bash|sh|zsh|console)\n(.*?)```", text, re.S):
-    for line in block.splitlines():
-        # A trailing comment is annotation, not part of the command, and would
-        # otherwise be word-split into the arguments this test runs.
-        line = re.sub(r"\s+#.*$", "", line).strip()
-        if line and not line.startswith("#"):
-            print(line)
-PY
-)"
-[[ -n "$readme_commands" ]] || fail "the README documents no commands at all"
-
 # Whitespace-flattened, so an assertion about a sentence is not really an
 # assertion about where the paragraph happened to wrap.
 readme_flat="$(python3 -c \
@@ -1409,6 +1426,28 @@ assert_contains "$readme_flat" "\`.agentic/\` holds your project's own mutable d
 assert_contains "$readme_flat" "changes no file inside \`.agentic/\`" \
   "the README says an upgrade does not rewrite project data"
 
+# The documented overlay is not validated against another test literal. It is
+# resolved with the project and role this suite actually dispatched, then
+# compared with the repository file that dispatch read and the provenance row
+# it recorded.
+documented_overlay="$(python3 - "$README" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+matches = re.findall(r"`([^`\n]*<project>/roles/<role>\.md)`", text)
+if len(matches) != 1:
+    raise SystemExit(f"expected one documented project overlay path, found {len(matches)}")
+print(matches[0])
+PY
+)" || fail "the README does not document one project overlay path"
+documented_overlay="${documented_overlay//<project>/$DISPATCH_KEY}"
+documented_overlay="${documented_overlay//<role>/pm}"
+assert_equals "$documented_overlay" "${LOCAL_LAYER#$FIXTURE/}" \
+  "the documented overlay path is the repository file the dispatch read"
+assert_contains "$recorded" "persona_id=$DISPATCH_KEY/pm (style)" \
+  "the documented overlay's project and role are the recorded top layer"
+
 # Run what it documents. The executable path a README writes is a venv-relative
 # one; the command and its arguments are what this executes, through the venv
 # built at the top of this file.
@@ -1423,13 +1462,6 @@ run_documented() {
   local -a words
   words=( ${(z)${line#*pm-flow}} )
   ( cd "$repo" && "$PM_FLOW" "${words[@]}" )
-}
-
-# The first documented line matching a command shape, or empty. `|| true`
-# because a README that documents nothing of the sort is a failure this block
-# reports itself, not a pipeline error that aborts the run before it can.
-documented() {
-  printf '%s\n' "$readme_commands" | grep -E "$1" | /usr/bin/head -n 1 || true
 }
 
 # Version reporting, through the installed command.
@@ -1484,13 +1516,15 @@ assert_contains "$documented_upgrade" "pm-flow" \
 [[ ! -e "$REPO_ROOT/MANIFEST" && ! -e "$REPO_ROOT/manifest.json" ]] || \
   fail "the checkout still ships a root install manifest"
 manifest_tooling="$(find "$REPO_ROOT" \
-  \( -name .git -o -name tests -o -name .agentic -o -name '__pycache__' \) -prune -o \
+  \( -name .git -o -name tests -o -name .agentic -o -name .venv -o \
+     -name dist -o -name build -o -name '__pycache__' \) -prune -o \
   -type f \( -name 'MANIFEST' -o -name 'manifest.json' -o -name '*manifest*.py' \) -print \
   2>/dev/null | LC_ALL=C sort | tr '\n' ' ')"
 assert_equals "$manifest_tooling" "" \
   "the checkout provides no obsolete root-MANIFEST generator"
 manifest_writers="$(grep -rlI 'MANIFEST' "$REPO_ROOT" \
   --exclude-dir=.git --exclude-dir=tests --exclude-dir=.agentic \
+  --exclude-dir=.venv --exclude-dir=dist --exclude-dir=build \
   --exclude-dir=__pycache__ --exclude=.git 2>/dev/null || true)"
 manifest_writers="$(printf '%s' "$manifest_writers" | LC_ALL=C sort | tr '\n' ' ')"
 assert_equals "$manifest_writers" "" \

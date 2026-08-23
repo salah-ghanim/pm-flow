@@ -202,6 +202,13 @@ mkdir "$FIXTURE_REPO"
 printf '# Existing repository rules\n\n- Preserve this custom rule.\n' > "$FIXTURE_REPO/CLAUDE.md"
 "$REPO_ROOT/install.sh" "$FIXTURE_REPO" --name "Fixture Project" > "$TEST_ROOT/install.out"
 
+fixture_root_entries="$(/bin/ls -A "$FIXTURE_REPO" | LC_ALL=C sort | tr '\n' ' ')"
+[[ "$fixture_root_entries" == ".agentic AGENTS.md CLAUDE.md CLAUDE.pre-pm-flow.md " ]] || \
+  fail "installer added unexpected repository-root entries: $fixture_root_entries"
+instruction_templates="$(find "$FIXTURE_REPO" -name '*.pm-flow.template.md' -print)"
+[[ -z "$instruction_templates" ]] || \
+  fail "installer left rendered instruction templates in the repository:"$'\n'"$instruction_templates"
+
 # `env` rather than a wrapper script: the command actually executed is the
 # entry point the wheel installed, and a prefixed assignment in front of one of
 # these still reaches the child, which a shell function would not manage.

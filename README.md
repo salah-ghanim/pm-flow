@@ -15,12 +15,13 @@ product officer          cuts the product into sections, adjudicates failures
 ## Install
 
 The engine is an installed Python package. It goes into the repository's own
-virtual environment, and `install.sh` writes only the project data beside it:
+virtual environment, and `install.sh` from a pm-flow checkout writes only the
+project data beside it:
 
 ```bash
-cd /path/to/repo
+cd /path/to/target-repository
 python3 -m venv .venv && .venv/bin/pip install pm-flow
-./install.sh /path/to/repo --name "My Product" --domain saas
+/path/to/pm-flow-checkout/install.sh /path/to/target-repository --name "My Product" --domain saas
 ```
 
 Domains — `generic`, `saas`, `prop-trading`, `crypto-trading`, `infrastructure`,
@@ -33,8 +34,8 @@ work. Each project records its own domain, so a platform project and the
 migration that replaces it can share a flow directory without sharing personas:
 
 ```bash
-./install.sh /path/to/repo --project-key platform  --domain infrastructure
-./install.sh /path/to/repo --project-key migration --domain migration --add-project
+/path/to/pm-flow-checkout/install.sh /path/to/target-repository --project-key platform  --domain infrastructure
+/path/to/pm-flow-checkout/install.sh /path/to/target-repository --project-key migration --domain migration --add-project
 .venv/bin/pm-flow --project migration run
 ```
 
@@ -78,13 +79,14 @@ repositories can run different versions of pm-flow at the same time, and
 upgrading one leaves the other where it was.
 
 Customise a role by adding a file, never by editing a packaged one: a
-`<project>/roles/<role>.md` in your repository is applied as one more layer over
-the packaged persona, which is why an upgrade cannot take it away.
+`.agentic/pm_flow/<project>/roles/<role>.md` in your repository is applied as one
+more layer over the packaged persona, which is why an upgrade cannot take it
+away.
 
-Re-running `./install.sh` refreshes the project scaffolding it owns while
-preserving all of the above. Run against a repository that still holds a copied
-engine from an older release, it migrates: the project data is kept as it stands
-and the copied engine is removed.
+Re-running `/path/to/pm-flow-checkout/install.sh /path/to/target-repository`
+refreshes the project scaffolding it owns while preserving all of the above. Run
+against a repository that still holds a copied engine from an older release, it
+migrates: the project data is kept as it stands and the copied engine is removed.
 
 ## Run it
 
