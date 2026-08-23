@@ -180,4 +180,7 @@ from the venv at runtime; `install.sh` writes only the project data.
 - `template/.agentic/pm_flow/roles/` — who each role is.
 - `template/.agentic/pm_flow/domains/` — how roles specialise per domain.
 - `template/.agentic/pm_flow/tasks/` — what a role is asked to do on a call.
-- `tests/pm_flow_test.sh` — the suite, run with `zsh tests/pm_flow_test.sh`.
+- `tests/pm_flow_test.sh` — the main suite, run with `zsh tests/pm_flow_test.sh`.
+- `tests/prompt_quality_test.sh` — deterministic prompt contradiction,
+  duplication, density, and manifest checks.
+- `docs/prompt-qa.md` — the static, stubbed, packaged, and live canary gates.

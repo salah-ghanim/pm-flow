@@ -61,17 +61,31 @@ Rescue engineer:
 
 ## Section definition
 
-A section brief must contain these exact Markdown headings:
+A section brief is a stable outcome contract. It must contain these Markdown
+headings (the first seven remain accepted for legacy briefs; new briefs use the
+full shape):
 
 ```markdown
 ## Objective
+## Current baseline
+## Deliverables
+## User-visible scenarios
+## Interfaces produced
+## Interfaces consumed
 ## Scope
+## Non-goals
 ## Priority
 ## Owned paths
 ## Dependencies
+## Constraints and fixed decisions
 ## Acceptance
 ## Rejection conditions
+## Open questions
 ```
+
+Each Acceptance bullet starts with a stable ID such as `A1`. IDs are never
+renumbered after work begins; a visibly retired criterion remains traceable.
+The brief says what must be true, not the sequence of code edits.
 
 `Priority` is one bullet: `must-have` or `nice-to-have`, then one line naming
 what the product loses without this section. It belongs to the product officer;
@@ -84,6 +98,29 @@ creation rejects any overlap with a section that is not terminal.
 
 Each `Dependencies` bullet is an exact existing section key or the repo-relative
 path to its `handoff.md`. Use `- None.` when there are none.
+
+## Section workplan and state
+
+`workplan.md` is the executable decomposition of `brief.md`. It contains:
+
+- a design summary and the existing components to reuse
+- interfaces and data changes
+- ordered tasks with IDs `T1`, `T2`, and so on
+- for every task: status, concrete outcome, exact writable paths, reuse inputs,
+  acceptance IDs, validation command with expected observation, and dependency
+- an integration and end-to-end task
+- risks and rollback
+- an acceptance coverage table mapping every brief ID to one or more tasks
+
+One cycle assignment selects exactly one eligible workplan task and carries its
+ID. It may narrow that task but cannot combine task IDs or invent work absent
+from the workplan. Update the workplan when evidence changes the decomposition;
+delete superseded prose instead of preserving multiple truths.
+
+`state.md` is an evidence ledger, not another plan. It contains only the current
+task, completed task and acceptance IDs with observations, active decisions,
+observed blockers, and the next eligible task. Cycle files remain immutable
+history.
 
 ## What counts as progress
 

@@ -45,6 +45,7 @@ Usage:
   pm_flow.sh [--project <name>] [--section <name>] tick
   pm_flow.sh [--project <name>] [--section <name>] run [--max-ticks <n>]
   pm_flow.sh [--project <name>] role-prompt <role>
+  pm_flow.sh [--project <name>] prompt-audit [<prompt-file>|--all] [--strict]
   pm_flow.sh [--project <name>] init-section <section-name> [--file <markdown-file>]
   pm_flow.sh [--project <name>] list-sections
   pm_flow.sh [--project <name>] section-run <section-name>
@@ -300,19 +301,38 @@ compose_role_task() {
   local role="$1"
   local task_file="$2"
   shift 2
+  local phase="$(basename "$task_file" .md)"
+  local commit_owner="none"
+  case "$role" in
+    pm|developer|10x_developer|maintenance_engineer) commit_owner="driver" ;;
+    cpo) commit_owner="product-officer" ;;
+  esac
+  printf '<!-- pm-flow-prompt version=2 role=%s phase=%s commit_owner=%s -->\n\n' \
+    "$role" "$phase" "$commit_owner"
   compose_role_prompt "$role"
   printf '\n'
-  python3 - "$task_file" "$@" <<'PY'
+  local domain_task=""
+  local project_task=""
+  [[ -f "$SCRIPT_DIR/domains/$DOMAIN/tasks/$phase.md" ]] && \
+    domain_task="$SCRIPT_DIR/domains/$DOMAIN/tasks/$phase.md"
+  [[ -f "$PROJECT_DIR/tasks/$phase.md" ]] && \
+    project_task="$PROJECT_DIR/tasks/$phase.md"
+  python3 - "$task_file" "$domain_task" "$project_task" "$@" <<'PY'
 import sys
 from pathlib import Path
 
-rendered = Path(sys.argv[1]).read_text()
-for pair in sys.argv[2:]:
-    if "=" not in pair:
-        raise SystemExit(f"task substitution must be key=value, got {pair!r}")
-    key, value = pair.split("=", 1)
-    rendered = rendered.replace("{{" + key + "}}", value)
-sys.stdout.write(rendered)
+layers = [Path(value) for value in sys.argv[1:4] if value]
+pairs = sys.argv[4:]
+for index, path in enumerate(layers):
+    rendered = path.read_text()
+    for pair in pairs:
+        if "=" not in pair:
+            raise SystemExit(f"task substitution must be key=value, got {pair!r}")
+        key, value = pair.split("=", 1)
+        rendered = rendered.replace("{{" + key + "}}", value)
+    if index:
+        sys.stdout.write("\n")
+    sys.stdout.write(rendered)
 PY
 }
 
@@ -986,8 +1006,8 @@ extract_assignment_sections() {
 import re
 import sys
 
-WANTED = ["assignment", "acceptance", "rejection conditions"]
-TITLES = {"assignment": "Assignment", "acceptance": "Acceptance",
+WANTED = ["workplan task", "assignment", "acceptance", "rejection conditions"]
+TITLES = {"workplan task": "Workplan task", "assignment": "Assignment", "acceptance": "Acceptance",
           "rejection conditions": "Rejection conditions"}
 
 atx_re = re.compile(r"^\s*#{1,6}\s*(?:\d+[.)]\s*)?\**\s*(.+?)\s*\**\s*:?\s*$")
@@ -1028,6 +1048,52 @@ if not out:
     raise SystemExit("no assignment sections found")
 print("\n".join(out).rstrip())
 '
+}
+
+validate_scoped_assignment() {
+  local assignment="$1"
+  local workplan="$2"
+  ASSIGNMENT_TEXT="$assignment" python3 - "$workplan" <<'PY'
+import os
+import re
+import sys
+from pathlib import Path
+
+text = os.environ["ASSIGNMENT_TEXT"]
+match = re.search(
+    r"(?im)^##\s+Workplan task\s*$\s*^\s*(?:[-*]\s*)?`?(T[0-9]+)`?\s*$",
+    text,
+)
+if not match:
+    raise SystemExit("assignment needs a Workplan task heading containing one T<number> ID")
+task_id = match.group(1)
+path = Path(sys.argv[1])
+workplan_text = path.read_text() if path.is_file() else ""
+if not re.search(rf"(?im)^#{{2,4}}\s+(?:Task\s+)?{re.escape(task_id)}(?:\s|[-—:])", workplan_text):
+    raise SystemExit(f"{task_id} is not defined as a task heading in workplan.md")
+PY
+}
+
+cmd_prompt_audit() {
+  local target="${1:---all}"
+  local strict=""
+  if [[ "$target" == "--strict" ]]; then
+    strict="--strict"
+    target="--all"
+  elif [[ "${2:-}" == "--strict" ]]; then
+    strict="--strict"
+  elif [[ -n "${2:-}" ]]; then
+    fail "unknown prompt-audit argument: ${2:-}"
+  fi
+
+  if [[ "$target" == "--all" ]]; then
+    python3 "$SCRIPT_DIR/prompt_quality.py" audit $strict \
+      --repo-root "$PROJECT_ROOT" --all-under "$PROJECT_DIR"
+    return
+  fi
+  [[ "$target" == /* ]] || target="$PROJECT_ROOT/$target"
+  python3 "$SCRIPT_DIR/prompt_quality.py" audit $strict \
+    --repo-root "$PROJECT_ROOT" "$target"
 }
 
 validate_section_brief() {
@@ -1451,6 +1517,27 @@ cmd_validate() {
   claude --version
 }
 
+write_workplan_template() {
+  local path="$1"
+  local section_name="$2"
+  {
+    printf '# %s workplan\n\n' "$section_name"
+    printf '## Design summary\n\n- Replace this line with the chosen approach and the existing components it reuses.\n\n'
+    printf '## Interfaces and data changes\n\n- None identified yet.\n\n'
+    printf '## Task T1 — Decompose before assignment\n\n'
+    printf -- '- Status: pending\n'
+    printf -- '- Outcome: Replace with one concrete, observable outcome.\n'
+    printf -- '- Paths: Copy the exact writable paths from `brief.md`.\n'
+    printf -- '- Reuse: Name existing code, fixtures, or interfaces.\n'
+    printf -- '- Acceptance IDs: Map to IDs in `brief.md`.\n'
+    printf -- '- Validation: Name the command and expected observation.\n'
+    printf -- '- Depends on: None.\n\n'
+    printf '## Integration and end-to-end validation\n\n- Add the task that proves the section through its user-visible scenario.\n\n'
+    printf '## Risks and rollback\n\n- Record material risks and the smallest safe rollback.\n\n'
+    printf '## Acceptance coverage\n\n| Brief ID | Workplan task | Evidence required |\n|---|---|---|\n| Replace | T1 | Replace |\n'
+  } > "$path"
+}
+
 create_run() {
   local task_name="$1"
   local task_brief="$2"
@@ -1541,14 +1628,14 @@ cmd_init_section() {
   printf 'Section created; its PM sub-agent has not been launched yet.\n' > "$SECTION_DIR/summary.txt"
   printf '%s\n' "$(now_iso_utc)" > "$SECTION_DIR/updated_at.txt"
   printf '%s\n' "$section_brief" > "$SECTION_DIR/brief.md"
+  write_workplan_template "$SECTION_DIR/workplan.md" "$SECTION_NAME"
   {
     printf '# %s section PM state\n\n' "$SECTION_NAME"
-    printf '## Objective\n\n- Derive the current objective from `brief.md`.\n\n'
-    printf '## Owned paths\n\n- Record the files or components this section owns before delegating work.\n\n'
-    printf '## Plan\n\n- Break the section into bounded developer assignments.\n\n'
-    printf '## Decisions and evidence\n\n- Keep detailed local decisions and validation evidence here, not in the root context.\n\n'
-    printf '## Current assignment\n\n- None yet.\n\n'
-    printf '## Dependencies\n\n- Read only dependency handoffs explicitly required by `brief.md`.\n'
+    printf '## Current task\n\n- None; reconcile `workplan.md` before the first assignment.\n\n'
+    printf '## Completed tasks and evidence\n\n- None. Record task ID, acceptance IDs, command, and observation.\n\n'
+    printf '## Active decisions\n\n- None. Keep only decisions that still constrain the work.\n\n'
+    printf '## Blockers\n\n- None observed.\n\n'
+    printf '## Next eligible task\n\n- T1 after the workplan template has been replaced with section-specific detail.\n'
   } > "$SECTION_DIR/state.md"
   {
     printf '# %s section handoff\n\n' "$SECTION_NAME"
@@ -1769,6 +1856,10 @@ main() {
     role-prompt)
       shift || true
       cmd_role_prompt "$@"
+      ;;
+    prompt-audit)
+      shift || true
+      cmd_prompt_audit "$@"
       ;;
     consult-panel)
       shift || true

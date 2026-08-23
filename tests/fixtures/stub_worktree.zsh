@@ -80,6 +80,9 @@ COMPLETE - acceptance met"
       emit "## Where the section stands
 Nothing written yet.
 
+## Workplan task
+T1
+
 ## Assignment
 Write the section's own file.
 

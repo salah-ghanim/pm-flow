@@ -11,7 +11,8 @@
 ## Section graph
 
 - Define independently owned sections and their dependencies at a high level.
-- Keep detailed implementation plans inside each section's `state.md`.
+- Keep executable implementation plans in each section's `workplan.md`; keep
+  only current truth and evidence in `state.md`.
 
 ## Integration order
 

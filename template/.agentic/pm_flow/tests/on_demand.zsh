@@ -10,7 +10,7 @@ rm -rf "$W"; mkdir -p "$W/src"
 cd "$W"
 git init -q .; git config user.email t@t; git config user.name t
 
-mkdir -p "$W/agentic"
+mkdir -p "$W/.agentic"
 cp -R "$TEMPLATE" "$W/.agentic/pm_flow"
 FLOW="$W/.agentic/pm_flow"
 rm -rf "$FLOW/project"

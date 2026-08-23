@@ -283,6 +283,7 @@ load_config_cache() {
   local assignments
   assignments="$(python3 - "$config_file" 2>/dev/null <<'PY_CONFIG_CACHE'
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -309,7 +310,13 @@ for section, body in config.items():
             value = ""
         elif isinstance(value, (dict, list)):
             value = json.dumps(value)
-        print(f"PM_FLOW_CONFIG[{quote(f'{section}.{key}')}]={quote(value)}")
+        flat_key = f"{section}.{key}"
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", flat_key):
+            continue
+        # zsh treats quotes inside an associative-array subscript as literal
+        # key characters during eval (`A['x']` stores the key `'x'`). Keep the
+        # validated key bare and quote only the value.
+        print(f"PM_FLOW_CONFIG[{flat_key}]={quote(value)}")
 PY_CONFIG_CACHE
 )" || return 0
   [[ -z "$assignments" ]] || eval "$assignments"
@@ -944,6 +951,16 @@ dispatch_role() {
   local response_json="${output_md%.md}.response.json"
   local staged="${output_md}.staging"
 
+  # Check the exact generated prompt before spending model budget. Structural
+  # defects fail here; size and density warnings are recorded in the adjacent
+  # manifest and are elevated by the strict CI audit.
+  local prompt_audit_args=(audit)
+  [[ "${PM_FLOW_PROMPT_AUDIT_STRICT:-0}" != "1" ]] || prompt_audit_args+=(--strict)
+  python3 "$SCRIPT_DIR/prompt_quality.py" "${prompt_audit_args[@]}" \
+    --repo-root "$PROJECT_ROOT" \
+    --manifest "${prompt_file%.md}.manifest.json" \
+    "$prompt_file" >/dev/null
+
   assert_within_budget "$section_key"
 
   # Tool caches, pointed somewhere the dispatch is actually allowed to write.
@@ -1168,17 +1185,10 @@ record_cycle_decision() {
 # never assumes what the previous tick was doing; it reads the same files
 # section_next_action read.
 
-# A domain may replace what a role is asked to do on a call, the same way it may
-# replace who the role is. The generic task set asks for code, tests and commits;
-# a research domain asks for sourced findings and a counter-search. Overlay wins,
-# generic falls through, so existing domains are unaffected.
+# The generic phase contract is always present. Domain and project task files
+# are small additive deltas composed by compose_role_task; replacing the phase
+# contract made overlays drift on response schemas and runtime ownership facts.
 task_file() {
-  [[ -n "${DOMAIN:-}" ]] || resolve_domain
-  local override="$SCRIPT_DIR/domains/$DOMAIN/tasks/$1.md"
-  if [[ -f "$override" ]]; then
-    printf '%s\n' "$override"
-    return
-  fi
   printf '%s/tasks/%s.md\n' "$SCRIPT_DIR" "$1"
 }
 
@@ -1269,11 +1279,15 @@ do_scope() {
   local section_dir="$1"
   local cycle_dir cycle_number prompt context section_key
   section_key="$(basename "$section_dir")"
+  if [[ ! -f "$section_dir/workplan.md" ]]; then
+    write_workplan_template "$section_dir/workplan.md" \
+      "$(first_line_or "$section_dir/name.txt" "$section_key")"
+  fi
   cycle_dir="$(open_or_resume_cycle "$section_dir")"
   cycle_number="$(basename "$cycle_dir")"
   claim_step "$cycle_dir/.claim-scope"
 
-  context="$(context_bullet_list "$section_dir/brief.md" "$section_dir/state.md" "$CONTRACT_FILE" \
+  context="$(context_bullet_list "$section_dir/brief.md" "$section_dir/workplan.md" "$section_dir/state.md" \
       "$section_dir/convergence/latest.md" "$section_dir/portfolio_rescope.txt" \
       "$cycle_dir/rescope_reason.txt" "$cycle_dir/verdict_feedback.md")
 $(section_dependency_context "$section_dir")
@@ -1282,6 +1296,7 @@ $(cycle_history_files "$section_dir" "${cycle_number#0}" "$(scope_history_window
   compose_role_task pm "$(task_file section_scope)" \
     "SECTION_KEY=$section_key" \
     "CYCLE=$cycle_number" \
+    "HISTORY_WINDOW=$(scope_history_window)" \
     "CONTEXT_FILES=$context" > "$prompt"
 
   dispatch_role pm "$prompt" "$cycle_dir/scope.md" "" "scope $section_key $cycle_number"
@@ -1297,6 +1312,15 @@ $(cycle_history_files "$section_dir" "${cycle_number#0}" "$(scope_history_window
       # used to be copied verbatim, editorial included.
       if ! assignment="$(extract_assignment_sections "$(/bin/cat "$cycle_dir/scope.md")" 2>/dev/null)"; then
         assignment="$(/bin/cat "$cycle_dir/scope.md")"
+      fi
+      if ! validate_scoped_assignment "$assignment" "$section_dir/workplan.md" \
+          2> "$cycle_dir/verdict_feedback.md"; then
+        printf 'UNPARSED\n' > "$cycle_dir/.decision.txt.staging"
+        mv "$cycle_dir/.decision.txt.staging" "$cycle_dir/decision.txt"
+        rm -f "$cycle_dir/.claim-scope/attempts.txt"
+        printf 'scope %s -> UNPARSED (assignment is not mapped to one workplan task)\n' \
+          "$cycle_number"
+        return 0
       fi
       printf '%s\n' "$assignment" > "$cycle_dir/.assignment.staging"
       mv "$cycle_dir/.assignment.staging" "$cycle_dir/assignment.md"
@@ -1352,7 +1376,8 @@ do_develop() {
   # but the brief and the section state are its parents, and a role that cannot
   # read its own brief is worse off inside a worktree than it was outside one.
   begin_worktree_dispatch "$(basename "$section_dir")" "$section_dir"
-  context="$(context_bullet_list "$cycle_dir/assignment.md" "$section_dir/brief.md" "$section_dir/state.md")"
+  context="$(context_bullet_list "$cycle_dir/assignment.md" "$section_dir/brief.md" \
+    "$section_dir/workplan.md" "$section_dir/state.md")"
   prompt="$cycle_dir/develop_prompt.md"
   compose_role_task developer "$(task_file developer_assignment)" \
     "SECTION_KEY=$(basename "$section_dir")" \
@@ -1384,7 +1409,7 @@ do_review() {
   claim_step "$cycle_dir/.claim-review"
 
   context="$(context_bullet_list "$cycle_dir/assignment.md" "$cycle_dir/result.md" \
-    "$section_dir/brief.md" "$cycle_dir/verdict_feedback.md")"
+    "$section_dir/brief.md" "$section_dir/workplan.md" "$cycle_dir/verdict_feedback.md")"
   prompt="$cycle_dir/review_prompt.md"
   compose_role_task pm "$(task_file section_review)" \
     "SECTION_KEY=$(basename "$section_dir")" \

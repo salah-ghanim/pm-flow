@@ -235,8 +235,9 @@ A section's state *is* its files:
 
 ```text
 sections/<key>/
-├── brief.md                 the boundary and acceptance criteria
-├── state.md                 durable detail the manager keeps
+├── brief.md                 stable outcome contract and acceptance IDs
+├── workplan.md              ordered tasks mapped to acceptance IDs
+├── state.md                 current truth and validation evidence
 ├── priority.txt             must-have or nice-to-have, and what is lost
 ├── handoff.md               the bounded report upward, unproven claims included
 ├── quarantine.txt           written only if a dispatch failed fatally
@@ -414,6 +415,19 @@ responses and canned failures, so every transition, every recovery path, and the
 verdict parser's whole near-miss table run for free against a synthetic project
 in a temporary directory. Run it after changing the driver.
 
+Every dispatched prompt is audited before model spend and gets an adjacent
+`*_prompt.manifest.json` with word, task-density, duplication, and context
+metrics. Audit a prompt or the project history directly with:
+
+```bash
+./.agentic/pm_flow/pm_flow.sh prompt-audit path/to/scope_prompt.md --strict
+./.agentic/pm_flow/pm_flow.sh prompt-audit --all
+```
+
+Structural errors such as unresolved placeholders, false runtime facts, and a
+commit-owner contradiction always stop dispatch. Strict mode also promotes
+size, duplication, and task-density warnings to failures.
+
 ## Sections by hand
 
 The product officer normally creates sections, but you can add one directly:
@@ -423,14 +437,22 @@ The product officer normally creates sections, but you can add one directly:
 ./.agentic/pm_flow/pm_flow.sh list-sections
 ```
 
-A brief needs the exact headings `Objective`, `Scope`, `Priority`,
-`Owned paths`, `Dependencies`, `Acceptance`, and `Rejection conditions`.
+A legacy brief needs the headings `Objective`, `Scope`, `Priority`, `Owned
+paths`, `Dependencies`, `Acceptance`, and `Rejection conditions`. New briefs
+also state `Current baseline`, `Deliverables`, `User-visible scenarios`,
+interfaces produced and consumed, `Non-goals`, fixed decisions, and open
+questions. Acceptance bullets carry stable IDs such as `A1`.
 `Priority` is one bullet: `must-have` or `nice-to-have`, then one line naming
 what the product loses without this section. Owned paths must be repo-relative
 and cannot overlap a section that is still live, because sections may run
 concurrently. Each dependency is an existing section key or a
 repo-relative path to its `handoff.md`; the dependency section must be `done`
 before the dependent section becomes actionable.
+
+`init-section` creates `workplan.md`. Before its first assignment the manager
+replaces the template with ordered `T<number>` tasks mapped to the brief's
+acceptance IDs. One cycle may select exactly one of those tasks. `state.md` is
+the current evidence ledger, not a second copy of the plan.
 
 ## Layout
 

@@ -494,6 +494,10 @@ python3 -c 'import json, sys; print(json.dumps(
 
 The registry has unaccounted assets and nothing has been scoped yet.
 
+## Workplan task
+
+T1
+
 ## Assignment
 
 Reconcile the registry against the source documents.

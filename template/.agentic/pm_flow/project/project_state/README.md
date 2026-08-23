@@ -17,7 +17,8 @@ Per-section detail lives under `../sections/<key>/` and is deliberately not
 read from here:
 
 - `brief.md` — the boundary and acceptance criteria
-- `state.md` — durable detail the section manager keeps
+- `workplan.md` — ordered, acceptance-mapped executable tasks
+- `state.md` — current task, decisions, blockers, and validation evidence
 - `handoff.md` — the bounded report upward, capped at 500 words and 8192 bytes
 - `cycles/NNN/` — one attempt each: assignment, result, review, decision
 - `escalation/` — the consultant panel, the adjudication, and any rescue

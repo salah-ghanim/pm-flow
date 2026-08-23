@@ -8,7 +8,7 @@ rm -rf "$W"; mkdir -p "$W/src"
 cd "$W"
 git init -q .; git config user.email t@t; git config user.name t
 
-mkdir -p "$W/agentic"
+mkdir -p "$W/.agentic"
 cp -R "$TEMPLATE" "$W/.agentic/pm_flow"
 FLOW="$W/.agentic/pm_flow"
 rm -rf "$FLOW/project"
@@ -83,7 +83,11 @@ brief() {
   printf '## Objective\n\n- %s\n\n## Scope\n\n- one thing\n\n## Priority\n\n- must-have: the product cannot ship without it\n\n## Owned paths\n\n- `%s`\n\n## Dependencies\n\n- None.\n\n## Acceptance\n\n- `.venv/bin/python -m pytest -q` exits 0\n\n## Rejection conditions\n\n- nothing runs\n' "$1" "$2"
 }
 
-SCOPE_OK='## Assignment
+SCOPE_OK='## Workplan task
+
+T1
+
+## Assignment
 
 Write it.
 
@@ -245,7 +249,11 @@ brief gamma "tools/" > "$W/b.md"; "$FLOWSH" init-section gamma --file "$W/b.md" 
 git add -A >/dev/null 2>&1; git commit -qm sections
 
 printf '\n===== F16: an assignment that owns the dispatch output returns to its manager =====\n'
-PM_FLOW_STUB='## Assignment
+PM_FLOW_STUB='## Workplan task
+
+T1
+
+## Assignment
 
 Do the thing. You may write `result.md` with your findings.
 

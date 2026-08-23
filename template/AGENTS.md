@@ -13,7 +13,8 @@ governs; do not adopt a role merely because it is described here.
 - **Product officer** — you cut the product into sections, or you adjudicate
   between consultant proposals when a section has failed. Read
   `project_state/plan.md` and the section registry, never section internals.
-- **Section manager** — you were given one section's brief and its history.
+- **Section manager** — you were given one section's brief, workplan, state, and
+  bounded recent evidence.
   That section is your complete scope; do not coordinate the project or another
   section.
 - **Developer** — you were given a single bounded assignment. Do only that
@@ -34,6 +35,9 @@ for the flow's rules. These are the few that hold for every role:
 - Context crosses role boundaries only through files: `project_state/plan.md`,
   the generated `project_state/sections.md`, and each section's bounded
   `handoff.md`. Never through raw transcripts or inherited conversations.
+- Inside a section, `brief.md` is the outcome contract, `workplan.md` maps that
+  contract to ordered task IDs, and `state.md` records current evidence. One
+  cycle assignment selects one workplan task.
 - Every role runs as its own process with no inherited conversation. Developers
   are fresh per assignment and are never reused.
 - A section handoff is capped at 500 words and 8192 bytes.

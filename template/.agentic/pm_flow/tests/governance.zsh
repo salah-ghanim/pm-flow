@@ -9,7 +9,7 @@ rm -rf "$W"; mkdir -p "$W/src"
 cd "$W"
 git init -q .; git config user.email t@t; git config user.name t
 
-mkdir -p "$W/agentic"
+mkdir -p "$W/.agentic"
 cp -R "$TEMPLATE" "$W/.agentic/pm_flow"
 FLOW="$W/.agentic/pm_flow"
 rm -rf "$FLOW/project"
@@ -220,7 +220,11 @@ printf '\n===== C2: RESCOPE reaches that section next scope =====\n'
 exists "C2 the rescope reason is written" "$FLOW/demo/sections/delta/portfolio_rescope.txt"
 has    "C2 it names what has to change" \
        "$(cat "$FLOW/demo/sections/delta/portfolio_rescope.txt")" "drop the live-venue criterion"
-PM_FLOW_STUB='## Assignment
+PM_FLOW_STUB='## Workplan task
+
+T1
+
+## Assignment
 
 Do it.
 

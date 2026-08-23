@@ -49,6 +49,9 @@ case "$prompt" in
     emit "## Where the section stands
 Stuck.
 
+## Workplan task
+T1
+
 ## Assignment
 Try again.
 

@@ -9,7 +9,7 @@ rm -rf "$W"; mkdir -p "$W/src"
 cd "$W"
 git init -q .; git config user.email t@t; git config user.name t
 
-mkdir -p "$W/agentic"
+mkdir -p "$W/.agentic"
 cp -R "$TEMPLATE" "$W/.agentic/pm_flow"
 FLOW="$W/.agentic/pm_flow"
 rm -rf "$FLOW/project"
@@ -114,6 +114,10 @@ SCOPE_ASSIGN='## Where the section stands
 
 Editorial that the developer must never see.
 
+## Workplan task
+
+T1
+
 ## Assignment
 
 Write lib/a.py.
@@ -141,11 +145,20 @@ output
 
 PARTIAL only two of three cases pass'
 
-printf '\n===== F20: only Assignment/Acceptance/Rejection reach the developer =====\n'
+printf '\n===== F20: only the task ID and bounded assignment reach the developer =====\n'
 PM_FLOW_STUB="$SCOPE_ASSIGN" PM_FLOW_SECTION=alpha "$FLOWSH" tick >/dev/null
 assignment="$(cat "$FLOW/demo/sections/alpha/cycles/001/assignment.md")"
+has    "F20 the Workplan task is kept" "$assignment" "T1"
 has    "F20 the Assignment section is kept" "$assignment" "Write lib/a.py."
 absent "F20 the editorial is dropped"       "$assignment" "Editorial"
+if [[ -f "$FLOW/demo/sections/alpha/cycles/001/scope_prompt.manifest.json" ]]; then
+  ok "F20 the exact generated prompt has a quality manifest"
+else
+  bad "F20 the exact generated prompt has a quality manifest" "missing"
+fi
+has "F20 the manifest records task density" \
+  "$(cat "$FLOW/demo/sections/alpha/cycles/001/scope_prompt.manifest.json")" \
+  '"task_ratio"'
 
 printf '\n===== F11: the lifecycle is stamped on every tick =====\n'
 eq  "F11 status.txt advances past planned" "$(cat "$FLOW/demo/sections/alpha/status.txt")" "active"
