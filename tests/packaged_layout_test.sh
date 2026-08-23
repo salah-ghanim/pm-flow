@@ -683,27 +683,49 @@ assert_data_only() {
 }
 
 # What the installed package holds, so "the install was not written to" is
-# measured rather than assumed. Bytecode caches are excluded: they are the
-# interpreter's, not the distribution's, and they are not what an upgrade or a
-# migration would be accused of rewriting.
+# measured rather than assumed. Bytecode caches are excluded by default: they
+# are the interpreter's, not the distribution's, and they are not what an
+# upgrade or a migration would be accused of rewriting.
+#
+# `--complete` is the other question, asked of a repository rather than of an
+# installation: not "did anything the distribution ships change" but "is this
+# tree byte for byte what it was". It omits nothing - hidden paths, empty
+# directories, bytecode and symlinks are all reported, and a symlink is reported
+# by its target rather than by the bytes it happens to point at, because
+# repointing one is a change to the tree that hashing through it would hide.
 /bin/cat > "$TEST_ROOT/digest_tree.py" <<'DIGEST'
 import hashlib
+import os
 import sys
 from pathlib import Path
 
-base = Path(sys.argv[1])
-for root in sorted(sys.argv[2:]):
+argv = sys.argv[1:]
+complete = bool(argv) and argv[0] == "--complete"
+if complete:
+    argv = argv[1:]
+
+base = Path(argv[0])
+for root in sorted(argv[1:]):
     target = Path(root)
     paths = sorted(target.rglob("*")) if target.is_dir() else [target]
     for path in paths:
-        if not path.is_file() or path.suffix == ".pyc" or "__pycache__" in path.parts:
-            continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
         try:
             shown = path.relative_to(base)
         except ValueError:
             shown = path
-        print(f"{digest}  {shown}")
+        if not complete:
+            if not path.is_file() or path.suffix == ".pyc" or "__pycache__" in path.parts:
+                continue
+            print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {shown}")
+            continue
+        if path.is_symlink():
+            print(f"symlink:{os.readlink(path)}  {shown}")
+        elif path.is_dir():
+            print(f"dir  {shown}")
+        elif path.is_file():
+            print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {shown}")
+        else:
+            print(f"other  {shown}")
 DIGEST
 
 engine_digests() {
@@ -751,13 +773,18 @@ section_brief() {
 # Project-level governance preempts section work, so a tick that lands on a due
 # review spends itself there. `status` is side-effect free, so the queue is
 # drained before anything asserts on a single section's tick.
+#
+# The command is a parameter rather than the ambient `$PM_FLOW`: later blocks
+# drive repositories through their own separately versioned installs, and a
+# drain that reached for one repository's executable while ticking another's
+# would be the exact sharing those blocks exist to rule out.
 drain_project_work() {
-  local repo="$1" done_flag="$2" guard=0
-  while [[ "$(cd "$repo" && "$PM_FLOW" status)" == *"portfolio review due"* ]]; do
+  local repo="$1" done_flag="$2" command="${3:-$PM_FLOW}" guard=0
+  while [[ "$(cd "$repo" && "$command" status)" == *"portfolio review due"* ]]; do
     (( guard += 1 ))
     (( guard <= 8 )) || fail "the portfolio review queue would not drain"
     ( cd "$repo" && PM_DONE_FLAG="$done_flag" PATH="$TEST_ROOT/flow-bin:$PATH" \
-      "$PM_FLOW" tick ) > /dev/null 2>&1
+      "$command" tick ) > /dev/null 2>&1
   done
 }
 
@@ -952,13 +979,30 @@ assert_equals "$(/bin/ls -A "$LEGACY_FLOW" | LC_ALL=C sort | tr '\n' ' ')" \
 # workspace - the .gitkeep markers that keep an empty runs/ and sections/ in
 # git. Losing or rewriting one of the files below is what this forbids, and the
 # failure names the file rather than printing two hundred digests.
-assert_preserved() {
-  local after="$1" before="$2" label="$3" line
+#
+# One direction of a digest-listing comparison, so the failure names the entry
+# rather than printing two hundred digests. Both directions are wanted in
+# different places, so the direction and its complaint are parameters.
+assert_digest_lines_present() {
+  local haystack="$1" needles="$2" label="$3" complaint="$4" line
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
-    [[ "$after" == *"$line"* ]] || \
-      fail "$label: this file was lost or rewritten: ${line#* }"
-  done <<< "$before"
+    [[ "$haystack" == *"$line"* ]] || fail "$label: $complaint: ${line#* }"
+  done <<< "$needles"
+}
+assert_preserved() {
+  assert_digest_lines_present "$1" "$2" "$3" "this file was lost or rewritten"
+}
+
+# Equality, not survival: nothing changed, nothing removed, and nothing added.
+# Used where the claim is that a tree was not touched at all, rather than that
+# an operation which legitimately adds files did not destroy anything.
+assert_tree_unchanged() {
+  local after="$1" before="$2" label="$3"
+  assert_digest_lines_present "$after" "$before" "$label" \
+    "this entry was changed or removed"
+  assert_digest_lines_present "$before" "$after" "$label" \
+    "this entry appeared"
 }
 assert_preserved "$(preserved_digests)" "$preserved_before" \
   "migration left the project's own files byte for byte unchanged"
@@ -1021,3 +1065,271 @@ assert_equals "$(engine_digests)" "$engine_before" \
   "neither initialisation nor migration changed a file inside the installed package"
 
 printf 'PASS: initialisation and migration leave the installed package untouched\n'
+
+# --- two repositories pinned to different versions ---------------------------
+#
+# The claim the copy-versioning machinery existed to make, now made by the
+# package manager instead: two repositories run different engine versions at the
+# same time, and upgrading one is `pip install --upgrade` with nothing to merge.
+#
+# Two *real* wheels, built the same offline way as the one above, from
+# disposable copies of the checkout with a different VERSION stamped into each.
+# The checkout's own VERSION is never touched - a test that edited the tree it
+# is testing would be proving something about a tree nobody ships.
+#
+# Version evidence is only ever taken from `pm-flow version` run inside a
+# repository. A wheel filename, a dist-info directory or a metadata field would
+# say what was installed; only the command says what actually runs.
+
+PINNED_OLD="0.7.1"
+PINNED_NEW="0.7.2"
+
+build_pinned_wheel() {
+  local version="$1" source_copy="$2" wheel_dir="$3" item
+  mkdir -p "$source_copy" "$wheel_dir"
+  # Everything the wheel is built from: the build backend's configuration, the
+  # version it reads, the package, and the engine it force-includes.
+  for item in pyproject.toml README.md VERSION src template; do
+    /bin/cp -R "$REPO_ROOT/$item" "$source_copy/$item"
+  done
+  printf '%s\n' "$version" > "$source_copy/VERSION"
+  find "$source_copy" -name '__pycache__' -type d -prune -exec rm -rf {} +
+  "$BUILD_VENV/bin/python" -m pip wheel \
+    --no-index --no-build-isolation --no-deps \
+    --disable-pip-version-check --no-input \
+    --wheel-dir "$wheel_dir" "$source_copy" >> "$BUILD_LOG" 2>&1 || {
+    /bin/cat "$BUILD_LOG" >&2
+    fail "the offline build of pm-flow $version failed"
+  }
+  local built
+  built="$(find "$wheel_dir" -maxdepth 1 -type f -name "pm_flow-${version}-*.whl")"
+  [[ -f "$built" ]] || fail "no wheel for version $version was built in $wheel_dir"
+  printf '%s\n' "$built"
+}
+
+install_pinned_venv() {
+  local venv="$1" wheel="$2"
+  python3 -m venv "$venv" >> "$BUILD_LOG" 2>&1 || {
+    /bin/cat "$BUILD_LOG" >&2
+    fail "creating the venv at $venv failed"
+  }
+  "$venv/bin/python" -m pip install \
+    --quiet --no-index --no-deps \
+    --disable-pip-version-check --no-input \
+    "$wheel" >> "$BUILD_LOG" 2>&1 || {
+    /bin/cat "$BUILD_LOG" >&2
+    fail "installing $wheel into $venv failed"
+  }
+  [[ -x "$venv/bin/pm-flow" ]] || fail "$venv produced no pm-flow entry point"
+}
+
+# A repository holding project data only, driven by its own installed command.
+# install.sh writes the data; the engine only ever arrives through the venv.
+prepare_pinned_repo() {
+  local repo="$1" key="$2" name="$3" section_key="$4" objective="$5" command="$6"
+  mkdir -p "$repo"
+  git -C "$repo" init --quiet
+  "$REPO_ROOT/install.sh" "$repo" --name "$name" --project-key "$key" \
+    --domain distressed-tech > "$TEST_ROOT/$key-install.out" 2>&1 || \
+    fail "install.sh failed for $key:"$'\n'"$(/bin/cat "$TEST_ROOT/$key-install.out")"
+  assert_data_only "$repo/.agentic/pm_flow" "the $key repository"
+  bind_local_roles "$repo/.agentic/pm_flow/config.json"
+  ( cd "$repo" && "$command" init-section "$section_key" \
+    <<< "$(section_brief "$objective" "$key")" ) > "$TEST_ROOT/$key-section.out" 2>&1 || \
+    fail "init-section failed for $key:"$'\n'"$(/bin/cat "$TEST_ROOT/$key-section.out")"
+}
+
+# One tick through the repository's own installed command, with the project-level
+# queue drained first so the tick lands on the section rather than on a review.
+advance_pinned_repo() {
+  local repo="$1" key="$2" section_key="$3" command="$4" flag="$5" output
+  drain_project_work "$repo" "$flag" "$command"
+  output="$(cd "$repo" && PM_DONE_FLAG="$flag" PATH="$TEST_ROOT/flow-bin:$PATH" \
+    "$command" tick 2>&1)" || \
+    fail "the installed tick failed in $key:"$'\n'"$output"
+  printf '%s\n' "$output"
+}
+
+WHEEL_OLD="$(build_pinned_wheel "$PINNED_OLD" "$TEST_ROOT/source-$PINNED_OLD" \
+  "$TEST_ROOT/dist-$PINNED_OLD")" || exit 1
+WHEEL_NEW="$(build_pinned_wheel "$PINNED_NEW" "$TEST_ROOT/source-$PINNED_NEW" \
+  "$TEST_ROOT/dist-$PINNED_NEW")" || exit 1
+[[ "$WHEEL_OLD" != "$WHEEL_NEW" ]] || \
+  fail "both pinned versions built the same wheel: $WHEEL_OLD"
+
+ALPHA_REPO="$TEST_ROOT/alpha repo"
+ALPHA_VENV="$TEST_ROOT/alpha-venv"
+ALPHA_PM="$ALPHA_VENV/bin/pm-flow"
+ALPHA_KEY="alpha-ledger"
+ALPHA_SECTION_KEY="alpha-cutover"
+ALPHA_FLOW="$ALPHA_REPO/.agentic/pm_flow"
+ALPHA_SECTION="$ALPHA_FLOW/$ALPHA_KEY/sections/$ALPHA_SECTION_KEY"
+ALPHA_STORE="$ALPHA_FLOW/$ALPHA_KEY/runs/pm_flow.db"
+ALPHA_FLAG="$TEST_ROOT/alpha.flag"
+
+BETA_REPO="$TEST_ROOT/beta repo"
+BETA_VENV="$TEST_ROOT/beta-venv"
+BETA_PM="$BETA_VENV/bin/pm-flow"
+BETA_KEY="beta-ledger"
+BETA_SECTION_KEY="beta-cutover"
+BETA_FLOW="$BETA_REPO/.agentic/pm_flow"
+BETA_SECTION="$BETA_FLOW/$BETA_KEY/sections/$BETA_SECTION_KEY"
+BETA_FLAG="$TEST_ROOT/beta.flag"
+
+install_pinned_venv "$ALPHA_VENV" "$WHEEL_OLD"
+install_pinned_venv "$BETA_VENV" "$WHEEL_NEW"
+
+prepare_pinned_repo "$ALPHA_REPO" "$ALPHA_KEY" "Alpha Ledger" "$ALPHA_SECTION_KEY" \
+  'Reconcile the alpha ledger against its documents.' "$ALPHA_PM"
+prepare_pinned_repo "$BETA_REPO" "$BETA_KEY" "Beta Ledger" "$BETA_SECTION_KEY" \
+  'Reconcile the beta ledger against its documents.' "$BETA_PM"
+
+# Both installations exist at once, and both are asked in turn. Reading them
+# back to back is the point: this is two live installs disagreeing about the
+# version, not one install observed twice at different times.
+alpha_version="$(cd "$ALPHA_REPO" && "$ALPHA_PM" version)" || \
+  fail "the alpha repository's installed command could not report a version"
+beta_version="$(cd "$BETA_REPO" && "$BETA_PM" version)" || \
+  fail "the beta repository's installed command could not report a version"
+alpha_version_line="$(printf '%s\n' "$alpha_version" | /usr/bin/head -n 1)"
+beta_version_line="$(printf '%s\n' "$beta_version" | /usr/bin/head -n 1)"
+
+# The independent-version claim, asserted before either version is checked
+# against its pin: two repositories sharing one installation would still answer
+# both commands, and would differ from the expected pins in only one of them.
+[[ "$alpha_version_line" != "$beta_version_line" ]] || \
+  fail "both repositories report the same running version: $alpha_version_line"
+assert_equals "$alpha_version_line" "pm-flow $PINNED_OLD" \
+  "the alpha repository runs the version its own venv was pinned to"
+assert_equals "$beta_version_line" "pm-flow $PINNED_NEW" \
+  "the beta repository runs the version its own venv was pinned to"
+
+# And each runs out of its own venv rather than the other's or the checkout's.
+pinned_engine_line() {
+  printf '%s\n' "$1" | awk '/^ *engine:/ {sub(/^ *engine: */, ""); print; exit}'
+}
+assert_engine_beneath_venv() {
+  local engine_path="$1" venv_path="$2" label="$3" venv_real
+  venv_real="$(cd -P "$venv_path" && pwd -P)"
+  case "$engine_path" in
+    "$venv_real"/*|"$venv_path"/*) ;;
+    *) fail "the $label repository's engine is not beneath its own venv: $engine_path" ;;
+  esac
+  assert_not_contains "$engine_path" "$REPO_ROOT" \
+    "the $label repository's engine resolves outside the checkout"
+}
+alpha_engine="$(pinned_engine_line "$alpha_version")"
+beta_engine="$(pinned_engine_line "$beta_version")"
+assert_engine_beneath_venv "$alpha_engine" "$ALPHA_VENV" alpha
+assert_engine_beneath_venv "$beta_engine" "$BETA_VENV" beta
+[[ "$alpha_engine" != "$beta_engine" ]] || \
+  fail "both repositories resolved the same engine directory: $alpha_engine"
+
+# Reporting a version is not running one. Each repository advances its own
+# section through its own installed command.
+alpha_tick="$(advance_pinned_repo "$ALPHA_REPO" "$ALPHA_KEY" "$ALPHA_SECTION_KEY" \
+  "$ALPHA_PM" "$ALPHA_FLAG")"
+assert_contains "$alpha_tick" "section=$ALPHA_SECTION_KEY" \
+  "the alpha repository advanced its own section"
+assert_contains "$alpha_tick" "-> ASSIGN" \
+  "the alpha repository's dispatch was acted on"
+[[ -f "$ALPHA_SECTION/cycles/001/assignment.md" ]] || \
+  fail "the alpha repository produced no assignment:"$'\n'"$alpha_tick"
+
+beta_tick="$(advance_pinned_repo "$BETA_REPO" "$BETA_KEY" "$BETA_SECTION_KEY" \
+  "$BETA_PM" "$BETA_FLAG")"
+assert_contains "$beta_tick" "section=$BETA_SECTION_KEY" \
+  "the beta repository advanced its own section"
+assert_contains "$beta_tick" "-> ASSIGN" \
+  "the beta repository's dispatch was acted on"
+[[ -f "$BETA_SECTION/cycles/001/assignment.md" ]] || \
+  fail "the beta repository produced no assignment:"$'\n'"$beta_tick"
+
+# Neither repository acquired an engine by being driven, and neither section
+# leaked into the other's repository.
+assert_data_only "$ALPHA_FLOW" "the alpha repository after a tick"
+assert_data_only "$BETA_FLOW" "the beta repository after a tick"
+[[ ! -e "$ALPHA_FLOW/$BETA_KEY" && ! -e "$BETA_FLOW/$ALPHA_KEY" ]] || \
+  fail "one repository's project appeared inside the other"
+
+printf 'PASS: two repositories run independently pinned versions and drive their own projects\n'
+
+# --- upgrading one repository -------------------------------------------------
+#
+# The upgrade is `pip install --upgrade` against the existing venv: the same
+# installation, the same repository, the same `.agentic/` tree. Nothing is
+# recreated, because recreating any of them would test a fresh install and call
+# it an upgrade.
+
+complete_tree_digest() {
+  python3 "$TEST_ROOT/digest_tree.py" --complete "$1" "$1"
+}
+installed_tree_digest() {
+  python3 "$TEST_ROOT/digest_tree.py" "$1" "$1/lib"
+}
+
+alpha_status_before="$(cd "$ALPHA_REPO" && "$ALPHA_PM" status)"
+alpha_attempts_before="$(query_attempts "$ALPHA_STORE")" || \
+  fail "the alpha repository recorded no queryable attempt before the upgrade"
+beta_status_before="$(cd "$BETA_REPO" && "$BETA_PM" status)"
+beta_installed_before="$(installed_tree_digest "$BETA_VENV")"
+beta_tree_before="$(complete_tree_digest "$BETA_REPO/.agentic")"
+
+# Captured last, so nothing this test does afterwards is mistaken for the
+# upgrade's doing.
+alpha_tree_before="$(complete_tree_digest "$ALPHA_REPO/.agentic")"
+[[ -n "$alpha_tree_before" ]] || fail "the alpha repository has no .agentic tree to compare"
+
+"$ALPHA_VENV/bin/python" -m pip install --upgrade \
+  --no-index --no-deps --disable-pip-version-check --no-input \
+  "$WHEEL_NEW" > "$TEST_ROOT/alpha-upgrade.log" 2>&1 || {
+  /bin/cat "$TEST_ROOT/alpha-upgrade.log" >&2
+  fail "pip install --upgrade failed in the alpha repository's venv"
+}
+
+alpha_version_after="$(cd "$ALPHA_REPO" && "$ALPHA_PM" version)" || \
+  fail "the alpha repository's command stopped working after the upgrade"
+alpha_line_after="$(printf '%s\n' "$alpha_version_after" | /usr/bin/head -n 1)"
+[[ "$alpha_line_after" != "$alpha_version_line" ]] || \
+  fail "the upgrade did not change the version the installed command runs: $alpha_line_after"
+assert_equals "$alpha_line_after" "pm-flow $PINNED_NEW" \
+  "the upgraded repository runs the newer package"
+
+# Immediately, before anything else runs against this repository: an upgrade
+# that touched project data would be doing exactly what the copy-versioning
+# machinery had to be built to avoid.
+assert_tree_unchanged "$(complete_tree_digest "$ALPHA_REPO/.agentic")" \
+  "$alpha_tree_before" \
+  "the package upgrade changed the repository's .agentic tree"
+
+# The same project, still readable by the new version.
+assert_equals "$(cd "$ALPHA_REPO" && "$ALPHA_PM" status)" "$alpha_status_before" \
+  "the upgraded command reports the project it had before the upgrade"
+assert_equals "$(query_attempts "$ALPHA_STORE")" "$alpha_attempts_before" \
+  "the upgraded command reads the records the previous version wrote"
+
+# And carries it forward: the next step of the cycle the older version opened.
+upgraded_tick="$(advance_pinned_repo "$ALPHA_REPO" "$ALPHA_KEY" "$ALPHA_SECTION_KEY" \
+  "$ALPHA_PM" "$ALPHA_FLAG")"
+assert_contains "$upgraded_tick" "section=$ALPHA_SECTION_KEY" \
+  "the upgraded command advanced the same section"
+assert_contains "$upgraded_tick" "develop 001 -> result" \
+  "the upgraded command took the next step of the cycle the older version opened"
+[[ -f "$ALPHA_SECTION/cycles/001/result.md" ]] || \
+  fail "the continued cycle produced no result:"$'\n'"$upgraded_tick"
+assert_data_only "$ALPHA_FLOW" "the upgraded repository after a tick"
+
+# The other repository was not part of any of this: not its version, not its
+# installation, not its project data.
+beta_version_after="$(cd "$BETA_REPO" && "$BETA_PM" version)" || \
+  fail "the beta repository's command stopped working after the other was upgraded"
+assert_equals "$(printf '%s\n' "$beta_version_after" | /usr/bin/head -n 1)" \
+  "$beta_version_line" "upgrading one repository changed the other's running version"
+assert_equals "$(installed_tree_digest "$BETA_VENV")" "$beta_installed_before" \
+  "upgrading one repository rewrote a file in the other's installation"
+assert_tree_unchanged "$(complete_tree_digest "$BETA_REPO/.agentic")" \
+  "$beta_tree_before" "upgrading one repository changed the other's project data"
+assert_equals "$(cd "$BETA_REPO" && "$BETA_PM" status)" "$beta_status_before" \
+  "upgrading one repository changed the other's reported project state"
+
+printf 'PASS: upgrading one repository changes its version, not its data and not the other repository\n'
