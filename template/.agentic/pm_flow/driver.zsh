@@ -1009,6 +1009,12 @@ $(/bin/cat "$audit_report")"
       dispatch_args+=(--extra-dir "$granted")
     done
   fi
+  # Read-only grants stand on their own: a reviewer launched in the main tree
+  # still has to read and run commands in the developer's worktree.
+  local readable
+  for readable in "${DISPATCH_READ_DIRS[@]}"; do
+    dispatch_args+=(--read-dir "$readable")
+  done
 
   local dispatch_status=0
   # Opened before the call and closed after it, so what is recorded is one
@@ -1435,7 +1441,10 @@ do_review() {
     "WORKTREE=$review_tree" \
     "CONTEXT_FILES=$context" > "$prompt"
 
+  DISPATCH_READ_DIRS=()
+  [[ "$review_tree" == "$PROJECT_ROOT" ]] || DISPATCH_READ_DIRS=("$review_tree")
   dispatch_role pm "$prompt" "$cycle_dir/review.md" "" "review $(basename "$section_dir") $cycle_number"
+  DISPATCH_READ_DIRS=()
   decision="$(record_cycle_decision "$cycle_dir" "$cycle_dir/review.md" "GO,GO_WITH_CHANGES,NO_GO")"
   printf 'review %s -> %s (developer said %s; consecutive failures: %s)\n' \
     "$cycle_number" "$decision" "$(first_line_or "$cycle_dir/dev_status.txt" UNSTATED)" \
@@ -1926,7 +1935,10 @@ do_review_rescue() {
     "WORKTREE=$rescue_tree" \
     "CONTEXT_FILES=$context" > "$prompt"
 
+  DISPATCH_READ_DIRS=()
+  [[ "$rescue_tree" == "$PROJECT_ROOT" ]] || DISPATCH_READ_DIRS=("$rescue_tree")
   dispatch_role pm "$prompt" "$escalation_dir/review.md" "" "review rescue $(basename "$section_dir")"
+  DISPATCH_READ_DIRS=()
   decision="$(extract_markdown_decision "$(/bin/cat "$escalation_dir/review.md")" "GO,GO_WITH_CHANGES,NO_GO")"
   if [[ "$decision" == "NO_GO" ]]; then
     local rounds budget
@@ -2220,6 +2232,7 @@ with_repo_git_lock() {
 
 DISPATCH_WORK_ROOT=""
 DISPATCH_EXTRA_DIRS=()
+DISPATCH_READ_DIRS=()
 
 worktree_isolation_enabled() {
   [[ "$(config_setting isolation worktrees 1)" != "0" ]] || return 1

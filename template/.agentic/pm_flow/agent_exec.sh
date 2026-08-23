@@ -80,11 +80,16 @@ DRY_RUN="0"
 SEAT="1"
 WORK_ROOT=""
 EXTRA_DIRS=()
+# Directories a role may read and run commands against, but not write: a
+# reviewer's view of the developer's worktree. Granted to the CLI as a working
+# directory and left out of the scoped write roots.
+READ_DIRS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --seat)        SEAT="${2:-}"; [[ "$SEAT" == <-> ]] || fail "--seat requires a positive integer"; shift 2 ;;
     --work-root)   WORK_ROOT="${2:-}"; [[ -n "$WORK_ROOT" ]] || fail "--work-root requires a value"; shift 2 ;;
     --extra-dir)   [[ -n "${2:-}" ]] || fail "--extra-dir requires a value"; EXTRA_DIRS+=("$2"); shift 2 ;;
+    --read-dir)    [[ -n "${2:-}" ]] || fail "--read-dir requires a value"; READ_DIRS+=("$2"); shift 2 ;;
     --prompt-file) PROMPT_FILE="${2:-}"; [[ -n "$PROMPT_FILE" ]] || fail "--prompt-file requires a value"; shift 2 ;;
     --output)      OUTPUT_FILE="${2:-}"; [[ -n "$OUTPUT_FILE" ]] || fail "--output requires a value"; shift 2 ;;
     --heartbeat)   HEARTBEAT_FILE="${2:-}"; [[ -n "$HEARTBEAT_FILE" ]] || fail "--heartbeat requires a value"; shift 2 ;;
@@ -110,6 +115,9 @@ if [[ -n "$WORK_ROOT" ]]; then
 fi
 for extra_dir in "${EXTRA_DIRS[@]}"; do
   [[ -d "$extra_dir" ]] || fail "--extra-dir is not a directory: $extra_dir"
+done
+for read_dir in "${READ_DIRS[@]}"; do
+  [[ -d "$read_dir" ]] || fail "--read-dir is not a directory: $read_dir"
 done
 
 # Roles are dispatched directly rather than through net_exec.sh, so honour the
@@ -242,7 +250,7 @@ DEFAULT_SCOPED_BASH = [
     # granted as runners, the way pytest is; the access hook records what they
     # reach, and the Edit/Write rules still bound what a scoped role may write.
     "zsh:*", "bash:*", "sh:*", "make test:*",
-    "ls:*", "cat:*", "head:*", "tail:*", "wc:*", "grep:*", "rg:*",
+    "ls:*", "cat:*", "head:*", "tail:*", "wc:*", "grep:*", "rg:*", "sed -n:*",
     # Probing the world the criteria describe: a listening port is a fact about
     # whether an external dependency is actually satisfied.
     "nc:*", "lsof:*",
@@ -572,7 +580,7 @@ build_command() {
   case "$AGENT_CLI" in
     claude)
       AGENT_ARGV=(claude -p --output-format json --effort "$AGENT_DIFFICULTY" --add-dir "$PROJECT_ROOT")
-      for extra_dir in "${EXTRA_DIRS[@]}"; do
+      for extra_dir in "${EXTRA_DIRS[@]}" "${READ_DIRS[@]}"; do
         AGENT_ARGV+=(--add-dir "$extra_dir")
       done
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(--model "$AGENT_MODEL")
@@ -647,7 +655,7 @@ build_command() {
       AGENT_ARGV=(copilot -p "$(/bin/cat "$PROMPT_FILE")"
                   --effort "$AGENT_DIFFICULTY" --add-dir "$PROJECT_ROOT"
                   --no-custom-instructions --no-ask-user --silent --stream off)
-      for extra_dir in "${EXTRA_DIRS[@]}"; do
+      for extra_dir in "${EXTRA_DIRS[@]}" "${READ_DIRS[@]}"; do
         AGENT_ARGV+=(--add-dir "$extra_dir")
       done
       [[ -z "$AGENT_MODEL" ]] || AGENT_ARGV+=(--model "$AGENT_MODEL")
