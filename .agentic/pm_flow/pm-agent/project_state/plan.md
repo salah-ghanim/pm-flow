@@ -68,6 +68,20 @@ Everything below serves that sentence.
 - pm-flow is drivable over MCP and can bind any ACP-compatible agent.
 - The test suite runs to completion.
 
+## Current position
+
+- Met: sections run in isolated worktrees outside the repository.
+- Unmet: backend-readable traces (no OTLP endpoint, no `pm-flow trace`),
+  the ledger still written beside the store, no compare, no persona
+  measurement, no MCP or ACP surface. The suite's exit status is a section
+  claim until the officer's tier can run it.
+- Order of work: `store-ledger`, `trace-commands` and `otel-semconv` in
+  parallel; `topology-compare` as soon as `store-ledger` lands;
+  `agent-bindings` after. `codex-usage` and `persona-packs` close on their
+  next cycle. `persona-cards` is the only live nice-to-have.
+- Cut: `a2a-binding` and `repo-hooks`. The product does not guarantee an A2A
+  seat, a commit-message hook, or an install registry.
+
 ## Deliberately out of scope
 
 - A visual editor. The vault format has to survive real use first; the markdown

@@ -82,3 +82,56 @@
   declares `COMPLETE`.
 - Unproven after this pass: nothing new; the planned sections have no
   evidence and say so.
+
+## 2026-08-23 — portfolio review 001
+
+- Decision: OFF_TRACK. $107 and 28 cycles bought the scaffolding (packaging,
+  worktrees, installer, persona packs, Codex usage); every criterion in the
+  objective sentence - store instead of ledger, compare, trace commands,
+  backend-readable spans, MCP/ACP - sits in a section with zero cycles.
+- Criteria: worktree isolation MET (`git worktree list` shows the two live
+  section checkouts under `../.pm-flow-worktrees/`, outside the repository).
+  Backend-readable trace NOT MET (`otlp_endpoint` absent from both
+  `config.json`; `trace_export.py` is reachable only from `driver.zsh:736`
+  autoexport, never from `pm-flow`). Ledger gone NOT MET (`driver.zsh:441-471`
+  still writes and reads `runs/cost_ledger.tsv`; the file is on disk beside
+  `pm_flow.db`; both are gitignored, so the host absorbs no tracked writes).
+  Persona install-swap-measure NOT MET (`catalog.py` has `persona add|list|
+  swap`; no compare exists to measure against). Compare NOT MET and MCP/ACP
+  NOT MET (`src/pm_flow/cli.py` has no `trace`, `compare`, `acp` or `mcp`;
+  `agent_exec.sh` none either). Suite NOT MET by probe: `tests/pm_flow_test.sh`,
+  `zsh -f tests/pm_flow_test.sh` and `zsh -f tests/prompt_quality_test.sh` were
+  all refused under approval in this tier; last suite commit is 988781c today;
+  the green-suite and packaging handoffs claim exit 0 and remain claims.
+- `sqlite3` and `python3 -c` were refused, so the store's attempt count and
+  summed Codex tokens are unprobed; `tests/fixtures/codex_events_real.jsonl`
+  is committed.
+- Plan structure: unstarted dependency FOUND - `topology-compare` waits on
+  `store-ledger` (0 cycles) and `a2a-binding` on `agent-bindings` (0 cycles);
+  both upstreams wait on nothing. Unreachable CLEAR: every planned acceptance
+  names a path its section owns, and `cli.py` forwards unknown commands to
+  `pm_flow.sh`, so `trace-commands` needs no `cli.py` edit. Must-have
+  inflation CLEAR: each must-have maps to one plan bullet. Linear chain CLEAR:
+  longest chain is two deep.
+- `driver.zsh` does not order dispatch by priority (only validates the word),
+  so a nice-to-have costs a must-have its tick.
+- CUT `a2a-binding`: no plan bullet names A2A; the binding criterion is ACP;
+  it waited on an unstarted section and its own stated risk is an
+  unauthenticated endpoint that spends budget. The product no longer
+  guarantees a seat bound to an agent somebody else serves over A2A.
+- CUT `repo-hooks`: it advances no plan bullet, the driver already writes
+  Conventional Commits, and its failure mode stops the flow. The product no
+  longer guarantees an installed commit-message hook or a registry of installs
+  for batch updates. Reopen with a planned handoff once the must-haves close.
+- `persona-cards` stays nice-to-have and live: attribution is what makes a
+  persona publishable, which is plan bullet four.
+- `persona-packs`: remote authenticated transports unproven; accepted, since
+  `file://` went through the real Git CLI and transport does not change pack
+  semantics. Its next scope call declares COMPLETE.
+- `codex-usage`: the live dispatch evidence is still the reviewer's claim;
+  T3's tracked replay closes the section.
+- Shortest path: `store-ledger` T1 now, in parallel with `trace-commands` T1
+  and `otel-semconv` T1; `topology-compare` the moment `store-ledger` lands;
+  `agent-bindings` after. Nothing in flight is on that path yet.
+- Unproven after this review: every planned must-have; the suite's exit
+  status from this tier; non-zero Codex tokens in the store.
