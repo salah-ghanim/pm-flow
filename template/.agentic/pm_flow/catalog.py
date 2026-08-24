@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.util
 import json
 import os
 import re
@@ -853,7 +854,9 @@ FORBIDDEN_KEYS = frozenset({
     "disallowed_tools", "mcp_servers",
 })
 
-PERSONA_ENTRY_KEYS = frozenset({"key", "file", "layer", "title", "summary", "tags"})
+PERSONA_ENTRY_KEYS = frozenset(
+    {"key", "file", "layer", "title", "summary", "tags", "card"}
+)
 
 
 class PackError(Exception):
@@ -900,25 +903,72 @@ def reject_local_fields(value, where, path="") -> None:
             reject_local_fields(item, where, f"{path}[{index}]")
 
 
-def resolve_inside(root: Path, relative) -> Path:
+def resolve_inside(root: Path, relative, *, suffix=".md", description="persona file") -> Path:
     """A pack may only index files it contains.
 
     Resolved rather than merely joined, so a symlink pointing out of the pack is
     caught instead of followed.
     """
     if not isinstance(relative, str) or not relative.strip():
-        raise PackError("persona file must be a non-empty pack-relative path")
+        raise PackError(f"{description} must be a non-empty pack-relative path")
     candidate = Path(relative)
     if candidate.is_absolute() or ".." in candidate.parts:
-        raise PackError(f"persona file '{relative}' must stay inside the pack")
+        raise PackError(f"{description} '{relative}' must stay inside the pack")
     resolved = (root / candidate).resolve()
     if root not in resolved.parents:
-        raise PackError(f"persona file '{relative}' resolves outside the pack")
-    if resolved.suffix.lower() != ".md":
-        raise PackError(f"persona file '{relative}' must be a .md file")
+        raise PackError(f"{description} '{relative}' resolves outside the pack")
+    if resolved.suffix.lower() != suffix:
+        raise PackError(f"{description} '{relative}' must be a {suffix} file")
     if not resolved.is_file():
-        raise PackError(f"persona file '{relative}' is missing")
+        raise PackError(f"{description} '{relative}' is missing")
     return resolved
+
+
+def load_persona_card_module():
+    """Load the accepted card contract in package, wheel, or checkout layout."""
+    try:
+        from pm_flow import persona_card
+    except ImportError:
+        source = Path(__file__).resolve()
+        candidates = (
+            source.parent.parent / "persona_card.py",
+            source.parents[3] / "src" / "pm_flow" / "persona_card.py",
+        )
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            spec = importlib.util.spec_from_file_location(
+                "_pm_flow_persona_card", candidate
+            )
+            if spec is None or spec.loader is None:
+                continue
+            persona_card = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = persona_card
+            spec.loader.exec_module(persona_card)
+            return persona_card
+        raise PackError("cannot find pm_flow.persona_card to validate persona card")
+    return persona_card
+
+
+def forbidden_card_field_path(value, forbidden_keys, path=""):
+    """Locate a rejected field for the secondary install diagnostic only."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalised = str(key).strip().lower().replace("-", "_")
+            child_path = f"{path}.{key}" if path else str(key)
+            if normalised in forbidden_keys:
+                return child_path
+            found = forbidden_card_field_path(item, forbidden_keys, child_path)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            found = forbidden_card_field_path(
+                item, forbidden_keys, f"{path}[{index}]"
+            )
+            if found:
+                return found
+    return None
 
 
 def read_pack(path) -> dict:
@@ -980,6 +1030,30 @@ def read_pack(path) -> dict:
         reject_local_fields(meta, f"{entry.get('file')} frontmatter")
         if not body.strip():
             raise PackError(f"{field} file '{entry.get('file')}' has no prompt body")
+        card = None
+        if "card" in entry:
+            card_path = resolve_inside(
+                root, entry.get("card"), suffix=".json", description="persona card"
+            )
+            persona_card = load_persona_card_module()
+            card_text = card_path.read_text(errors="replace")
+            try:
+                card = persona_card.parse(card_text)
+            except persona_card.PersonaCardError as error:
+                # The contract message is the primary diagnostic. The file is
+                # secondary context and does not change that stable message.
+                details = []
+                try:
+                    rejected_card = json.loads(card_text)
+                except ValueError:
+                    rejected_card = None
+                rejected_path = forbidden_card_field_path(
+                    rejected_card, persona_card.FORBIDDEN_CARD_KEYS
+                )
+                if rejected_path:
+                    details.append(f"card field path: {rejected_path}")
+                details.append(f"card file: {card_path.relative_to(root)}")
+                raise PackError(f"{error}\n" + "\n".join(details)) from error
         tags = []
         for tag in (pack_tags + _tag_list(entry.get("tags"), f"{field}.tags")
                     + _tag_list(meta.get("tags"), f"{field} frontmatter tags")):
@@ -992,6 +1066,7 @@ def read_pack(path) -> dict:
             "summary": _optional_text(entry.get("summary")) or _optional_text(meta.get("summary")),
             "body": body.strip(),
             "tags": tags,
+            "card": card,
             "source_path": str(file_path),
             # Where the file sits inside the pack, which stays true however the
             # pack itself was obtained.
@@ -1134,10 +1209,26 @@ def persona_git_metadata(pack, existing=None) -> dict:
     return metadata
 
 
+def persona_pack_metadata(pack, card, existing=None) -> dict:
+    """Merge the immutable commit and the pack's card onto a persona row."""
+    metadata = persona_git_metadata(pack, existing)
+    if card is None:
+        metadata.pop("card", None)
+    else:
+        metadata["card"] = card
+    return metadata
+
+
 def persona_commit(raw_metadata):
     """The commit recorded on a persona row, or None."""
     metadata = store.loads(raw_metadata)
     return metadata.get(GIT_COMMIT_KEY) if isinstance(metadata, dict) else None
+
+
+def persona_card(raw_metadata):
+    """The validated card stored on a persona row, or None."""
+    metadata = store.loads(raw_metadata)
+    return metadata.get("card") if isinstance(metadata, dict) else None
 
 
 def adopt_persona(connection, row, spec, pack, pack_id, source) -> bool:
@@ -1157,15 +1248,18 @@ def adopt_persona(connection, row, spec, pack, pack_id, source) -> bool:
     Returns whether anything actually changed, so re-adding an unchanged pack
     stays a reported no-op rather than announcing work it did not do.
     """
+    card = spec.get("card")
     wanted = {
         "pack_id": pack_id,
-        "author": pack["author"],
+        "author": card.get("author") if card else pack["author"],
         "license": pack["license"],
         "source_url": source,
-        "version": pack["version"],
+        "version": card.get("version") if card else pack["version"],
         "tags": store.dumps(spec["tags"]),
         "metadata": store.dumps(
-            persona_git_metadata(pack, store.loads(row["metadata"]))),
+            persona_pack_metadata(
+                pack, card, store.loads(row["metadata"])
+            )),
         "source_path": spec["source_path"],
         "title": spec["title"],
         "summary": spec["summary"],
@@ -1250,6 +1344,7 @@ def install_pack(connection, pack: dict) -> dict:
             "SELECT id FROM persona_packs WHERE name = ?", (pack["name"],)
         ).fetchone()["id"]
         for spec in pack["personas"]:
+            card = spec.get("card")
             digest = persona_digest(spec["key"], spec["layer"], spec["body"])
             found = find_persona(connection, spec["key"], digest)
             if found is not None:
@@ -1270,9 +1365,11 @@ def install_pack(connection, pack: dict) -> dict:
                 connection, key=spec["key"], title=spec["title"],
                 summary=spec["summary"], body=spec["body"], layer=spec["layer"],
                 digest=digest, source_path=spec["source_path"],
-                author=pack["author"], license=pack["license"],
-                source_url=source, version=pack["version"], tags=spec["tags"],
-                pack_id=pack_id, metadata=persona_git_metadata(pack),
+                author=card.get("author") if card else pack["author"],
+                license=pack["license"], source_url=source,
+                version=card.get("version") if card else pack["version"],
+                tags=spec["tags"], pack_id=pack_id,
+                metadata=persona_pack_metadata(pack, card),
             )
             (updated if superseded else installed).append(spec["key"])
         connection.commit()
@@ -1628,6 +1725,42 @@ def cmd_persona_list(args):
     return 0
 
 
+def cmd_persona_show(args):
+    connection = store.connect(args.db)
+    row = connection.execute(
+        "SELECT p.* FROM personas p WHERE p.key = ?"
+        " AND p.id = (SELECT MAX(id) FROM personas b WHERE b.key = p.key)",
+        (args.key,),
+    ).fetchone()
+    if row is None:
+        raise SystemExit(
+            f"persona show: no installed persona '{args.key}'; "
+            "`persona list` shows what is installed"
+        )
+
+    print(f"key: {row['key']}")
+    print(f"layer: {row['layer']}")
+    print(f"title: {row['title'] or '-'}")
+    print(f"summary: {row['summary'] or '-'}")
+    print(f"license: {row['license'] or '-'}")
+    print(f"source: {row['source_url'] or row['source_path'] or '-'}")
+    card = persona_card(row["metadata"])
+    if card is None:
+        print(f"author: {row['author'] or '-'}")
+        print(f"version: {row['version'] or '-'}")
+        print(f"tags: {', '.join(store.loads(row['tags'])) or '-'}")
+        print("card: this persona has no card")
+        return 0
+
+    print(f"author: {card['author']}")
+    print(f"purpose: {card['purpose']}")
+    print(f"version: {card['version']}")
+    print("skills:")
+    for skill in card["skills"]:
+        print("  - " + json.dumps(skill, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def cmd_persona_swap(args):
     connection = store.connect(args.db)
     project_key = args.project or os.environ.get("PM_FLOW_PROJECT", "")
@@ -1716,6 +1849,10 @@ def main(argv):
     q.set_defaults(func=cmd_persona_add)
     q = persona_sub.add_parser("list", help="installed personas and their provenance")
     q.set_defaults(func=cmd_persona_list)
+    q = persona_sub.add_parser(
+        "show", help="show one installed persona and its optional card")
+    q.add_argument("key", help="the installed persona key to show")
+    q.set_defaults(func=cmd_persona_show)
     q = persona_sub.add_parser(
         "update", help="reinstall persona packs from their recorded sources")
     q.add_argument("pack", nargs="?", metavar="pack-name",
