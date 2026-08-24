@@ -92,12 +92,36 @@
 
 ## Task T3 — MCP server
 
-- Status: pending.
+- Status: done (cycle 003, accepted with one change carried into T4).
 - Outcome: `python -m pm_flow.mcp_server` serves the five tools over stdio;
   each invokes the installed `pm-flow` command and returns its output or a
   tool error.
 - Paths: `src/pm_flow/mcp_server.py`, `tests/agent_bindings_test.sh`.
 - Reuse: `pm_flow.cli`; no state machine code.
+- Standard library only. `pyproject.toml` declares `dependencies = []` with a
+  comment stating the absence is deliberate, `pyproject.toml` is outside this
+  section's owned paths, and the editable venv carries no `mcp` package. So the
+  server hand-writes JSON-RPC 2.0 over stdio, and A4's "stock MCP client" is
+  the brief's permitted equivalent JSON-RPC script.
+- The transport hazard: `cli.main` runs the engine with `subprocess.call(...)`
+  inheriting fd 1 (`cli.py:87`). Calling it in-process would put the engine's
+  stdout on the JSON-RPC channel and corrupt every frame. The server must spawn
+  the command as a child with `stdout` and `stderr` piped, and write nothing to
+  its own stdout but protocol frames.
+- Error mapping is one rule, and it covers both of the brief's server-side
+  rejection conditions. `acquire_driver_lock` (`pm_flow.sh:884`) and
+  `assert_within_budget` (`driver.zsh:611`) both go through `fail`: message on
+  stderr, non-zero exit. A non-zero exit is therefore a *tool* error — a
+  `tools/call` result carrying the child's output with `isError` true — not a
+  JSON-RPC error. JSON-RPC errors are reserved for protocol faults: unknown
+  method, unknown tool name, arguments that do not match the declared schema.
+- Argument surface, confirmed against the engine: `main` (`pm_flow.sh:1881-1898`)
+  strips `--project` and `--section` from anywhere in argv; `cli.py:73` honours
+  `--project` only as argv[0], so the server puts it first. `cmd_cost`
+  (`driver.zsh:466`), `cmd_next` (`:2857`), `cmd_status` (`:2875`) and
+  `cmd_list_sections` (`pm_flow.sh:1744`) take no arguments; `cmd_tick`
+  (`:2710`) honours `SECTION_OVERRIDE`. So `tick` takes an optional `section`,
+  every tool takes an optional `project`, and nothing else is passed through.
 - Acceptance IDs: A4, A6.
 - Validation: `zsh tests/agent_bindings_test.sh` — a JSON-RPC client script
   lists exactly five tools, drives a stub project to `done` via `tick`, and a
@@ -111,6 +135,17 @@
   client to a terminal section, and `cost` distinguishes the two transports.
 - Paths: `tests/agent_bindings_test.sh`.
 - Reuse: the harness in `tests/packaged_layout_test.sh`.
+- Carried from T3's cycle-003 review, in `tests/agent_bindings_test.sh`:
+  `tick`'s `section` argument is built correctly — `_command_for("tick",
+  {"project":"p","section":"s"})` yields `--project p tick --section s`, and
+  `main`'s option loop (`pm_flow.sh:1881-1898`) strips `--section` from any
+  position — but no test shows it selecting a section. The drive loop calls
+  `tick` with `project` only; the budget case passes `section` but
+  `assert_within_budget` refuses before section resolution, so it proves only
+  that the engine tolerates the flag. T4's packaged run should tick a named
+  section over MCP and assert that section advanced and the other did not, or
+  the brief's "a tool silently accepts an argument it does not pass on" stays
+  untested for the one argument that is not `project`.
 - Carried from T2's cycle-002 review, both in `src/pm_flow/acp.py`:
   1. `_record_access` (`:232`) does not guard its write. An `OSError` on the
      access log escapes into `main`'s `except` (`:424`), which names every

@@ -2,11 +2,87 @@
 
 ## Current task
 
-- T1 and T2 are both accepted. T3 — the MCP server — is the next assignment; it
-  has no dependency. T4 needs T3 and carries two changes from T2's review
-  (access-log fault naming, ACP token accounting — see workplan T4).
+- T1, T2 and T3 are accepted. T4 — end to end through the installed command —
+  is the only unfinished task and is next. It carries three changes: two from
+  T2's review (access-log fault naming, ACP token accounting) and one from
+  T3's (no test selects a section through the `tick` tool) — see workplan T4.
 
 ## Completed tasks and evidence
+
+- **T3 — the MCP server. Acceptance A4, A6.**
+  Cycle 003. Two paths changed, both writable: `src/pm_flow/mcp_server.py`
+  (new, 189 lines) and `tests/agent_bindings_test.sh` (+330/-1).
+  `git status --porcelain` in the developer worktree lists exactly those two.
+  `pyproject.toml` is untouched and the module imports only `json`, `shutil`,
+  `subprocess`, `sys`, `typing` — standard library throughout.
+  - **A6.** `zsh tests/agent_bindings_test.sh` → exit 0. The seventeen T1/T2
+    `PASS` lines are all still present, plus five new ones: `MCP client has no
+    shell or state-reading escape hatch`, `MCP tick reports the driver lock as
+    a tool error without advancing`, `MCP lists exactly five tools and drives a
+    section to done`, `MCP tick reports budget exhaustion as a tool error
+    without dispatching`, `agent bindings MCP suite`.
+  - **A2, unaffected as predicted.** `zsh tests/pm_flow_test.sh` → exit 0, 10
+    `PASS`. `zsh template/.agentic/pm_flow/tests/run.zsh` → exit 0, `all suites
+    passed`, totals 35/41/32/58/74, fail=0. T3 added a module and touched no
+    engine file.
+  - **A4, the tool set is asserted as a set, not by presence.** The client
+    asserts `names == {"status","next","tick","list_sections","cost"}`.
+    Verified by mutation on a *copy* of the module under
+    `cycles/003/` (the worktree was never modified): adding a sixth
+    `"run": "run"` entry to `TOOL_COMMANDS` and running the developer's own
+    client against it fails at `assert names == expected` with
+    `{'list_sections','next','status','tick','run','cost'}`; against the
+    unmutated module the same client gets past that assertion. It also asserts
+    each tool's `additionalProperties is False` and exact property set —
+    `{project}`, and `{project, section}` for `tick` alone.
+  - **A4, no shell call of the client's own.** The test walks the client's AST
+    and asserts its `subprocess.*`/`os.*` call list is exactly
+    `[("subprocess","Popen")]`. Verified the guard bites: inserting a single
+    `subprocess.run(["pm-flow","status"])` into a copy of the client makes it
+    fail with `[('subprocess','Popen'), ('subprocess','run')]`. The client also
+    contains no `open(` and no `Path(` — its only `os` use is `os.environ` —
+    so it reads no section directory and no file the driver wrote.
+  - **A4, terminal state read back through a tool.** The client loops `tick`
+    (bounded at 32, raising if it does not converge) and re-reads
+    `list_sections` each time, matching the section's row on `done`. It does
+    not assume the first tick is section work: the test sets
+    `governance.portfolio_review_dispatches = 1` (`driver.zsh:819`, default 12),
+    so a portfolio review arms after every dispatch and preempts section work
+    during the drive. The shell then asserts the reported terminal table
+    contains `| mcp-widget | must-have | done |`.
+  - **Stdout purity, proven directly rather than inferred.**
+    `cycles/003/review_probe3.py` pipes six frames into
+    `python3 -m pm_flow.mcp_server` at once against this repo and reads back
+    exactly five lines — the `notifications/initialized` notification draws no
+    reply — every one a clean JSON frame, with the engine's `list-sections`
+    table carried *inside* `result.content[0].text` rather than beside it.
+    Server exit 0, its own stderr empty. The child is spawned with
+    `stdout=PIPE`/`stderr=PIPE`, never `cli.main` in-process.
+  - **The two error channels are distinct.** Same probe: `resources/list` →
+    JSON-RPC `error` -32601 `Method not found`; `tools/call tick` with an
+    undeclared `bogus` argument → JSON-RPC `error` -32602 `unexpected tool
+    argument: bogus`, *before* any process is spawned. Against the engine's own
+    guards the suite shows the other channel: a `tick` under a held
+    `.driver.lock` returns a `tools/call` **result** with `isError` true whose
+    text names `another pm_flow driver is already running`, and the client
+    proves nothing advanced by diffing `list_sections` across it; over budget,
+    `tick` returns `isError` true carrying `project budget exhausted`, with
+    `cost` output identical before and after, so no attempt was recorded.
+    Neither is translated into a JSON-RPC error, retried, or swallowed.
+  - **Argv, observed not read.** `cycles/003/review_probe4.zsh` prints what
+    each tool builds: `--project` first in every case, `list_sections` mapping
+    to the hyphenated command `list-sections`, `--section` emitted for `tick`
+    only, and nothing else passed through. With `pm-flow` off `PATH` the
+    fallback `[sys.executable, "-m", "pm_flow.cli"]` is what runs — which is
+    the form the suite exercises.
+  - **The server holds no state.** It touches the filesystem only through
+    `shutil.which`; it never reads `sections/`, parses `status.txt`, decides
+    what is actionable, or caches anything between calls.
+  - Review harnesses kept at `cycles/003/review_run.zsh` (suite + exit status),
+    `review_probe.zsh` (extract client/guard, build the mutant copy),
+    `review_probe2.zsh` (the two negative checks), `review_probe3.zsh`/`.py`
+    (stdout purity and both error channels), `review_probe4.zsh` (argv),
+    `review_cleanup.zsh`. All operate on copies; none writes into the worktree.
 
 - **T2 — the `acp` arm in `agent_exec.sh`. Acceptance A1, A2, A3, A5.**
   Cycle 002. Three files changed, all owned: `src/pm_flow/acp.py`,
@@ -178,6 +254,13 @@
 
 - Transport identity is `bindings.cli` + `cli_params`; no schema change.
 - The MCP server is a façade over the installed command.
+- The MCP server's error rule is one line and settled: a protocol fault
+  (unknown method, unknown tool, an argument outside the declared schema) is a
+  JSON-RPC `error`; a child that ran and exited non-zero is a `tools/call`
+  result with `isError` true carrying its stderr and stdout. The lock and the
+  budget are always the second kind.
+- The MCP server is standard library only and stays that way while
+  `pyproject.toml` declares `dependencies = []` and sits outside this section.
 - `cli_params` enters `agent_exec.sh` as a 13th resolver field, not as a second
   parse of `config.json`.
 - T1's outcome channel is a single-line JSON object on `acp.py`'s stdout with
@@ -228,11 +311,64 @@
   `cycles/002/log_fault_probe.zsh` (access-log fault). All read the developer
   worktree and write only to their own `mktemp -d` scratch.
 
+## Verified baseline (cycle 003 probes)
+
+- `src/pm_flow/` holds `__init__.py`, `cli.py`, `paths.py`, `acp.py`,
+  `semconv.py`. `mcp_server.py` is still absent.
+- **No MCP SDK, and none may be added.** `pyproject.toml` declares
+  `dependencies = []` with a comment saying the emptiness is the point ("a
+  dependency here would have to resolve on every machine the flow is installed
+  into"). `.venv/…/site-packages/` holds only `pm_flow` and its dist-info — no
+  `mcp`. `pyproject.toml` is outside the owned paths, so T3 is standard library
+  only and A4's client is the brief's permitted equivalent JSON-RPC script.
+- **The engine's stdout is the transport.** `cli.main` ends in
+  `subprocess.call(command, cwd=…, env=…)` (`cli.py:87`) with no pipes, so the
+  engine writes to the inherited fd 1. An MCP server that calls `cli.main`
+  in-process puts engine output on the JSON-RPC channel. The child must be
+  spawned with `stdout`/`stderr` piped.
+- **The command surface.** `pm_flow.sh:1910-1993` dispatches `tick`, `status`,
+  `next`, `cost`, `list-sections` among others. `main`'s option loop
+  (`:1881-1898`) strips `--project` and `--section` from any position;
+  `cli.py:73` recognises `--project` only as argv[0]. `cmd_cost`
+  (`driver.zsh:466`), `cmd_next` (`:2857`), `cmd_status` (`:2875`) and
+  `cmd_list_sections` (`pm_flow.sh:1744`) take no arguments. `cmd_tick`
+  (`:2710`) reads `SECTION_OVERRIDE` and, with no section, may return
+  `section=(project) action=portfolio-review` before any section work.
+- **Lock and budget are the same failure shape.** `acquire_driver_lock`
+  (`pm_flow.sh:884`) calls `fail "another pm_flow driver is already running for
+  project '<key>'"`; `assert_within_budget` (`driver.zsh:611`) calls `fail
+  "project budget exhausted: …"`. `fail` writes stderr and exits non-zero, so
+  one rule — non-zero exit becomes a tool error carrying the child's output —
+  covers both of the brief's server-side rejection conditions.
+- **The disposable-project harness already exists** at
+  `tests/agent_bindings_test.sh:256-343`: `install.sh` into a temp repo,
+  `CYCLE_PM=(env PM_FLOW_REPO_ROOT=… PYTHONPATH=… python3 -m pm_flow.cli)`,
+  `init-section` from a heredoc brief, `tests/fixtures/stub_success.zsh`
+  installed as `driver-bin/claude`, `drain_project_work`, `run_driver`. A
+  second disposable project driven over MCP reuses it as-is.
+
+## Verified baseline (cycle 003 review probes)
+
+- **The engine never reads the server's stdin.** Every `read` in `pm_flow.sh`
+  and `driver.zsh` is fed by a here-string or a pipe (`pm_flow.sh:1552`,
+  `driver.zsh:128`, `:144`, `:2686`, `:2942`, `:3392`, `:3396`). So the child
+  inheriting fd 0 from the MCP server cannot consume a pipelined client frame.
+  Confirmed empirically: six frames written in one go were answered in order.
+  Worth re-checking if any future command becomes interactive — the server
+  passes stdin through rather than closing it.
+- The AST guard in the test matches `subprocess.*` and `os.*` attribute calls
+  by name. It would not catch `from subprocess import run` or `__import__`, so
+  it is a guard against drift rather than against a determined bypass. Adequate
+  for its purpose; noted so a later cycle does not over-trust it.
+- `tick`'s `section` argument reaches the engine correctly but no test
+  demonstrates it selecting a section — see the carried change in workplan T4.
+
 ## Blockers
 
 - None.
 
 ## Next eligible task
 
-- T3 — the MCP server. T1 and T2 are accepted; T3 has no dependency. T4 needs
-  T3 and picks up T2's two carried changes.
+- T4 — end to end through the installed command. Its dependencies T2 and T3
+  are both accepted, so it is eligible now, and it is the last task in the
+  plan. It picks up T2's two carried changes and T3's one.
