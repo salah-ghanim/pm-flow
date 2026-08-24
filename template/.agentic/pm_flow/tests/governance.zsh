@@ -216,6 +216,11 @@ eq     "C2 decision.txt holds the product verdict" \
        "$(cat "$FLOW/demo/project_state/portfolio/001/decision.txt")" "OFF_TRACK"
 exists "C2 the trigger that convened it is recorded" \
        "$FLOW/demo/project_state/portfolio/001/trigger.txt"
+has    "C2 the driver commits its own record of the review" \
+       "$(git -C "$W" log -1 --format=%s 2>/dev/null)" "chore(plan): record portfolio review 001"
+eq     "C2 and leaves none of it dirty" \
+       "$(git -C "$W" status --porcelain -- .agentic/pm_flow/demo/project_state/portfolio \
+          .agentic/pm_flow/demo/project_state/portfolio_log.md .agentic/pm_flow/demo/project_state/sections.md)" ""
 
 printf '\n===== C2: all four verdict tokens parse =====\n'
 verdicts="$FLOW/demo/project_state/portfolio/001/verdicts.tsv"

@@ -1500,8 +1500,16 @@ PM_STUB_REVIEW=NO_GO wt_run 4 > /dev/null
   fail "a rejected result reached the main working tree"
 [[ -f "$WT_ROOT/gamma/src/gamma.txt" ]] || \
   fail "the rejected work did not survive in the section's own worktree"
-[[ "$(git -C "$WT_REPO" rev-parse HEAD)" == "$WT_REJECT_COMMIT" ]] || \
-  fail "a rejected cycle advanced the base branch"
+# The driver may still commit its own records on the base branch (a portfolio
+# review that fell due during the run); none of the rejected section's work
+# and no commit in its name may be among them.
+WT_SINCE_REJECT="$(git -C "$WT_REPO" log --format=%s "$WT_REJECT_COMMIT..HEAD")"
+[[ "$WT_SINCE_REJECT" != *gamma* ]] || \
+  fail "a rejected cycle was committed on the base branch:
+$WT_SINCE_REJECT"
+git -C "$WT_REPO" diff --quiet "$WT_REJECT_COMMIT" HEAD -- src || \
+  fail "a rejected cycle changed src on the base branch:
+$WT_SINCE_REJECT"
 [[ -z "$(git -C "$WT_REPO" status --porcelain -- src)" ]] || \
   fail "a rejected cycle left the main working tree dirty"
 

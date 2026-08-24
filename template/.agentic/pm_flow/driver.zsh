@@ -3399,6 +3399,35 @@ ${handoffs%$'\n'}"
 
   record_portfolio_baseline
   refresh_sections_index
+  with_repo_git_lock commit_portfolio_record "$index"
+}
+
+# The officer commits what it changed in the main tree; the driver's own
+# record of the review - the numbered directory, the log block, the baseline,
+# the registry and every verdict it applied - was left dirty for the operator.
+commit_portfolio_record() {
+  local index="$1"
+  local -a paths
+  worktree_isolation_enabled || return 0
+  paths=("$STATE_DIR/portfolio" "$STATE_DIR/portfolio_log.md" "$STATE_DIR/sections.md")
+  local section_dir name
+  for section_dir in "$SECTIONS_DIR"/*(/N); do
+    [[ "$(basename "$section_dir")" != .* ]] || continue
+    for name in status.txt handoff.md summary.txt updated_at.txt portfolio_rescope.txt; do
+      [[ -f "$section_dir/$name" ]] && paths+=("$section_dir/$name")
+    done
+  done
+  git -C "$PROJECT_ROOT" add -- "${paths[@]}" >/dev/null 2>&1 || return 0
+  if git -C "$PROJECT_ROOT" diff --cached --quiet 2>/dev/null; then
+    return 0
+  fi
+  git -C "$PROJECT_ROOT" \
+    -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
+    -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
+    commit --quiet --no-verify \
+    -m "$(printf 'chore(plan): record portfolio review %03d' "$index")" \
+    -- "${paths[@]}" >/dev/null 2>&1 || true
+  return 0
 }
 
 # A governance dispatch that dies must not wedge the run. The baseline advances
