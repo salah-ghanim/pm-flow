@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pm-flow:a2a:0.2.5:agent-skill",
+  "title": "A2A AgentSkill 0.2.5",
+  "description": "A distinct capability or function that an agent can perform or address.",
+  "x-a2a-schema-provenance": {
+    "specVersion": "0.2.5",
+    "sourceUrl": "https://a2a-protocol.org/v0.2.5/specification/#554-agentskill-object",
+    "retrievedOn": "2026-08-24",
+    "acquisition": "Transcribed from the official specification after fetch.sh failed; this is not a byte-exact downloaded document."
+  },
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "description",
+    "tags"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the agent's skill."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable name of the skill."
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed description of the skill."
+    },
+    "tags": {
+      "type": "array",
+      "description": "Keywords or categories for discoverability.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "examples": {
+      "type": "array",
+      "description": "Example prompts or use cases demonstrating skill usage.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "inputModes": {
+      "type": "array",
+      "description": "Accepted media types overriding the agent defaults for this skill.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "outputModes": {
+      "type": "array",
+      "description": "Produced media types overriding the agent defaults for this skill.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}
