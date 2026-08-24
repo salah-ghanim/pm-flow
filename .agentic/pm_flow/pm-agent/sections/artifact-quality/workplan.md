@@ -100,16 +100,26 @@
 
 ## Task T4 — Show, and prove the suites still pass
 
-- Status: pending.
-- Outcome: `python -m pm_flow.quality show` prints `latest.md` or says none
-  exists. The new test and the existing engine suites exit 0.
+- Status: accepted cycle 004 (A1, A3, A6 met; all workplan tasks now closed).
+- Outcome: `python -m pm_flow.quality show` writes the recorded `latest.md`
+  to stdout byte for byte, and when no record exists says so in one line on
+  stderr and exits non-zero rather than printing nothing. `show` reads only:
+  it never scores, never creates the record directory, and refuses the same
+  destinations `rank` refuses. Being the last task, it also proves the three
+  user-visible scenarios end to end on the real project, and that the two
+  engine suites this section does not own still exit 0.
 - Paths: `src/pm_flow/quality.py`, `tests/artifact_quality_test.sh`.
-- Reuse: T3's record layout.
+- Reuse: T3's `resolve_record_dir` for the destination and T3's record
+  layout for the file names. No second renderer — `show` prints file bytes,
+  it does not re-render an `Artifact` list.
 - Acceptance IDs: A1, A3, A6.
 - Validation: `zsh tests/artifact_quality_test.sh` — `show` after `rank`
-  reprints `latest.md`; `show` on an empty quality dir prints a one-line
-  absence. `zsh tests/pm_flow_test.sh` and
-  `zsh template/.agentic/pm_flow/tests/run.zsh` exit 0.
+  reprints `latest.md` byte-identically; `show` against a project with no
+  record exits non-zero, names the directory it looked in, and leaves that
+  directory uncreated; `show` at a refused destination is refused. Then
+  `rank` followed by `show` against this repository with `git status
+  --porcelain` unchanged across both, and `zsh tests/pm_flow_test.sh` and
+  `zsh template/.agentic/pm_flow/tests/run.zsh` each exiting 0.
 - Depends on: T3.
 
 ## Integration and end-to-end validation

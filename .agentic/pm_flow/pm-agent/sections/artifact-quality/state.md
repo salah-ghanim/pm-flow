@@ -2,11 +2,52 @@
 
 ## Current task
 
-- T4 — `show`, plus proving both existing suites still pass. Next to assign.
-  (T2 was first written as `T1b`; workplan IDs are `T<number>` only, so it
-  became T2 and the record/show tasks renumbered to T3 and T4.)
+- None. T1–T4 are all accepted; the workplan has no unfinished task. Every
+  brief acceptance ID (A1–A6) has recorded evidence below. (T2 was first
+  written as `T1b`; workplan IDs are `T<number>` only, so it became T2 and the
+  record/show tasks renumbered to T3 and T4.)
+- T1–T3 are merged to `main`: `bbf704c`, `adba805`, `67d200c` on
+  `src/pm_flow/quality.py` and `tests/artifact_quality_test.sh`. T4 is accepted
+  cycle 004 and awaiting the driver's merge.
 
 ## Completed tasks and evidence
+
+- T4 — `show`, and both unowned suites still green. Accepted cycle 004.
+  Acceptance IDs A1, A3, A6. Worktree `git status --porcelain` shows exactly
+  `src/pm_flow/quality.py` and `tests/artifact_quality_test.sh`
+  (+61/−1 lines); no `show` arm was added to `tick`, `dispatch_role`,
+  `cli.py` or `pm_flow.sh`.
+  - A1/A3 fixture: `zsh <worktree>/tests/artifact_quality_test.sh` → exit 0
+    with eleven PASS lines, the new one being `PASS: show reprints the record
+    byte-for-byte, stays read-only, and distinguishes absence from refusal`.
+    (The assignment said "nine existing"; there are ten. The assignment's
+    count was stale, not a missing assertion.)
+  - A3 on this repository, every `PM_FLOW_*` unset then
+    `PM_FLOW_REPO_ROOT=/Users/salah/code/personal/pm-flow`,
+    `PYTHONPATH=<worktree>/src`: `rank --project pm-agent` exit 0,
+    `show --project pm-agent` exit 0, both stderr empty. `git status
+    --porcelain` before vs after → `cmp` exit 0. `show` stdout vs `rank`
+    stdout → `cmp` exit 0. `show` stdout vs
+    `.agentic/pm_flow/pm-agent/quality/latest.md` → `cmp` exit 0. The record
+    dir gained exactly one snapshot (`20260824T222340Z.json`) beside
+    `latest.md` and `latest.json`. `grep -c 'quality:'` over `show` stdout → 0,
+    and over `latest.json` → 0, so no composite leaked.
+  - A6: `zsh <worktree>/tests/pm_flow_test.sh` → exit 0 (last line `PASS:
+    independent consultant panel and CPO adjudication`);
+    `zsh <worktree>/template/.agentic/pm_flow/tests/run.zsh` → exit 0
+    (`totals: pass=74 fail=0`, `all suites passed`). Neither suite was edited.
+  - Negative checks, each in a scratch copy of the worktree, each run to a
+    failing assertion:
+    - absence falls through to an empty string instead of raising → exit 1,
+      `FAIL: show exited successfully without a quality record`.
+    - `sys.stdout.write(text.strip())` → exit 1, `FAIL: show stdout differs
+      from latest.md`, so byte identity is pinned and not merely asserted.
+    - `--out` bypasses `resolve_record_dir` → exit 1, `FAIL: missing-record
+      error did not name the resolved directory`. It trips the absence
+      assertion first (that assertion greps the *realpath* of the temp dir,
+      which only the shared resolver produces), so the suite catches the
+      bypass but names the wrong symptom. Cosmetic; the refusal itself is
+      still separately asserted.
 
 - T3 — metadata-only record. Accepted cycle 003. Acceptance IDs A2, A3, plus
   the A1 terminator regression guard. Only `src/pm_flow/quality.py` and
@@ -208,15 +249,16 @@
 - Six `review_002*.sh`, seven `scope_probe*.sh` and now four `review_003*`
   read-only probe scripts sit in this section directory from earlier cycles.
   Removing them needs an approval the roles have not had; they affect nothing.
-- The developer's sandbox denied `mkdir` on
+- The developer's sandbox denies writes under
   `/Users/salah/code/personal/pm-flow/.agentic/pm_flow/pm-agent/quality`
-  (`PermissionError: [Errno 1] Operation not permitted`), so cycle 003 came
-  back PARTIAL with the host-repo A3 evidence missing. The review re-ran the
-  same command from the same directory without that denial, so it is a
-  developer-workspace permission limit, not a code defect. If it recurs,
-  expect the developer to be able to prove A3 only on the fixture.
+  (`PermissionError: [Errno 1] Operation not permitted`). It hit cycle 003 and
+  again cycle 004, both times on the host `rank` write, never on the fixture.
+  The review re-ran the identical command in both cycles with no denial, so it
+  is a developer-workspace permission limit, not a code defect. Any future
+  host-write acceptance should be assigned expecting the developer to reach
+  only the read-only fallback, with the review supplying the write branch.
 
 ## Next eligible task
 
-- T4 — `show` on top of T3's record layout, plus `zsh tests/pm_flow_test.sh`
-  and `zsh template/.agentic/pm_flow/tests/run.zsh` exiting 0 (A6).
+- None — the workplan is complete. The section's remaining obligation is the
+  driver's merge of cycle 004.
