@@ -2,15 +2,40 @@
 
 ## Current task
 
-- None. T1–T4 are all accepted; the workplan has no unfinished task. Every
-  brief acceptance ID (A1–A6) has recorded evidence below. (T2 was first
-  written as `T1b`; workplan IDs are `T<number>` only, so it became T2 and the
-  record/show tasks renumbered to T3 and T4.)
-- T1–T3 are merged to `main`: `bbf704c`, `adba805`, `67d200c` on
-  `src/pm_flow/quality.py` and `tests/artifact_quality_test.sh`. T4 is accepted
-  cycle 004 and awaiting the driver's merge.
+- None. T1–T4 are all accepted and merged; the workplan has no unfinished
+  task. Every brief acceptance ID (A1–A6) has current evidence below. (T2 was
+  first written as `T1b`; workplan IDs are `T<number>` only, so it became T2
+  and the record/show tasks renumbered to T3 and T4.)
+- All four tasks are on `main`: `bbf704c` (T1), `adba805` (T2), `67d200c`
+  (T3), `1fb989b` (T4), touching only `src/pm_flow/quality.py`,
+  `template/.agentic/pm_flow/artifact_quality.md` and
+  `tests/artifact_quality_test.sh`.
 
 ## Completed tasks and evidence
+
+- Section verification on `main`, scope 005. Every prior acceptance was
+  observed against a section worktree; this re-runs A1–A3 and A6 against the
+  merged checkout at `/Users/salah/code/personal/pm-flow`, no `PM_FLOW_*` or
+  `PYTHONPATH` override. Probe: `scope_005_probe.sh` in this section dir.
+  - A6: `zsh tests/artifact_quality_test.sh` → exit 0 (eleven PASS lines,
+    including `PASS: show reprints the record byte-for-byte …` and, unlike the
+    developer's sandboxed run, `PASS: host rank leaves git status and sections
+    unchanged (wrote ignored project metadata)` — the write branch, not the
+    refusal fallback). `zsh tests/pm_flow_test.sh` → exit 0. `zsh
+    template/.agentic/pm_flow/tests/run.zsh` → exit 0 (`totals: pass=74
+    fail=0`).
+  - A1: `python -m pm_flow.quality rank --project pm-agent` → exit 0, empty
+    stderr, 65 lines for 65 artifacts; `grep -Ec
+    'composite|quality:[0-9]|score[=:][0-9]'` → 0. Dimension lines present:
+    `length` 18, `shape` 5, `boundaries` 50, `echo` 0, `stale` 0 — unchanged
+    from cycle 003/004, so no new `echo` or `stale` finding appeared.
+  - A2: `git status --porcelain` before vs after the run → `cmp` exit 0.
+    `find sections \( -name 'quality*' -o -name '*.score' \)` prints nothing.
+  - A3: `show --project pm-agent` → exit 0; `show` stdout vs `rank` stdout →
+    `cmp` exit 0; `show` stdout vs `quality/latest.md` → `cmp` exit 0. The
+    record dir holds `latest.md`, `latest.json` and nine timestamped
+    snapshots. `git check-ignore -v …/quality/latest.json` →
+    `.gitignore:24:.agentic/pm_flow/pm-agent/*`.
 
 - T4 — `show`, and both unowned suites still green. Accepted cycle 004.
   Acceptance IDs A1, A3, A6. Worktree `git status --porcelain` shows exactly
@@ -246,9 +271,10 @@
   untracked by construction: `git check-ignore -v
   .agentic/pm_flow/pm-agent/quality/latest.md` returns
   `.gitignore:24 .agentic/pm_flow/pm-agent/quality/latest.md`.
-- Six `review_002*.sh`, seven `scope_probe*.sh` and now four `review_003*`
-  read-only probe scripts sit in this section directory from earlier cycles.
-  Removing them needs an approval the roles have not had; they affect nothing.
+- Six `review_002*.sh`, seven `scope_probe*.sh`, four `review_003*` and now
+  `scope_005_probe.sh` read-only probe scripts sit in this section directory
+  from earlier cycles. Removing them needs an approval the roles have not had;
+  they affect nothing.
 - The developer's sandbox denies writes under
   `/Users/salah/code/personal/pm-flow/.agentic/pm_flow/pm-agent/quality`
   (`PermissionError: [Errno 1] Operation not permitted`). It hit cycle 003 and
@@ -260,5 +286,7 @@
 
 ## Next eligible task
 
-- None — the workplan is complete. The section's remaining obligation is the
-  driver's merge of cycle 004.
+- None — the workplan is complete, cycle 004 is merged (`1fb989b`), and A1–A6
+  were re-observed on `main` at scope 005. The section is done; anything
+  further (a `pm-flow quality` arm, a `tick` hook, model-graded clarity) is
+  explicitly out of scope or a non-goal in `brief.md`.
