@@ -468,7 +468,7 @@ spent_usd() {
 }
 
 cmd_cost() {
-  python3 "$SCRIPT_DIR/cost.py" report "$PROJECT_DIR" "$(cost_ledger_file)"
+  python3 "$SCRIPT_DIR/cost.py" report "$PROJECT_DIR"
 }
 
 # What the roles actually reached for.

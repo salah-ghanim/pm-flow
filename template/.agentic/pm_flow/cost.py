@@ -309,12 +309,6 @@ def main(argv):
         else:
             print(f"{sum(per_section.values()):.4f}")
         return 0
-    if len(argv) == 4 and argv[1] == "report" and argv[3].endswith(".tsv"):
-        per_section = totals(argv[2], argv[3])
-        for section in sorted(per_section):
-            print(f"{section}\t{per_section[section]:.4f}")
-        print(f"TOTAL\t{sum(per_section.values()):.4f}")
-        return 0
     if len(argv) in (3, 4) and argv[1] == "total":
         import_legacy(argv[2])
         per_section = stored_totals(argv[2])
@@ -335,7 +329,6 @@ def main(argv):
     print("       cost.py total <project_dir> [section]", file=sys.stderr)
     print("       cost.py total <project_dir> <ledger> [section]", file=sys.stderr)
     print("       cost.py report <project_dir>", file=sys.stderr)
-    print("       cost.py report <project_dir> <ledger>", file=sys.stderr)
     print("       cost.py import <project_dir>", file=sys.stderr)
     return 2
 

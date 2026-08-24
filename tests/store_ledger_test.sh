@@ -43,7 +43,16 @@ assert_eq() {
     fail "$label: expected '$expected', got '$actual'"
 }
 
-PROJECT_DIR="$TEST_ROOT/legacy-project"
+COMMAND_WORK="$TEST_ROOT/command-work"
+mkdir -p "$COMMAND_WORK/src" "$COMMAND_WORK/.agentic"
+git init -q "$COMMAND_WORK"
+git -C "$COMMAND_WORK" config user.email t@t
+git -C "$COMMAND_WORK" config user.name t
+cp -R "$REPO_ROOT/template/.agentic/pm_flow" "$COMMAND_WORK/.agentic/pm_flow"
+FLOW="$COMMAND_WORK/.agentic/pm_flow"
+rm -rf -- "$FLOW/project"
+
+PROJECT_DIR="$FLOW/legacy-project"
 LEDGER="$PROJECT_DIR/runs/cost_ledger.tsv"
 DB="$PROJECT_DIR/runs/pm_flow.db"
 ALPHA_ONE="$PROJECT_DIR/sections/alpha/cycles/001/first.response.json"
@@ -54,9 +63,17 @@ BETA_TWO="$PROJECT_DIR/sections/beta/cycles/001/second.response.json"
 BETA_EXTRA="$PROJECT_DIR/sections/beta/cycles/002/result.response.json"
 
 mkdir -p "$PROJECT_DIR/runs" \
+  "$PROJECT_DIR/project_state" \
   "$PROJECT_DIR/sections/alpha/cycles/001" \
   "$PROJECT_DIR/sections/beta/cycles/001" \
   "$PROJECT_DIR/sections/beta/cycles/002"
+
+printf 'legacy-project\n' > "$FLOW/.project-key"
+printf '%s\n' '{"domain":"generic"}' > "$PROJECT_DIR/project.json"
+printf '# Legacy Project Task Contract\n\nrules\n' > "$PROJECT_DIR/task_contract.md"
+printf '# Plan\n\nexercise the store ledger\n' > \
+  "$PROJECT_DIR/project_state/plan.md"
+printf 'print("hi")\n' > "$COMMAND_WORK/src/main.py"
 
 printf '%s\n' '{"total_cost_usd": 7.777}' > "$ALPHA_BLANK"
 printf '%s\n' '{"total_cost_usd": 99.0}' > "$BETA_ONE"
@@ -158,6 +175,33 @@ printf '%s\n' "$report" | grep -F \
   fail "report omits live Codex attempt fields"
 assert_eq "$(python3 "$COST" import "$PROJECT_DIR")" "imported=0" \
   "live attempt envelope is not re-imported"
+
+flow_report="$(cd "$COMMAND_WORK" && zsh -f "$FLOW/pm_flow.sh" cost)"
+assert_eq "$flow_report" "$report" \
+  "pm_flow cost matches cost.py report"
+printf '%s\n' "$flow_report" | grep -Fx $'TOTAL\t12.1650' >/dev/null || \
+  fail "pm_flow cost has the wrong total"
+printf '%s\n' "$flow_report" | grep -F $'ATTEMPT\t' | grep -F \
+  $'\talpha\tdeveloper\tcodex-one\tcodex\t0.0400\t13937\t5' >/dev/null || \
+  fail "pm_flow cost omits live Codex attempt fields"
+
+legacy_report_status=0
+python3 "$COST" report "$PROJECT_DIR" "$LEDGER" >/dev/null 2>&1 || \
+  legacy_report_status=$?
+assert_eq "$legacy_report_status" "2" "legacy report arity exit status"
+
+cmd_cost_body="$(sed -n '/^cmd_cost()/,/^}/p' \
+  "$REPO_ROOT/template/.agentic/pm_flow/driver.zsh")"
+[[ "$cmd_cost_body" == *'report "$PROJECT_DIR"'* ]] || \
+  fail "cmd_cost does not report from PROJECT_DIR"
+[[ "$cmd_cost_body" != *cost_ledger_file* ]] || \
+  fail "cmd_cost still reads the legacy ledger"
+
+rm -- "$LEDGER"
+flow_report_without_ledger="$(cd "$COMMAND_WORK" && \
+  zsh -f "$FLOW/pm_flow.sh" cost)"
+assert_eq "$flow_report_without_ledger" "$flow_report" \
+  "pm_flow cost changes after deleting imported TSV"
 
 WATCH_FLOW="$TEST_ROOT/watch-flow"
 mkdir -p "$WATCH_FLOW"
