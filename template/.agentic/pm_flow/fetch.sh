@@ -1,4 +1,8 @@
 #!/bin/zsh -f
+
+# zsh renices background jobs by default; inside a role's sandbox nice() is
+# prohibited and the renice kills the very jobs the timeout logic depends on.
+setopt NO_BG_NICE 2>/dev/null || true
 # Read one web page, or run one web search, in a context that knows nothing.
 #
 # Roles never hold web tools themselves. A page is hostile input: it can carry
