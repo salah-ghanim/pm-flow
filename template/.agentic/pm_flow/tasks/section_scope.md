@@ -20,7 +20,10 @@ If `workplan.md` is missing, still carries the scaffold marker, or no longer
 matches the evidence: write it now. Every brief acceptance ID maps to ordered
 `T<number>` tasks, each with a concrete outcome, exact writable paths, inputs
 to reuse, acceptance IDs, and a validation command with its expected
-observation; the last task proves the user-visible scenario end to end. Delete
+observation; the last task proves the user-visible scenario end to end.
+Cut every task a full cycle wide: a change too small to carry its own
+scope-develop-review pass - a test extension, a doc line - belongs inside the
+task that makes it necessary, never after it as a task of its own. Delete
 the scaffold marker line and any superseded prose. If the previous cycle
 changed what is true, update `state.md` the same way.
 
