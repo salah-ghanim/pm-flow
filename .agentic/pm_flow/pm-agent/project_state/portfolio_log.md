@@ -4,6 +4,36 @@ Newest first. Read this before anything else: one review cannot see a
 section that has been nearly done for four of them, or a shortest path that
 has not moved in three. Older entries are compacted to their summary line.
 
+## Review 003 - 2026-08-24T00:37:49Z - $181.0513 spent
+
+- Summary: 2 of 7 criteria met; verdicts CONTINUE 8; shortest path: `store-ledger` A1/A2/A4 — `cost.py totals` from `attempts`, the five driver functions off the TSV — then `topology-compare` T1. `trace-commands` T1 and `otel...
+
+### Completion criteria
+
+- Finished run opens in Phoenix/Langfuse/Jaeger with every role, prompt, retry, stall, tokens, dollars — `git grep -inE 'otlp_endpoint|"trace"|compare|\bacp\b|\bmcp\b' -- src/pm_flow/cli.py` empty; `otlp_endpoint` absent from `config.json`; `trace_export.py` reached only from `driver.zsh:736` — **NOT MET**
+- `cost_ledger.tsv` gone, host absorbs no per-dispatch writes — `git grep -n cost_ledger -- template` hits `driver.zsh:441-471`, `cost.py:186,193,221`, `watch.py:50`; `find` shows `runs/cost_ledger.tsv` beside `pm_flow.db` — **NOT MET**
+- Sections run in isolated worktrees — `git worktree list` shows `store-ledger` under `../.pm-flow-worktrees/` — **MET**
+- Persona installed from elsewhere, dropped on a seat, measured against the one it replaced — `git grep -inE 'compare|measure' -- template/pm_flow/catalog.py` empty — **NOT MET**
+- Two topologies compared in one command — `git ls-files src/pm_flow` = `__init__.py cli.py paths.py`; `cli.py` grep above empty — **NOT MET**
+- Drivable over MCP, binds any ACP agent — `git grep -inE 'otlp_endpoint|\bacp\b|\bmcp\b'` on `config.json`, `agent_exec.sh`, `pm_flow.sh` empty — **NOT MET**
+- Test suite runs to completion — `zsh tests/pm_flow_test.sh` exit 0 (10 PASS); `zsh tests/prompt_quality_test.sh` exit 0; `zsh template/.agentic/pm_flow/tests/run.zsh` exit 0 (`all suites passed`); `zsh tests/store_ledger_test.sh` exit 0; `git status --short` unchanged after all four — **MET**
+
+### Verdicts
+
+- agent-bindings: CONTINUE
+- artifact-quality: CONTINUE
+- otel-semconv: CONTINUE
+- persona-cards: CONTINUE
+- run-detach: CONTINUE
+- store-ledger: CONTINUE
+- topology-compare: CONTINUE
+- trace-commands: CONTINUE
+
+### Shortest path
+
+`store-ledger` A1/A2/A4 — `cost.py totals` from `attempts`, the five driver functions off the TSV — then `topology-compare` T1. `trace-commands` T1 and `otel-semconv` T1 in parallel now; neither has a reason left to wait, and the driver's least-recent-dispatch order puts both ahead of `store-ledger` at the next tick. Work in flight (`store-ledger` cycle 002, scope done) is on the path. The `store-ledger` handoff still says "Nothing delivered yet" despite `558837f` on `main`; its next scope call must sync it.
+Changes made: `plan.md` current position rewritten (harness-hazard paragraph removed as fixed by `ec8130f`, `codex-usage` dropped from the order, `run-detach` added with its gate); review 003 appended to `portfolio_log.md`; committed as `8e42ca2 chore(plan): portfolio review 003` and pushed to `origin/main`. No scope reduced, no graph edge or `priority.txt` changed.
+
 ## Review 002 - 2026-08-23T18:26:45Z - $144.0741 spent
 
 - Summary: 1 of 7 criteria met; verdicts CONTINUE 8; shortest path: `store-ledger` T1 on a project-wide run, with `trace-commands` T1 and `otel-semconv` T1 in parallel; `topology-compare` and `agent-bindings` the moment `stor...

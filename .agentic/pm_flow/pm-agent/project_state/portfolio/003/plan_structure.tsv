@@ -1,0 +1,4 @@
+UNSTARTED_DEPENDENCY	CLEAR	— `topology-compare` and `agent-bindings` wait on `store-ledger`, now at 2 cycles; `persona-cards` waits on `persona-packs`, done.
+UNREACHABLE_SECTION	CLEAR	— `run-detach` owns the four paths it writes; its `pm_flow.sh` arm (A7) is gated on a release this officer makes after `trace-commands` is done.
+MUST_HAVE_INFLATION	CLEAR	— the five live must-haves map one-to-one to the trace, ledger, compare and MCP/ACP bullets.
+LINEAR_CHAIN_RISK	CLEAR	— longest chain is two deep.
