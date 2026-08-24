@@ -362,6 +362,11 @@ run_rank() {
     PYTHONPATH="$REPO_ROOT/src" python3 -m pm_flow.quality rank --project "$PROJECT" "$@"
 }
 
+run_show() {
+  PM_FLOW_REPO_ROOT="$QA_ROOT" \
+    PYTHONPATH="$REPO_ROOT/src" python3 -m pm_flow.quality show --project "$PROJECT" "$@"
+}
+
 run_rank > "$QA_ROOT/initial.out" || fail "rank command failed"
 line_count="$(wc -l < "$QA_ROOT/initial.out" | tr -d ' ')"
 [[ "$line_count" == 17 ]] || fail "rank printed $line_count lines instead of one for each of 17 files"
@@ -454,6 +459,42 @@ cmp -s "$QUALITY_DIR/latest.json" "$snapshots[-1]" || \
 cmp -s "$QA_ROOT/first-latest.json" "$QUALITY_DIR/latest.json" && \
   fail "second rank did not replace latest.json"
 printf 'PASS: rank writes matching latest records and preserves timestamped snapshots\n'
+
+find "$PROJECT_DIR/quality" -type f | sort > "$QA_ROOT/show-files-before"
+run_show > "$QA_ROOT/show.out" || fail "show command failed"
+cmp -s "$QA_ROOT/show.out" "$QUALITY_DIR/latest.md" || \
+  fail "show stdout differs from latest.md"
+cmp -s "$QA_ROOT/show.out" "$QA_ROOT/second.out" || \
+  fail "show stdout differs from rank stdout"
+find "$PROJECT_DIR/quality" -type f | sort > "$QA_ROOT/show-files-after"
+cmp -s "$QA_ROOT/show-files-before" "$QA_ROOT/show-files-after" || \
+  fail "show created or removed a quality record file"
+
+if run_show --out "$QA_ROOT/empty-record" \
+    > "$QA_ROOT/empty-record.out" 2> "$QA_ROOT/empty-record.err"; then
+  fail "show exited successfully without a quality record"
+fi
+grep -Fq "${QA_ROOT:A}/empty-record" "$QA_ROOT/empty-record.err" || \
+  fail "missing-record error did not name the resolved directory"
+grep -q "python -m pm_flow.quality rank" "$QA_ROOT/empty-record.err" || \
+  fail "missing-record error did not name the command that creates it"
+grep -q 'refusing quality record' "$QA_ROOT/empty-record.err" && \
+  fail "missing-record error was confused with destination refusal"
+[[ ! -s "$QA_ROOT/empty-record.out" ]] || \
+  fail "show printed missing-record output on stdout"
+[[ ! -e "$QA_ROOT/empty-record" ]] || \
+  fail "show created the missing record directory"
+
+if run_show --out "$SECTIONS_DIR/alpha/quality" \
+    > "$QA_ROOT/show-sections-refusal.out" 2> "$QA_ROOT/show-sections-refusal.err"; then
+  fail "show accepted an output directory inside sections"
+fi
+grep -q 'sections' "$QA_ROOT/show-sections-refusal.err" || \
+  fail "show sections refusal did not explain the rejected path"
+show_section_records=("${(@f)$(find "$SECTIONS_DIR" -name 'quality*' -print)}")
+[[ -z "${show_section_records[1]:-}" ]] || \
+  fail "show sections refusal created a quality path: ${show_section_records[1]}"
+printf 'PASS: show reprints the record byte-for-byte, stays read-only, and distinguishes absence from refusal\n'
 
 if run_rank --out "$SECTIONS_DIR/alpha/quality" \
     > "$QA_ROOT/sections-refusal.out" 2> "$QA_ROOT/sections-refusal.err"; then
