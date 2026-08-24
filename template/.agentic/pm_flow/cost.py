@@ -1,4 +1,4 @@
-"""What a dispatch cost, read back out of its response envelope.
+"""Import legacy dispatch costs and read current costs from the store.
 
 Two things make this less trivial than reading one key.
 
@@ -9,16 +9,15 @@ string with no top-level key. Those are exactly the dispatches worth counting -
 a call that died after the model had already answered is paid for and bought
 nothing - so the nested form is parsed too, with a regex as the last resort.
 
-The second problem is history. The ledger only knows about dispatches made since
-it existed, and a budget that starts from zero on a project already deep into its
-spend will authorise the whole budget again. So the total is the ledger plus
-every response envelope on disk that the ledger has never seen.
+Legacy totals remain available while the driver still uses their explicit TSV
+arity. New total and report calls silently absorb that history once, then answer
+only from attempts in the project store.
 """
 
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -206,8 +205,62 @@ def import_legacy(project_dir):
     finally:
         connection.close()
 
-    print(f"imported={imported}")
-    return 0
+    return imported
+
+
+def stored_totals(project_dir):
+    """Per-section totals from every attempt in this project's store."""
+    connection = store.connect(store.default_path(project_dir))
+    try:
+        return {
+            row["section"]: float(row["cost"])
+            for row in connection.execute(
+                "SELECT COALESCE(t.key, '(project)') AS section,"
+                " SUM(COALESCE(a.cost_usd, 0)) AS cost"
+                " FROM attempts a LEFT JOIN tasks t ON t.id = a.task_id"
+                " GROUP BY COALESCE(t.key, '(project)')"
+            )
+        }
+    finally:
+        connection.close()
+
+
+def stored_attempts(project_dir):
+    """Attempts in report order, with sections resolved through task_id."""
+    connection = store.connect(store.default_path(project_dir))
+    try:
+        return list(connection.execute(
+            "SELECT a.started_at, COALESCE(t.key, '(project)') AS section,"
+            " a.role_key, a.label, a.cli, a.cost_usd, a.input_tokens,"
+            " a.output_tokens FROM attempts a"
+            " LEFT JOIN tasks t ON t.id = a.task_id"
+            " ORDER BY a.started_at, a.id"
+        ))
+    finally:
+        connection.close()
+
+
+def report_store(project_dir):
+    per_section = stored_totals(project_dir)
+    for section in sorted(per_section):
+        print(f"{section}\t{per_section[section]:.4f}")
+    print(f"TOTAL\t{sum(per_section.values()):.4f}")
+
+    def present(value):
+        return "-" if value is None else str(value)
+
+    for row in stored_attempts(project_dir):
+        stamp = "-"
+        if row["started_at"] is not None:
+            stamp = datetime.fromtimestamp(
+                row["started_at"], timezone.utc
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        amount = "-" if row["cost_usd"] is None else f"{row['cost_usd']:.4f}"
+        print("\t".join((
+            "ATTEMPT", stamp, row["section"], row["role_key"],
+            present(row["label"]), present(row["cli"]), amount,
+            present(row["input_tokens"]), present(row["output_tokens"]),
+        )))
 
 
 def totals(project_dir, ledger_path):
@@ -247,7 +300,8 @@ def main(argv):
         amount = cost_of(argv[2])
         print("" if amount is None else f"{amount:.6f}")
         return 0
-    if len(argv) >= 4 and argv[1] == "total":
+    if (len(argv) in (4, 5) and argv[1] == "total"
+            and argv[3].endswith(".tsv")):
         per_section = totals(argv[2], argv[3])
         wanted = argv[4] if len(argv) > 4 else ""
         if wanted:
@@ -255,16 +309,32 @@ def main(argv):
         else:
             print(f"{sum(per_section.values()):.4f}")
         return 0
-    if len(argv) >= 4 and argv[1] == "report":
+    if len(argv) == 4 and argv[1] == "report" and argv[3].endswith(".tsv"):
         per_section = totals(argv[2], argv[3])
         for section in sorted(per_section):
             print(f"{section}\t{per_section[section]:.4f}")
         print(f"TOTAL\t{sum(per_section.values()):.4f}")
         return 0
+    if len(argv) in (3, 4) and argv[1] == "total":
+        import_legacy(argv[2])
+        per_section = stored_totals(argv[2])
+        wanted = argv[3] if len(argv) == 4 else ""
+        if wanted:
+            print(f"{per_section.get(wanted, 0.0):.4f}")
+        else:
+            print(f"{sum(per_section.values()):.4f}")
+        return 0
+    if len(argv) == 3 and argv[1] == "report":
+        import_legacy(argv[2])
+        report_store(argv[2])
+        return 0
     if len(argv) == 3 and argv[1] == "import":
-        return import_legacy(argv[2])
+        print(f"imported={import_legacy(argv[2])}")
+        return 0
     print("usage: cost.py one <response.json>", file=sys.stderr)
+    print("       cost.py total <project_dir> [section]", file=sys.stderr)
     print("       cost.py total <project_dir> <ledger> [section]", file=sys.stderr)
+    print("       cost.py report <project_dir>", file=sys.stderr)
     print("       cost.py report <project_dir> <ledger>", file=sys.stderr)
     print("       cost.py import <project_dir>", file=sys.stderr)
     return 2
