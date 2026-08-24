@@ -130,11 +130,30 @@
 
 ## Task T4 — End to end through the installed command
 
-- Status: pending.
+- Status: done (cycle 005, accepted; the cycle-004 delivery plus the
+  section-selection control).
 - Outcome: a packaged install binds an ACP developer, is driven by the MCP
   client to a terminal section, and `cost` distinguishes the two transports.
-- Paths: `tests/agent_bindings_test.sh`.
-- Reuse: the harness in `tests/packaged_layout_test.sh`.
+- Paths: `tests/agent_bindings_test.sh`, `src/pm_flow/acp.py`,
+  `template/.agentic/pm_flow/agent_exec.sh`.
+- Reuse: the harness in `tests/packaged_layout_test.sh` — the offline wheel
+  build (`:104-200`), the two venvs, `PM_FLOW="$VENV/bin/pm-flow"` (`:226`),
+  the documented `install.sh` invocation (`:852`), `flow-bin/claude` from
+  `tests/fixtures/stub_success.zsh` (`:749`) — and this suite's own
+  disposable-project harness at `:256-343` for the config and brief shapes.
+- Why a packaged run is not ceremony (cycle-004 probes). `[tool.hatch.build.
+  targets.wheel]` packages `src/pm_flow`, and `force-include` maps
+  `template/.agentic/pm_flow` → `pm_flow/engine`. So in a real install
+  `agent_exec.sh` sits at `<site-packages>/pm_flow/engine/agent_exec.sh` and
+  `acp.py` at `<site-packages>/pm_flow/acp.py` — which is the arm's **first**
+  branch, `"$SCRIPT_DIR/../acp.py"` (`agent_exec.sh:670`). Every test to date
+  runs from the checkout and therefore takes the **second** branch,
+  `"$SCRIPT_DIR/../../../src/pm_flow/acp.py"` (`:672`). Symmetrically,
+  `mcp_server.py` ships as `pm_flow.mcp_server` and `pm-flow` is a console
+  script on the venv's `bin`, so `shutil.which("pm-flow")` succeeds and the
+  server spawns the console script — where the suite so far has only exercised
+  the `[sys.executable, "-m", "pm_flow.cli"]` fallback. T4 is the first run of
+  either shipped path.
 - Carried from T3's cycle-003 review, in `tests/agent_bindings_test.sh`:
   `tick`'s `section` argument is built correctly — `_command_for("tick",
   {"project":"p","section":"s"})` yields `--project p tick --section s`, and
@@ -146,6 +165,35 @@
   section over MCP and assert that section advanced and the other did not, or
   the brief's "a tool silently accepts an argument it does not pass on" stays
   untested for the one argument that is not `project`.
+  Still open after cycle 004, and the reason is fixture ordering, not the
+  assertion's shape. Cycle 004 wrote both halves but ran the MCP drive after
+  the ACP cycle had already taken the control section (`widget`) to `done`,
+  leaving `selected-widget` the only actionable section; mutating
+  `_command_for` to drop `--section` entirely left the suite green. Two things
+  have to be true at the moment each targeted tick is issued: the control is
+  **actionable**, and the control is what an **untargeted** tick would take.
+  Making the control merely actionable is not enough — the scheduler's key is
+  `(priority_rank, -dependents, last_dispatch, name)` (`driver.zsh:2666`), and
+  on `name` alone `selected-widget` sorts *before* `widget`, so an untargeted
+  tick would still take the target and the mutant would still pass.
+  `last_dispatch` outranks `name`: a section never dispatched reads `0`
+  (`:2648`) and heads the queue. `cmd_next` (`:2857`) prints exactly that queue
+  without dispatching, and `next` is already one of the five tools — so the
+  client can assert the ordering through the MCP surface rather than infer it.
+  Note also that `SECTION_OVERRIDE` makes `cmd_tick` skip the project branch
+  entirely (`:2711-2722`), so no portfolio review can preempt a *targeted*
+  tick; an untargeted one is preempted by it, which only strengthens the
+  mutant's failure. Prove the fix the way the defect was found: with
+  `--section` dropped from `_command_for`, `zsh tests/agent_bindings_test.sh`
+  must fail, and the failing assertion must be reported.
+- Also from cycle 004's review, and entangled with the above: the fixture
+  injects a synthetic failing `claude` dispatch at `selected-widget` to get a
+  nested-`usage` row for the A5 claude-side assertion, then deletes
+  `quarantine.txt` out of the section to make it drivable again. A test that
+  repairs engine state by hand is asserting against a state the engine never
+  produces. Route the synthetic failure somewhere that needs no repair — a
+  section that may stay quarantined, since `actionable_sections` (`:2616`) and
+  `cmd_next` both drop a quarantined section from the queue.
 - Carried from T2's cycle-002 review, both in `src/pm_flow/acp.py`:
   1. `_record_access` (`:232`) does not guard its write. An `OSError` on the
      access log escapes into `main`'s `except` (`:424`), which names every
@@ -159,13 +207,53 @@
      directory: …"}`, exit 1, and the agent never reaches `session/prompt`.
      `access_hook.sh:132` swallows the same class of fault (`except OSError:
      pass`), so the two writers disagree about how loud a log fault is.
+     Confirmed in cycle 004: `_record_access` (`acp.py:232-253`) writes with no
+     `try`, and `main`'s handler (`:424`) catches bare `OSError` alongside
+     `ValueError`, so the fault cannot be told from a bad `--params-json`.
+     Decision for T4: `acp.py` raises `ACPFailure("acp_access_log_unwritable",
+     …)` and the arm maps it to `permanent`. A log path that is a directory, or
+     a root the process cannot write, does not become writable inside one
+     retry backoff, and the `unknown` arm's free retry would spend a dispatch
+     to re-learn it. Fail closed, loud, and once.
   2. The arm discards `usage`: the outcome line is replaced wholesale by
-     `text` before `write_response`, so an ACP attempt reaches the store with
-     no token counts. A5 only ever needed `cli=acp` and is met, but T4's
-     packaged run is where token accounting for the transport should land.
+     `text` before `write_response` (`agent_exec.sh:914-931`), so an ACP
+     attempt reaches the store with `input_tokens`/`output_tokens` NULL. A5
+     only ever needed `cli=acp` and is met, but T4's packaged run is where
+     token accounting for the transport should land.
+     The route needs nothing outside the owned paths, confirmed in cycle 004:
+     `driver.zsh:791-793` always passes `--response "$response_json"` to
+     `telemetry.py attempt-end`, and `usage_from_response` (`telemetry.py:139`)
+     depth-first searches the envelope for a `usage` key and reads
+     `input_tokens`/`output_tokens` off it. `write_response`
+     (`agent_exec.sh:751`) is owned, so carrying `acp.py`'s counts into the
+     envelope as a `usage` object is the whole of it — no `telemetry.py` edit.
+     Two constraints on doing it:
+     - **The envelope must not carry an empty `usage`.** `_find_key`
+       (`telemetry.py:103`) returns the first `usage` it meets, and
+       `usage_from_response` then `setdefault`s `input_tokens`/`output_tokens`
+       to `None` from it. For a claude dispatch the real counts live in the
+       second candidate — the JSON nested in `result` — and `setdefault` will
+       not overwrite a key already set to `None`. So a top-level `"usage": {}`
+       written unconditionally silently zeroes claude's token accounting while
+       every suite stays green. Write the key only when there is something in
+       it.
+     - **The keys must be the envelope's, not ACP's.** The test agent today
+       reports `{"used": 7, "size": 100}` (`agent_bindings_test.sh:149`) —
+       context occupancy, not tokens. `acp.py` should normalise whatever the
+       agent reports into `input_tokens`/`output_tokens` and leave `Result.
+       usage` empty when the agent reported neither, so the arm's "only when
+       non-empty" rule has something to test.
+     - Where it lands: `cost.py:227-236` selects `a.input_tokens,
+       a.output_tokens` as the last two columns of the `ATTEMPT` row, so the
+       assertion is on fields 8 and 9 of the same row A5 already matches on.
 - Acceptance IDs: A1–A6.
-- Validation: `zsh tests/agent_bindings_test.sh`, `zsh tests/pm_flow_test.sh`,
-  `zsh tests/packaged_layout_test.sh` exit 0.
+- Validation: `zsh tests/agent_bindings_test.sh` — a wheel-installed
+  `$VENV/bin/pm-flow` runs a cycle with an ACP developer to `GO`, an MCP
+  client on the console script ticks a *named* section and only that section
+  advances, and the packaged `cost` row for the ACP attempt carries `cli=acp`
+  with non-empty token columns beside a `cli=claude` row. Plus
+  `zsh tests/pm_flow_test.sh`, `zsh template/.agentic/pm_flow/tests/run.zsh`
+  and `zsh tests/packaged_layout_test.sh` exit 0.
 - Depends on: T2, T3.
 
 ## Integration and end-to-end validation

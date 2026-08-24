@@ -2,12 +2,79 @@
 
 ## Current task
 
-- T1, T2 and T3 are accepted. T4 — end to end through the installed command —
-  is the only unfinished task and is next. It carries three changes: two from
-  T2's review (access-log fault naming, ACP token accounting) and one from
-  T3's (no test selects a section through the `tick` tool) — see workplan T4.
+- None. T1, T2, T3 and T4 are all accepted; T4 landed in cycle 005 and nothing
+  follows it. Every brief acceptance ID A1–A6 has evidence below. The section's
+  remaining work is its handoff.
 
 ## Completed tasks and evidence
+
+- **T4 — end to end through the installed command. Acceptance A1–A6.**
+  Cycle 005, accepted. It carries cycle 004's delivery forward plus the
+  section-selection control; `git status --porcelain` in the developer worktree
+  lists exactly the three owned paths `src/pm_flow/acp.py`,
+  `template/.agentic/pm_flow/agent_exec.sh`, `tests/agent_bindings_test.sh`, and
+  the status is unchanged after four suite runs — no venv, wheel or temp
+  repository left behind, and no `pm-flow-agent-bindings.*` directory survives
+  in `$TMPDIR`.
+  - **A4, the half cycle 004 could not prove.** Command:
+    `zsh tests/agent_bindings_test.sh` → exit 0 with
+    `PASS: MCP targets one named section and leaves the other unchanged`.
+    The fixture now seeds the target `selected-widget` with a real dispatch and
+    then creates `undispatched-widget` through `"$PM_FLOW" init-section`,
+    leaving it `planned` and never dispatched, so it heads the queue on
+    `last_dispatch=0` rather than on its name — which sorts *after* the target.
+    The client asserts the ordering through the `next` tool
+    (`section_queue[0] == unchanged_key`) **before every** targeted tick, and
+    compares whole `list_sections` rows for both sections **after every** tick,
+    inside the same loop (`tests/agent_bindings_test.sh:860-885`). The control
+    is never made unactionable; if it left the queue the `next` assertion would
+    fail first.
+  - **A4, the discriminating negative check.** On a copy of the worktree at
+    `$TMPDIR/pm-flow-review-005-mutant` with `_command_for` mutated to
+    `if section is not None and False:` — a server that accepts `section` and
+    never passes it on — `zsh <mutant>/tests/agent_bindings_test.sh` exits **1**
+    at `assert selected_after != selected_before`:
+    `target row did not change after targeted tick`, with
+    `selected-widget … | active | Cycle 0; last action scope. | … | 2026-08-24T11:15:21Z |`
+    identical before and after, while the control moved
+    `undispatched-widget … | planned | Section created; …` →
+    `| active | Cycle 0; last action scope. |` with a later `updated` stamp.
+    So the untargeted tick really did take the control: the assertion now
+    discriminates, and the fixture ordering is observed rather than assumed.
+    The mutant copy was removed after the run; the worktree was never written
+    to. Harnesses kept at `cycles/005/review_mutation.zsh` and
+    `cycles/005/review_cleanup.zsh`.
+  - **No hand-repair of engine state survives.** The synthetic failing `claude`
+    dispatch is routed at its own `usage-widget` section, which may stay
+    quarantined; `grep` for `rm ` in the suite returns only `$TEST_ROOT` marker
+    files and the trap's `rm -rf -- "$TEST_ROOT"`. The former
+    `rm -f -- "$SELECTED_SECTION/quarantine.txt"` is gone.
+  - **A1.** Same command: `PASS: ACP developer completes a public driver cycle
+    to GO`, on the wheel-installed `$VENV/bin/pm-flow` — the run asserts
+    `develop 001 -> result`, `review 001 -> GO`, `complete -> section done`,
+    that `cycles/001/result.md` holds `Built through ACP.` and does **not**
+    contain `"failure_reason"`. `PM_FLOW_ENGINE_ROOT` appears nowhere in the
+    suite; the only two `PM_FLOW_REPO_ROOT` uses (`:597`, `:639`) point at the
+    disposable fixture, and `PYTHONPATH` is unset (`:306`) before the wheel is
+    built and never re-exported for a packaged scenario.
+  - **A3.** `PASS: enforced ACP access is recorded before work`,
+    `PASS: prompt-level ACP access is recorded before work and still
+    dispatches`, `PASS: an ACP access-log fault is permanent and is not
+    retried` — `--access-log` at a directory yields
+    `acp_access_log_unwritable`, `attempts=1`, the agent runs once and
+    `arm-log-fault.prompt` never exists, so `session/prompt` was never reached.
+  - **A5.** `PASS: cost distinguishes ACP and claude transports` and
+    `PASS: cost preserves ACP and nested claude token counts` — the `awk`
+    assertions match an `ATTEMPT` row with field 6 `acp` and fields 8/9 `17`/`5`
+    beside one with field 6 `claude` and fields 8/9 `11`/`3`. Both still hold
+    with the synthetic claude failure re-routed to `usage-widget`.
+  - **A2.** `zsh tests/pm_flow_test.sh` → exit 0, 10 `PASS`.
+    `zsh template/.agentic/pm_flow/tests/run.zsh` → exit 0, `all suites
+    passed`, totals 35/41/32/58/74, fail=0.
+    `zsh tests/packaged_layout_test.sh` → exit 0, 13 `PASS`.
+  - **A6.** `zsh tests/agent_bindings_test.sh` → exit 0, 33 `PASS` lines:
+    every cycle-004 line still present, plus `MCP targets one named section and
+    leaves the other unchanged`.
 
 - **T3 — the MCP server. Acceptance A4, A6.**
   Cycle 003. Two paths changed, both writable: `src/pm_flow/mcp_server.py`
@@ -363,12 +430,125 @@
 - `tick`'s `section` argument reaches the engine correctly but no test
   demonstrates it selecting a section — see the carried change in workplan T4.
 
+## Verified baseline (cycle 004 probes)
+
+- **A packaged install exercises code paths no suite has run.** `pyproject.toml`
+  packages `src/pm_flow` and force-includes `template/.agentic/pm_flow` as
+  `pm_flow/engine`. So installed, `agent_exec.sh` is at
+  `<site-packages>/pm_flow/engine/agent_exec.sh` and `acp.py` one level up at
+  `<site-packages>/pm_flow/acp.py` — the arm's **first** branch (`:670`).
+  Every existing test runs from the checkout and takes the **second** branch
+  (`:672`). Likewise `shutil.which("pm-flow")` finds the venv console script,
+  where the suite has only ever seen the `-m pm_flow.cli` fallback. Neither
+  shipped path has been run once.
+- **Token accounting needs no file outside the owned paths.**
+  `driver.zsh:791-793` always passes `--response` to `telemetry.py
+  attempt-end`; `usage_from_response` (`telemetry.py:139`) depth-first searches
+  the envelope for `usage` and reads `input_tokens`/`output_tokens`;
+  `write_response` (`agent_exec.sh:751`) is owned. Carrying `acp.py`'s counts
+  into the envelope is the whole change.
+- **But an unconditional `usage` key is an A2 regression.** `_find_key`
+  (`telemetry.py:103`) returns the first `usage` it meets and
+  `usage_from_response` `setdefault`s off it. A claude envelope's real counts
+  are in the *second* candidate — the JSON nested in `result` — so a top-level
+  `"usage": {}` written for every arm sets both keys to `None` first and
+  `setdefault` never overwrites them. Claude's token accounting would go to
+  NULL with every suite still green. The key must be omitted when empty.
+- **`_record_access` still cannot name its own fault.** `acp.py:232-253` writes
+  with no `try`; `main:424` catches bare `OSError` beside `ValueError` and
+  labels both `acp_invalid_params`.
+- **The ACP `usage` the test agent reports is not tokens.**
+  `agent_bindings_test.sh:149` sends `{"used": 7, "size": 100}` — context
+  occupancy. `acp.py:360-372` copies it through verbatim, so there is nothing
+  token-shaped to carry yet.
+- **Where the assertion lands.** `cost.py:227-236` selects
+  `a.input_tokens, a.output_tokens` as the last two columns of the `ATTEMPT`
+  row, i.e. fields 8 and 9 of the row A5 already matches by `awk`.
+
+## Verified baseline (cycle 004 review probes)
+
+- **The packaged harness is real.** Reviewed against the developer worktree:
+  the suite unsets `VIRTUAL_ENV`/`PYTHONPATH`/`PYTHONHOME` and every `PIP_*`/
+  `UV_*` parameter, sets `ZDOTDIR` to an empty dir, builds the wheel offline
+  from `tests/packaging-build-wheelhouse` in a separate build venv, and runs
+  every packaged scenario through `$VENV/bin/pm-flow` or
+  `$INSTALLED_ENGINE/agent_exec.sh`. `PM_FLOW_ENGINE_ROOT` appears nowhere;
+  the only `PM_FLOW_REPO_ROOT` uses (`:571`, `:613`) point at the disposable
+  fixture, never at the checkout. `install.sh` writes no engine file and calls
+  `remove_copied_engine`, so the fixture holds project data only.
+- **The claude-usage guard bites.** Mutating `write_response` to write the
+  `usage` key on every arm (`if usage_path:` → `if True:`, and dropping the
+  non-empty test) makes the suite fail at `FAIL: cost lost nested claude token
+  counts` while the ACP row's fields 8/9 still read `17`/`5`. So the
+  rejection condition the workplan named is genuinely covered, not asserted
+  only on the ACP side.
+- **The retry-mapping guard bites.** Removing `acp_access_log_unwritable` from
+  the arm's `case` fails at `FAIL: access-log failure did not map to
+  permanent`.
+- **The section-selection assertion does not discriminate.** Mutating
+  `_command_for` to drop `--section` (`if section is not None and False:`) —
+  a server that accepts the argument and never passes it on — leaves the whole
+  suite green, `PASS: MCP targets one named section and leaves the other
+  unchanged` included. Cause: the MCP drive runs *after* the ACP cycle has
+  taken `widget` to `done`, so `selected-widget` is the only actionable
+  section and the control cannot move under any tick. Printing the client's
+  own `list_sections` read-back confirms it: both rows are `done`, and
+  `widget`'s was already `done` before the first targeted tick. The control
+  section has to be actionable at tick time — and ranked ahead of the target
+  by the scheduler — or the "other section standing still" half proves
+  nothing. All mutations were applied to `/tmp` copies of the worktree; the
+  worktree was never written to. Harness: `cycles/004/review_mutate.zsh`.
+
+## Verified baseline (cycle 005 scope probes)
+
+- **The scheduler's key is not "dependents then lexical".** `actionable_sections`
+  (`driver.zsh:2666`) sorts on `(priority_rank, -dependents, last_dispatch,
+  name)`. So `last_dispatch` decides before the name does, and a section that
+  has never been dispatched reads `0` (`:2648`) and heads the queue. This
+  matters for the open defect: on `name` alone `selected-widget` sorts *before*
+  `widget`, so simply leaving the cycle-004 control actionable would still let
+  an untargeted tick take the target, and the dropped-`--section` mutant would
+  still pass. A never-dispatched control is what discriminates.
+- **A targeted tick cannot be preempted.** `cmd_tick` (`:2711-2722`) reads
+  `SECTION_OVERRIDE` first and skips the `decompose`/`portfolio-review` branch
+  entirely when it is set; only an untargeted tick goes through
+  `project_next_action`. So a portfolio review can never take a tick the client
+  aimed at a section, and an armed review makes a `--section`-dropping server
+  fail sooner, not later.
+- **The queue is observable through a tool.** `cmd_next` (`:2857`) prints the
+  same order `cmd_tick` would take, project work included, and dispatches
+  nothing. `next` is already one of the five MCP tools, so "the control is what
+  an untargeted tick would take" can be asserted from inside the client.
+- **A quarantined section leaves the queue.** `actionable_sections` skips
+  `quarantined` (`:2616`) and `cmd_next` iterates the same list, so a section
+  parked by the synthetic claude failure perturbs neither the ordering nor the
+  drive — and needs no hand-deletion of `quarantine.txt`.
+- **`list_sections` rows carry `updated_at`.** `refresh_sections_index`
+  (`pm_flow.sh:653-655`) emits `name | priority | status | summary | handoff |
+  run_path | updated`, so whole-row equality is a real "did not move" test.
+- Cycle 004's delivery is intact and uncommitted in the section worktree at
+  `.pm-flow-worktrees/pm-flow/pm-agent/agent-bindings` (branch tip `67367b6`,
+  three modified files). `main` and the branch tip carry only through cycle 003.
+
 ## Blockers
 
-- None.
+- None. The cycle-004 defect — the vacuous MCP named-section assertion — is
+  closed in cycle 005 and re-verified by mutation (see T4's evidence above).
 
 ## Next eligible task
 
-- T4 — end to end through the installed command. Its dependencies T2 and T3
-  are both accepted, so it is eligible now, and it is the last task in the
-  plan. It picks up T2's two carried changes and T3's one.
+- None. Every workplan task is done and every brief acceptance ID A1–A6 has
+  evidence. The section's next action is its handoff.
+
+## Residual notes for whoever reads this next
+
+- `governance.portfolio_review_dispatches = 1`, set during T3, was not restored
+  in cycle 005. It is not needed for the property under test: `cmd_tick`
+  (`driver.zsh:2711-2722`) reads `SECTION_OVERRIDE` before consulting
+  `project_next_action`, so a portfolio review can never preempt a *targeted*
+  tick. The suite still drains project work through `drain_project_work` at the
+  default threshold. Optional hardening, not a gap.
+- The AST guard on the MCP client matches `subprocess.*`/`os.*` attribute calls
+  by name only; `from subprocess import run` or `__import__` would evade it. It
+  guards against drift, not a determined bypass — unchanged from cycle 003 and
+  still adequate for its purpose.
