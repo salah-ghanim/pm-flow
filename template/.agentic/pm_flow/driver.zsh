@@ -3438,7 +3438,10 @@ required = ["Objective", "Scope", "Priority", "Owned paths", "Dependencies",
 names = []
 for index in range(1, len(blocks), 2):
     raw_name = blocks[index].strip().strip("`")
-    body = blocks[index + 1]
+    # The officer's own `## Decision` is a verdict, not part of the brief
+    # that precedes it.
+    body = re.split(r"^##\s+Decision\s*$", blocks[index + 1], maxsplit=1,
+                    flags=re.MULTILINE | re.IGNORECASE)[0]
     key = re.sub(r"[^a-z0-9]+", "-", raw_name.lower()).strip("-")
     if not key:
         raise SystemExit(f"section {raw_name!r} has no usable name")

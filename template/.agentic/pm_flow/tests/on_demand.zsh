@@ -395,6 +395,7 @@ has    "D5 the decision is reported"              "$out" "init-section theta -> 
 if [[ -f "$FLOW/demo/sections/theta/brief.md" ]]; then ok "D5 the section exists"; else bad "D5 the section exists" "$out"; fi
 has    "D5 the brief is the officer's, in full shape" "$(cat "$FLOW/demo/sections/theta/brief.md")" "### Deliverables"
 has    "D5 acceptance carries its ID"             "$(cat "$FLOW/demo/sections/theta/brief.md")" "A1:"
+absent "D5 the officer's decision stays out of the brief" "$(cat "$FLOW/demo/sections/theta/brief.md")" "## Decision"
 eq     "D5 owned paths come from the brief"       "$(cat "$FLOW/demo/sections/theta/owned_paths.txt")" "export/**"
 has    "D5 the request is kept with the proposal" "$(cat "$FLOW"/demo/project_state/proposals/*-theta/request.md)" "exportable"
 has    "D5 the proposal prompt names the live owners" "$(cat "$FLOW"/demo/project_state/proposals/*-theta/prompt.md)" '`lib/` (alpha)'

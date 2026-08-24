@@ -45,3 +45,10 @@ Paths already owned by live sections, which this section may not claim:
 3. `## Decision` - exactly one line beginning `CUT` or `DECLINE`, then a short
    reason; `DECLINE` names what already covers the request or which plan
    bullet would have to change
+
+A `Dependencies` bullet is the exact key of a live section and nothing else on
+the line, or `None.`. It holds this section until that one is done, so name
+only a section without which this one's acceptance cannot pass; a later
+hand-over of one file is a constraint, not a dependency. `Priority` is one
+bullet beginning `must-have` or `nice-to-have`, a colon, and what the product
+loses without the section.
