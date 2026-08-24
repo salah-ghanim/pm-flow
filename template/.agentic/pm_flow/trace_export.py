@@ -437,10 +437,14 @@ def export_once(connection, args) -> int:
 
 def print_status(connection, config):
     if connection is None:
-        unexported = exported = 0
+        unexported = in_flight = exported = 0
     else:
         unexported = connection.execute(
-            "SELECT COUNT(*) FROM spans WHERE exported_at IS NULL"
+            "SELECT COUNT(*) FROM spans "
+            "WHERE exported_at IS NULL AND ended_at IS NOT NULL"
+        ).fetchone()[0]
+        in_flight = connection.execute(
+            "SELECT COUNT(*) FROM spans WHERE ended_at IS NULL"
         ).fetchone()[0]
         exported = connection.execute(
             "SELECT COUNT(*) FROM spans WHERE exported_at IS NOT NULL"
@@ -449,6 +453,7 @@ def print_status(connection, config):
     print(f"recording: {'enabled' if recording_enabled(config) else 'disabled'}")
     print(f"endpoint: {endpoint or 'none'}")
     print(f"unexported spans: {unexported}")
+    print(f"in-flight spans: {in_flight}")
     print(f"exported spans: {exported}")
 
 
