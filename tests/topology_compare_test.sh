@@ -544,6 +544,270 @@ data_arm_edges="$(sqlite3 \
 assert_eq "$data_origin_edges" "$data_arm_edges" \
   "imported topology edges equal the retained arm store"
 
+# Build the artifact offline, install it into a clean runtime venv, and drive
+# all three user-visible scenarios through that venv's pm-flow entry point.
+# This fixture's repository contains project data only; all engine files and
+# packaged assets must therefore come from the wheel.
+WHEELHOUSE="$REPO_ROOT/tests/packaging-build-wheelhouse"
+BUILD_REQUIREMENTS="$WHEELHOUSE/build-requirements.txt"
+WHEEL_BUILD_VENV="$TEST_ROOT/wheel-build-venv"
+WHEEL_RUNTIME_VENV="$TEST_ROOT/wheel-runtime-venv"
+WHEEL_DIST="$TEST_ROOT/wheel-dist"
+WHEEL_BUILD_LOG="$TEST_ROOT/wheel-build.log"
+mkdir -p "$WHEEL_DIST"
+[[ -f "$BUILD_REQUIREMENTS" ]] || \
+  fail "no locked build requirements at $BUILD_REQUIREMENTS"
+
+unset VIRTUAL_ENV PYTHONPATH PYTHONHOME PYTHONSTARTUP
+for name in ${(k)parameters[(I)PIP_*]} ${(k)parameters[(I)UV_*]}; do
+  unset "$name"
+done
+export PIP_CACHE_DIR="$TEST_ROOT/wheel-pip-cache"
+export XDG_CACHE_HOME="$TEST_ROOT/wheel-xdg-cache"
+export PIP_CONFIG_FILE="$TEST_ROOT/wheel-pip.conf"
+export PIP_DISABLE_PIP_VERSION_CHECK=1
+export PIP_NO_INPUT=1
+: > "$PIP_CONFIG_FILE"
+[[ -z "${PIP_INDEX_URL:-}${PIP_EXTRA_INDEX_URL:-}${UV_CACHE_DIR:-}" ]] || \
+  fail "an inherited PIP_/UV_ setting survived into the wheel build"
+export ZDOTDIR="$TEST_ROOT/wheel-zdotdir"
+mkdir -p "$ZDOTDIR"
+
+pip_offline() {
+  local venv="$1"
+  shift
+  "$venv/bin/python" -m pip install \
+    --no-index --find-links "$WHEELHOUSE" \
+    --disable-pip-version-check --no-input "$@"
+}
+
+install_pinned_venv() {
+  local venv="$1" wheel="$2"
+  python3 -m venv "$venv" >> "$WHEEL_BUILD_LOG" 2>&1 || {
+    /bin/cat "$WHEEL_BUILD_LOG" >&2
+    fail "creating the runtime venv at $venv failed"
+  }
+  "$venv/bin/python" -m pip install \
+    --quiet --no-index --no-deps \
+    --disable-pip-version-check --no-input \
+    "$wheel" >> "$WHEEL_BUILD_LOG" 2>&1 || {
+    /bin/cat "$WHEEL_BUILD_LOG" >&2
+    fail "installing $wheel into $venv failed"
+  }
+  [[ -x "$venv/bin/pm-flow" ]] || fail "$venv produced no pm-flow entry point"
+}
+
+python3 -m venv "$WHEEL_BUILD_VENV" > "$WHEEL_BUILD_LOG" 2>&1 || {
+  /bin/cat "$WHEEL_BUILD_LOG" >&2
+  fail "wheel build venv creation failed"
+}
+pip_offline "$WHEEL_BUILD_VENV" --quiet --require-hashes \
+  -r "$BUILD_REQUIREMENTS" >> "$WHEEL_BUILD_LOG" 2>&1 || {
+  /bin/cat "$WHEEL_BUILD_LOG" >&2
+  fail "the locked build requirements did not install offline from $WHEELHOUSE"
+}
+"$WHEEL_BUILD_VENV/bin/python" -c 'import hatchling.build' \
+  >> "$WHEEL_BUILD_LOG" 2>&1 || {
+  /bin/cat "$WHEEL_BUILD_LOG" >&2
+  fail "the wheel build venv cannot import the declared build backend"
+}
+"$WHEEL_BUILD_VENV/bin/python" -m pip wheel \
+  --no-index --no-build-isolation --no-deps \
+  --disable-pip-version-check --no-input \
+  --wheel-dir "$WHEEL_DIST" "$REPO_ROOT" >> "$WHEEL_BUILD_LOG" 2>&1 || {
+  /bin/cat "$WHEEL_BUILD_LOG" >&2
+  fail "the offline wheel build failed"
+}
+built_wheels="$(find "$WHEEL_DIST" -maxdepth 1 -type f -name 'pm_flow-*.whl' | sort)"
+wheel_count="$(printf '%s' "$built_wheels" | grep -c . || true)"
+assert_eq "$wheel_count" "1" "offline build produces exactly one pm-flow wheel"
+WHEEL="$built_wheels"
+install_pinned_venv "$WHEEL_RUNTIME_VENV" "$WHEEL"
+WHEEL_PM_FLOW="$WHEEL_RUNTIME_VENV/bin/pm-flow"
+! "$WHEEL_RUNTIME_VENV/bin/python" -c 'import hatchling' >/dev/null 2>&1 || \
+  fail "the wheel runtime venv contains the build backend"
+WHEEL_ENGINE="$("$WHEEL_RUNTIME_VENV/bin/python" -c \
+  'from pm_flow.paths import engine_root; print(engine_root())')"
+case "$WHEEL_ENGINE" in
+  "$WHEEL_RUNTIME_VENV"/*) ;;
+  *) fail "the installed entry point resolved an engine outside its venv: $WHEEL_ENGINE" ;;
+esac
+[[ -d "$WHEEL_ENGINE/topologies" ]] || \
+  fail "the installed wheel omits its topology documents"
+
+WHEEL_WORK="$TEST_ROOT/wheel-data-work"
+WHEEL_FLOW="$WHEEL_WORK/.agentic/pm_flow"
+WHEEL_PROJECT_KEY="wheel-topology-project"
+WHEEL_PROJECT_DIR="$WHEEL_FLOW/$WHEEL_PROJECT_KEY"
+WHEEL_DB="$WHEEL_PROJECT_DIR/runs/pm_flow.db"
+mkdir -p "$WHEEL_PROJECT_DIR/runs"
+cp "$TEST_ROOT/config.before.json" "$WHEEL_FLOW/config.json"
+printf '%s\n' "$WHEEL_PROJECT_KEY" > "$WHEEL_FLOW/.project-key"
+printf 'export PATH="%s:%s:$PATH"\n' \
+  "$WHEEL_RUNTIME_VENV/bin" "$STUB_BIN" > "$WHEEL_FLOW/local_env.sh"
+printf '%s\n' '{"domain":"generic"}' > "$WHEEL_PROJECT_DIR/project.json"
+printf '# Wheel fixture contract\n\n- Use only stubbed CLIs.\n' \
+  > "$WHEEL_PROJECT_DIR/task_contract.md"
+
+wheel_command_path="$(PATH="$WHEEL_RUNTIME_VENV/bin:$STUB_BIN:$PATH" \
+  command -v pm-flow || true)"
+assert_eq "$wheel_command_path" "$WHEEL_PM_FLOW" \
+  "wheel scenario resolves pm-flow from the runtime venv"
+
+for section_key in alpha beta; do
+  (cd "$WHEEL_WORK" && PATH="$WHEEL_RUNTIME_VENV/bin:$STUB_BIN:$PATH" \
+    pm-flow --project "$WHEEL_PROJECT_KEY" init-section "$section_key") \
+    <<SECTIONBRIEF > "$TEST_ROOT/wheel-init-$section_key.out"
+## Objective
+
+- Build wheel comparison fixture $section_key.
+
+## Scope
+
+- The fixture only.
+
+## Priority
+
+- must-have: the comparison needs a real dispatch
+
+## Owned paths
+
+- \`fixture/$section_key/**\`
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- The fixture run completes.
+
+## Rejection conditions
+
+- A real backend is reached.
+SECTIONBRIEF
+  mkdir -p "$WHEEL_PROJECT_DIR/sections/$section_key/cycles/001"
+  printf 'COMPLETE\n' \
+    > "$WHEEL_PROJECT_DIR/sections/$section_key/cycles/001/decision.txt"
+done
+
+wheel_flow_entries="$(for entry in "$WHEEL_FLOW"/*(DN); do
+  basename "$entry"
+done | sort)"
+assert_eq "$wheel_flow_entries" \
+  $'.project-key\nconfig.json\nlocal_env.sh\nwheel-topology-project' \
+  "wheel fixture flow directory contains project data only"
+
+# Register definitions only, before the observations begin. The compare imports
+# just the CLIs referenced by attempts; without this schema/catalog setup a
+# later validation could stop at an unused seat instead of the missing document.
+"$WHEEL_RUNTIME_VENV/bin/python" "$WHEEL_ENGINE/catalog.py" \
+  --db "$WHEEL_DB" sync --flow "$WHEEL_FLOW" --engine "$WHEEL_ENGINE" \
+  --project "$WHEEL_PROJECT_KEY" --domain generic >/dev/null
+assert_eq "$(sqlite3 "$WHEEL_DB" 'SELECT COUNT(*) FROM attempts')" "0" \
+  "wheel compare starts without seeded attempts"
+
+git -C "$WHEEL_WORK" init --quiet
+git -C "$WHEEL_WORK" add .
+git -C "$WHEEL_WORK" add -f \
+  ".agentic/pm_flow/local_env.sh" \
+  ".agentic/pm_flow/$WHEEL_PROJECT_KEY/sections/alpha/cycles/001/decision.txt" \
+  ".agentic/pm_flow/$WHEEL_PROJECT_KEY/sections/beta/cycles/001/decision.txt"
+git -C "$WHEEL_WORK" -c user.name=pm-flow -c user.email=pm-flow@localhost \
+  commit --quiet -m "wheel comparison fixture"
+
+# Scenario 1: one installed command runs both arms and prints the full report.
+WHEEL_COMPARE_OUT="$TEST_ROOT/wheel-compare.out"
+(cd "$WHEEL_WORK" && PATH="$WHEEL_RUNTIME_VENV/bin:$STUB_BIN:$PATH" \
+  pm-flow --project "$WHEEL_PROJECT_KEY" \
+  compare lean heavy --max-ticks 6) > "$WHEEL_COMPARE_OUT"
+wheel_compare_output="$(<"$WHEEL_COMPARE_OUT")"
+
+assert_eq "$(printf '%s\n' "$wheel_compare_output" | head -n 1)" \
+  $'starting_commit='"$(git -C "$WHEEL_WORK" rev-parse HEAD)" \
+  "wheel compare records the fixture starting commit"
+wheel_copy_paths=("${(@f)$(printf '%s\n' "$wheel_compare_output" | \
+  sed -n 's/^arm_key=[^ ]* copy_path=\(.*\) imported_run_key=[^ ]* copy_status=[^ ]*$/\1/p')}")
+assert_eq "${#wheel_copy_paths[@]}" "2" "wheel compare prints both copy paths"
+[[ "${wheel_copy_paths[1]}" != "${wheel_copy_paths[2]}" ]] || \
+  fail "wheel compare used one checkout for both arms"
+[[ "${wheel_copy_paths[1]}" != "$WHEEL_WORK" && \
+   "${wheel_copy_paths[2]}" != "$WHEEL_WORK" ]] || \
+  fail "wheel compare drove an arm in the origin checkout"
+
+wheel_project_topologies="$(sqlite3 "$WHEEL_DB" \
+  "SELECT t.key || '|' || p.key FROM runs r JOIN topologies t ON t.id=r.topology_id JOIN projects p ON p.id=r.project_id ORDER BY t.key")"
+assert_eq "$wheel_project_topologies" \
+  $'heavy|wheel-topology-project\nlean|wheel-topology-project' \
+  "wheel compare imports both topology runs under one project"
+
+assert_eq "$(printf '%s\n' "$wheel_compare_output" | \
+  grep -m1 '^metric' || true)" $'metric\tlean\theavy' \
+  "wheel compare prints the report header"
+wheel_metric_order="$(printf '%s\n' "$wheel_compare_output" | awk -F'\t' \
+  '$1 ~ /^(cost_usd|tokens|cycles_to_done|rescue_rate|abandon_rate|escalation_depth|wall_clock_s|n_runs)$/ {print $1}')"
+assert_eq "$wheel_metric_order" \
+  $'cost_usd\ntokens\ncycles_to_done\nrescue_rate\nabandon_rate\nescalation_depth\nwall_clock_s\nn_runs' \
+  "wheel compare prints the metric contract in order"
+printf '%s\n' "$wheel_compare_output" | awk -F'\t' \
+  '$1 == "wall_clock_s" && $2 + 0 > 0 && $3 + 0 > 0 {found=1} END {exit !found}' || \
+  fail "wheel compare wall clocks are not both greater than zero"
+wheel_arm_sizes="$(sqlite3 "$WHEEL_DB" \
+  "SELECT t.key || '|' || COUNT(DISTINCT r.id) FROM runs r JOIN topologies t ON t.id=r.topology_id GROUP BY t.key ORDER BY t.key")"
+assert_eq "$wheel_arm_sizes" $'heavy|1\nlean|1' \
+  "wheel report arm sizes count store runs"
+assert_eq "$(printf '%s\n' "$wheel_compare_output" | tail -n 1)" \
+  "Limits: lean n=1; heavy n=1. No difference between the arms can be inferred." \
+  "wheel compare ends with the one-run inference limit"
+
+wheel_report_personas="$(printf '%s\n' "$wheel_compare_output" | awk -F'\t' \
+  '$1 == "arm" {arm=$2} $1 == "personas" {print arm "|" $2}')"
+assert_eq "$wheel_report_personas" $'lean|pm=pm\nheavy|pm=pm' \
+  "wheel report shows each arm persona key"
+wheel_store_personas="$(sqlite3 "$WHEEL_DB" \
+  "SELECT DISTINCT t.key || '|' || json_extract(stack.value, '$.key') FROM attempts a JOIN runs r ON r.id=a.run_id JOIN topologies t ON t.id=r.topology_id JOIN json_each(a.persona_stack) stack WHERE a.role_key='pm' AND json_extract(stack.value, '$.layer')='base' ORDER BY t.key")"
+assert_eq "$wheel_store_personas" $'heavy|pm\nlean|pm' \
+  "wheel store agrees with both report persona keys"
+
+# Scenario 3 follows immediately: ATTEMPT field ten identifies both arms, while
+# TOTAL still comes from cost.py's single accounting on this project.
+WHEEL_COST_OUT="$TEST_ROOT/wheel-cost.out"
+(cd "$WHEEL_WORK" && PATH="$WHEEL_RUNTIME_VENV/bin:$STUB_BIN:$PATH" \
+  pm-flow --project "$WHEEL_PROJECT_KEY" cost) > "$WHEEL_COST_OUT"
+wheel_cost_output="$(<"$WHEEL_COST_OUT")"
+wheel_bad_attempt_width="$(printf '%s\n' "$wheel_cost_output" | awk -F'\t' \
+  '$1 == "ATTEMPT" && NF != 10 {print NF; exit}')"
+[[ -z "$wheel_bad_attempt_width" ]] || \
+  fail "wheel cost ATTEMPT line has $wheel_bad_attempt_width fields instead of 10"
+wheel_cost_topologies="$(printf '%s\n' "$wheel_cost_output" | awk -F'\t' \
+  '$1 == "ATTEMPT" {print $10}' | sort -u)"
+assert_eq "$wheel_cost_topologies" $'heavy\nlean' \
+  "wheel cost field ten carries both topology keys"
+wheel_total="$("$WHEEL_RUNTIME_VENV/bin/python" "$WHEEL_ENGINE/cost.py" \
+  total "$WHEEL_PROJECT_DIR")"
+assert_eq "$(printf '%s\n' "$wheel_cost_output" | grep '^TOTAL' || true)" \
+  $'TOTAL\t'"$wheel_total" "wheel cost TOTAL uses the unchanged accounting"
+
+# Scenario 2 is deliberately last so its unchanged-attempt baseline is nonzero.
+wheel_attempts_before="$(sqlite3 "$WHEEL_DB" 'SELECT COUNT(*) FROM attempts')"
+(( wheel_attempts_before > 0 )) || \
+  fail "wheel missing-topology baseline has no successful attempts"
+WHEEL_REFUSAL_OUT="$TEST_ROOT/wheel-refusal.out"
+WHEEL_REFUSAL_ERR="$TEST_ROOT/wheel-refusal.err"
+if (cd "$WHEEL_WORK" && PATH="$WHEEL_RUNTIME_VENV/bin:$STUB_BIN:$PATH" \
+    pm-flow --project "$WHEEL_PROJECT_KEY" compare heavy missing) \
+    > "$WHEEL_REFUSAL_OUT" 2> "$WHEEL_REFUSAL_ERR"; then
+  fail "wheel compare accepted a missing topology"
+fi
+[[ ! -s "$WHEEL_REFUSAL_OUT" ]] || fail "wheel refusal wrote to stdout"
+wheel_refusal_error="$(<"$WHEEL_REFUSAL_ERR")"
+[[ "$wheel_refusal_error" == *"$WHEEL_FLOW/topologies/missing.json"* ]] || \
+  fail "wheel refusal omitted the flow topology path: $wheel_refusal_error"
+[[ "$wheel_refusal_error" == *"$WHEEL_ENGINE/topologies/missing.json"* ]] || \
+  fail "wheel refusal omitted the installed engine topology path: $wheel_refusal_error"
+assert_eq "$(sqlite3 "$WHEEL_DB" 'SELECT COUNT(*) FROM attempts')" \
+  "$wheel_attempts_before" "wheel refusal preserves the nonzero attempt count"
+
 # Seed a separate report-only project through the public telemetry commands.
 # Timestamps are normalized afterwards so wall-clock expectations are literal,
 # while attempts, prices, tokens, personas, cycles and outcomes all enter
