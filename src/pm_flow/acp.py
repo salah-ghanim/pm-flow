@@ -229,6 +229,29 @@ def _is_enforceable(initialize: dict[str, Any], access_tier: str) -> bool:
     return False
 
 
+def _normalise_usage(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    aliases = {
+        "input_tokens": ("input_tokens", "inputTokens", "inputTokenCount"),
+        "output_tokens": ("output_tokens", "outputTokens", "outputTokenCount"),
+    }
+    usage: dict[str, int] = {}
+    for target, names in aliases.items():
+        for name in names:
+            count = value.get(name)
+            if isinstance(count, bool):
+                continue
+            try:
+                parsed = int(count)
+            except (TypeError, ValueError):
+                continue
+            if parsed >= 0:
+                usage[target] = parsed
+                break
+    return usage
+
+
 def _record_access(
     log_path: Path | None,
     role: str,
@@ -248,9 +271,17 @@ def _record_access(
         "access": "enforced" if enforceable else "prompt-level",
         "source": "acp-capabilities",
     }
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as stream:
+            stream.write(
+                json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n"
+            )
+    except OSError as exc:
+        raise ACPFailure(
+            "acp_access_log_unwritable",
+            f"could not write ACP access log {log_path}: {exc}",
+        ) from exc
 
 
 def _reap(client: _Client) -> None:
@@ -359,7 +390,7 @@ def run(
                     text_parts.append(content["text"])
             elif value.get("sessionUpdate") == "usage_update":
                 usage.clear()
-                usage.update({key: item for key, item in value.items() if key != "sessionUpdate"})
+                usage.update(_normalise_usage(value))
 
         client.request(
             3,
@@ -368,7 +399,7 @@ def run(
         )
         prompt_result = client.response(3, update)
         if isinstance(prompt_result.get("usage"), dict):
-            usage = dict(prompt_result["usage"])
+            usage = _normalise_usage(prompt_result["usage"])
         return Result("".join(text_parts), enforceable, usage)
     except _Cancelled as exc:
         client.cancel()

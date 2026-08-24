@@ -753,14 +753,16 @@ write_response() {
   local is_error="$2"
   local failure_reason="$3"
   local attempts="$4"
+  local usage_path="${5:-}"
   python3 - "$OUTPUT_FILE" "$result_path" "$is_error" "$failure_reason" \
-      "$ROLE" "$AGENT_CLI" "$AGENT_MODEL" "$AGENT_DIFFICULTY" "$attempts" <<'PY'
+      "$ROLE" "$AGENT_CLI" "$AGENT_MODEL" "$AGENT_DIFFICULTY" "$attempts" \
+      "$usage_path" <<'PY'
 import json
 import os
 import sys
 from pathlib import Path
 
-out_path, result_path, is_error, reason, role, cli, model, difficulty, attempts = sys.argv[1:]
+out_path, result_path, is_error, reason, role, cli, model, difficulty, attempts, usage_path = sys.argv[1:]
 text = Path(result_path).read_text(errors="replace").strip() if Path(result_path).is_file() else ""
 # Backends other than claude do not report what the call cost. The field is
 # still written so every response envelope has the same shape and the driver's
@@ -788,6 +790,13 @@ payload = {
     "session_id": "",
     "session_resumable": False,
 }
+if usage_path:
+    try:
+        usage = json.loads(Path(usage_path).read_text())
+    except (OSError, ValueError):
+        usage = {}
+    if isinstance(usage, dict) and usage:
+        payload["usage"] = usage
 path = Path(out_path)
 path.parent.mkdir(parents=True, exist_ok=True)
 temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -852,6 +861,7 @@ trap cleanup_work_dir EXIT HUP INT TERM
 prepare_codex_home
 
 RAW_OUTPUT="$WORK_DIR/raw.txt"
+ACP_USAGE_FILE="$WORK_DIR/acp-usage.json"
 # codex reports token usage nowhere the response envelope can reach, so the
 # driver has always looked for `<response>.events.jsonl` beside the response -
 # and nothing ever wrote it, because `--json` was never passed. Its token counts
@@ -901,6 +911,7 @@ failure_output="$ATTEMPT_LOG"
 while (( attempt <= MAX_ATTEMPTS )); do
   : > "$ATTEMPT_LOG"
   : > "$RAW_OUTPUT"
+  : > "$ACP_USAGE_FILE"
   : > "$EVENTS_FILE"
   build_command
 
@@ -913,16 +924,19 @@ while (( attempt <= MAX_ATTEMPTS )); do
   # unwrapped onto the standard response path.
   if [[ "$AGENT_CLI" == "acp" ]] && (( attempt_status == 0 )) && \
       [[ "$STALLED" == "0" ]] && [[ -s "$RAW_OUTPUT" ]]; then
-    if ! python3 - "$RAW_OUTPUT" <<'PY_ACP_TEXT'
+    if ! python3 - "$RAW_OUTPUT" "$ACP_USAGE_FILE" <<'PY_ACP_TEXT'
 import json
 import sys
 from pathlib import Path
 
-path = Path(sys.argv[1])
+path, usage_path = map(Path, sys.argv[1:])
 payload = json.loads(path.read_text())
 text = payload.get("text")
 if not isinstance(text, str):
     raise SystemExit("ACP outcome omitted text")
+usage = payload.get("usage")
+if isinstance(usage, dict):
+    usage_path.write_text(json.dumps(usage, separators=(",", ":")))
 path.write_text(text)
 PY_ACP_TEXT
     then
@@ -953,7 +967,7 @@ PY_ACP_REASON
     case "$acp_reason" in
       acp_child_exited) reason="network" ;;
       acp_attempt_timeout|acp_silent_stall|acp_cancelled) reason="stall" ;;
-      acp_malformed_frame|acp_invalid_params) reason="permanent" ;;
+      acp_malformed_frame|acp_invalid_params|acp_access_log_unwritable) reason="permanent" ;;
       *) reason="unknown" ;;
     esac
   else
@@ -1056,7 +1070,11 @@ temp.write_text(json.dumps(payload, indent=2) + "\n")
 os.replace(temp, path)
 PY
 else
-  write_response "$RAW_OUTPUT" "0" "none" "$attempt"
+  if [[ "$AGENT_CLI" == "acp" ]]; then
+    write_response "$RAW_OUTPUT" "0" "none" "$attempt" "$ACP_USAGE_FILE"
+  else
+    write_response "$RAW_OUTPUT" "0" "none" "$attempt"
+  fi
 fi
 
 # codex has no hook mechanism, so its account of what it reached for is
