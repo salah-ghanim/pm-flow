@@ -136,6 +136,11 @@ loop_main() {
 
   local -a tick_command
   while (( ticks < max_ticks )); do
+    if [[ -f "$STOP_FILE" ]]; then
+      reason="stopped by request"
+      break
+    fi
+
     tick_command=("$engine")
     [[ -z "$PROJECT_INPUT" ]] || tick_command+=(--project "$PROJECT_INPUT")
     [[ -z "$section" ]] || tick_command+=(--section "$section")
@@ -147,6 +152,11 @@ loop_main() {
     (( ticks += 1 ))
     write_state "$$" "$started_at" "$log" "$section" "$max_ticks" "$engine" "$ticks"
 
+    if [[ -f "$STOP_FILE" ]]; then
+      reason="stopped by request"
+      break
+    fi
+
     if (( tick_status != 0 )); then
       reason="tick failed with status $tick_status"
       break
@@ -157,17 +167,24 @@ loop_main() {
     fi
   done
 
-  printf '[%s] run-detach finished after tick %s: %s\n' \
-    "$(now_iso_utc)" "$ticks" "$reason"
+  if [[ "$reason" == "stopped by request" ]]; then
+    printf '[%s] run-detach %s after tick %s\n' \
+      "$(now_iso_utc)" "$reason" "$ticks"
+  else
+    printf '[%s] run-detach finished after tick %s: %s\n' \
+      "$(now_iso_utc)" "$ticks" "$reason"
+  fi
   if [[ -f "$PID_FILE" && "$(/bin/cat "$PID_FILE" 2>/dev/null)" == "$$" ]]; then
     rm -f -- "$PID_FILE"
   fi
+  rm -f -- "$STOP_FILE"
 }
 
 usage() {
   cat <<'EOF'
 Usage:
   run_detach.zsh [--project <key>] start [--max-ticks N] [--section <key>]
+  run_detach.zsh [--project <key>] stop
   run_detach.zsh [--project <key>] status
 EOF
 }
@@ -201,7 +218,7 @@ cmd_start() {
     printf 'log=%s\n' "$(state_value log)"
     return 1
   fi
-  rm -f -- "$PID_FILE"
+  rm -f -- "$PID_FILE" "$STOP_FILE"
 
   local engine started_at log supervisor_pid
   engine="$(resolve_engine)"
@@ -222,6 +239,20 @@ cmd_start() {
 
   printf 'pid=%s\n' "$supervisor_pid"
   printf 'log=%s\n' "$log"
+}
+
+cmd_stop() {
+  local pid=""
+  [[ ! -f "$PID_FILE" ]] || pid="$(/bin/cat "$PID_FILE" 2>/dev/null)"
+  if ! pid_is_live "$pid"; then
+    printf 'no run-detach supervisor is live\n'
+    return 0
+  fi
+
+  printf '%s\n' "$(now_iso_utc)" > "$STOP_FILE"
+  printf 'run will stop after the current dispatch\n'
+  printf 'pid=%s\n' "$(state_value pid)"
+  printf 'log=%s\n' "$(state_value log)"
 }
 
 cmd_status() {
@@ -262,6 +293,7 @@ done
 resolve_project
 case "${1:-}" in
   start) shift; cmd_start "$@" ;;
+  stop) shift; [[ $# -eq 0 ]] || fail "stop takes no arguments"; cmd_stop ;;
   status) shift; [[ $# -eq 0 ]] || fail "status takes no arguments"; cmd_status ;;
   -h|--help|help|"") usage ;;
   *) fail "unknown command: $1" ;;
