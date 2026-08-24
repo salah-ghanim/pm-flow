@@ -8,6 +8,23 @@
   the `fail`-path open run below, and the brief's owned-paths correction
   (engine Python lives under `template/.agentic/pm_flow/`, not `src/pm_flow/`).
 
+- Post-merge verification, cycle 007 scoping, 2026-08-24. Every figure above was
+  taken in the section worktree; the accepted work is now on `main` (`a81a9a0`,
+  `b5e667a`) and the PM re-ran the gate against the merged tree rather than
+  trusting the merge:
+  - `zsh tests/topology_compare_test.sh` → exit 0,
+    `PASS: topology compare reports literal metrics, limits, personas, and copy retention`.
+  - `zsh tests/pm_flow_test.sh` → exit 0, 10 `PASS:` lines.
+  - `zsh tests/packaged_layout_test.sh` → exit 0, 13 `PASS:` lines including
+    `a copied-engine repository migrates losslessly and keeps running`.
+  - The T5 `cost.py` edit survived the merge: `template/.agentic/pm_flow/cost.py`
+    carries `tp.key AS topology` and the `topologies` join in `stored_attempts`
+    (`:234`, `:237`) and the appended `present(row["topology"])` in
+    `report_store` (`:264`); `tests/topology_compare_test.sh` holds the wheel
+    block (95 `wheel` matches).
+  So A6 holds on `main`, not only on the developer's tree, and A1-A5 are
+  re-observed through the gate suite that asserts them.
+
 ## Completed tasks and evidence
 
 - T1 — topology documents, the CLI model registry, and validation. Accepted
