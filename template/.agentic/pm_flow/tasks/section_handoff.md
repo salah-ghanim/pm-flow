@@ -13,10 +13,9 @@ Read:
 Stay under 500 words and 8192 bytes. State what a reader needs in order to act;
 do not summarise the transcript or restate the brief.
 
-Your response text IS the handoff document: the driver validates it and writes
-it to `handoff.md` itself. Do not write any file, and do not reply with a
-summary of a document you wrote elsewhere - a response that is not the
-document fails, whatever any file says.
+Your response text IS the handoff document: the driver validates and records
+it as `handoff.md`. Write no file; a reply that merely describes a document
+written elsewhere fails, whatever any file says.
 
 ## Respond with exactly these Markdown headings and nothing else
 
