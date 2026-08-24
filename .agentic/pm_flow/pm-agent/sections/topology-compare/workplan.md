@@ -150,27 +150,88 @@ change of scope; every acceptance ID is unaffected.
 
 ## Task T3 — The report and its limits
 
-- Status: pending.
+- Status: done (cycle 004), with two gaps T4 carries. A2, A3 and A5 met; the A6
+  regression gate holds. T2's carried defect is cleared: `swap_first_arm` is
+  gone and `compare lean heavy` with no `--persona` leaves both arms on `pm`.
+  Gaps for T4: (a) `wall_clock_s` reads `0.0` in every real compare, because
+  `telemetry_end_run` (`driver.zsh:752`) has no call site anywhere in the
+  engine, so `runs.ended_at` is NULL and `SUM(ended_at - started_at)` is NULL;
+  the formula is right and the seeded fixture proves it, but the shipped column
+  is inert. (b) `import_store`'s `topology_edges` half has no check behind it —
+  the importer works, but disabling it leaves the suite green.
 - First requirement, carried from T2: delete `swap_first_arm` and its call site
   from `compare.py`. `pm-flow compare` must run both arms with the seats their
   topology documents and the shared persona configuration give them, so the only
-  difference between arms is the topology. A5 is then evidenced the way the
-  brief words it — a persona the *operator* swapped shows up in that arm's
-  report column — which the test drives by calling `catalog.py persona swap`
-  against one arm before or between the arms, not by the command doing it.
-  Keep the existing two-directional store assertion
-  (`heavy|pm`, `lean|cpo`); it is mutation-tested and must stay capable of
-  failing when the swap is absent.
+  difference between arms is the topology — unless the operator asks for more.
+  A persona swap is therefore an operator argument, `--persona
+  <topology>:<role>=<persona>` (repeatable), applied to the named arm after its
+  `catalog.py sync` and before its run. Probed 2026-08-24: a swap is stored per
+  `(project, topology, role)` in the project store (`catalog.py:400-430`,
+  `seat_layer_overrides`), and an arm copy is a `git clone` (`compare.py:45-52`)
+  whose store starts empty, so a swap made in the origin store cannot reach an
+  arm and the arm's own store is the only place it can be made. Keep the
+  existing two-directional store assertion (`heavy|pm`, `lean|cpo`); it is
+  mutation-tested and must stay capable of failing when the swap is absent, and
+  it now proves the flag rather than a hardcoded call.
 - Outcome: `pm-flow compare --report <run-a> <run-b>` prints one row per
-  metric in the column contract and one column per arm, then the arm sizes,
-  then the limits sentence. `cost_usd` is read from `cost.py total`; nothing
-  in this section adds arithmetic over `attempts.cost_usd`.
+  metric in the column contract and one column per arm, then the per-arm block
+  (`n_runs`, run keys and persona keys), then the limits sentence; `pm-flow
+  compare <a> <b>` prints the same report over the runs it just imported, which
+  is the brief's scenario 1. `cost_usd` comes from `cost.py`'s accounting;
+  nothing in this section prices anything or adds a second sum of its own
+  making.
+- Metric definitions, settled here so the report describes something real. An
+  arm is the set of runs named for it; every figure below is over that set.
+  - `cost_usd` — `cost.py`'s accounting, restricted to the arm's runs:
+    `cost.import_legacy(project_dir)` first, exactly as `cost.py total` does,
+    then the same `SUM(COALESCE(a.cost_usd, 0))` over every status that
+    `cost.stored_totals` (`cost.py:210-224`) uses. Not
+    `topology_comparison.cost_usd`, which recomputes; not prices from tokens.
+    Proven by reconciliation: both arms' figures sum to `cost.py total` on a
+    store holding only those runs.
+  - `tokens` — `SUM(COALESCE(a.total_tokens, 0))`.
+  - `cycles_to_done` — the mean, over sections with a `section_status=complete`
+    outcome in the arm, of that section's highest `attempts.cycle`; `-` when no
+    section completed.
+  - `rescue_rate` — sections with at least one `role_key='10x_developer'`
+    attempt, over sections with any attempt. `do_rescue` (`driver.zsh:1903-1909`)
+    is the only dispatch of that role, so a rescue always leaves an attempt.
+  - `abandon_rate` — sections with a `section_status=abandoned` outcome, over
+    sections with any attempt. An abandonment dispatches nothing
+    (`do_abandon`, `driver.zsh:2070-2089`), so it leaves no attempt and must be
+    recorded: `driver.zsh` gains a `telemetry_record_outcome` helper beside the
+    other telemetry helpers, calling `telemetry.py outcome --metric
+    section_status` at `do_abandon` and `do_complete`. The `outcomes` table and
+    that subcommand already exist (`store.py:369-383`, `telemetry.py:753-777`)
+    and nothing in the engine emits to them yet.
+  - `escalation_depth` — the longest chain of `topology_edges` rows with
+    `kind='escalates_to'` for the arm's topology whose every role recorded an
+    attempt for one section; `0` when nothing escalated.
+  - `wall_clock_s` — `SUM(r.ended_at - r.started_at)` over the arm's runs.
+  - `n_runs` — the count of the arm's runs.
+  - Formats, because A2 compares against a hand-computed fixture: `cost_usd`
+    4 decimals, `tokens`/`escalation_depth`/`n_runs` integers,
+    `cycles_to_done`/`rescue_rate`/`abandon_rate` 2 decimals or `-`,
+    `wall_clock_s` 1 decimal.
+- Arm copies: deleted once the arm's rows are imported, unless `--keep-copies`
+  is passed; the command says which it did. This settles the retention question
+  the risks section booked — with the report printed, the clone is no longer
+  the only way to see the arm.
 - Paths: `template/.agentic/pm_flow/compare.py`,
-  `tests/topology_compare_test.sh`.
-- Reuse: `cost.py total <dir> [section]` for cost;
+  `template/.agentic/pm_flow/driver.zsh` (`cmd_compare`, and the outcome
+  helper with its two call sites), `template/.agentic/pm_flow/pm_flow.sh`
+  (`usage` and the `--report` spelling), `tests/topology_compare_test.sh`.
+- Reuse: `cost.py`'s `import_legacy` and `stored_totals` as a module, unedited;
   `topology_comparison` (`store.py:422-437`) for attempts, tokens, duration
-  and status — but not for `cost_usd`, which that view recomputes;
-  `catalog.py:1662-1681` (`cmd_compare`) as the per-run table it aggregates.
+  and status — but not for `cost_usd`; `telemetry.py outcome`
+  (`telemetry.py:753-777`, `:839-844`) for the abandonment record;
+  `attempts.persona_stack` for the per-arm persona keys, the field cycle 003's
+  A5 assertion already reads; `catalog.py:1662-1681` (`cmd_compare`) as the
+  per-run table it aggregates; `telemetry.py attempt-start|attempt-end` as the
+  way a fixture seeds priced attempts (`store-ledger` handoff).
+- `import_store` must additionally carry `outcomes` and the topology's
+  `topology_edges`, or two of the columns above read zero in the origin store
+  no matter what an arm did.
 - Acceptance IDs: A2, A3, A5.
 - Validation: `zsh tests/topology_compare_test.sh` — a seeded store with
   hand-computed metrics reproduces every column exactly; one run per arm
@@ -185,7 +246,23 @@ change of scope; every acceptance ID is unaffected.
 - Outcome: scenarios 1-3 driven through `.venv/bin/pm-flow`, including
   `pm-flow cost` after a compare showing attempts from both arms with their
   topology keys.
-- Paths: `tests/topology_compare_test.sh`.
+- Carried from T3, both to be closed here:
+  - `wall_clock_s` is inert in the shipped command. `telemetry_end_run`
+    (`driver.zsh:752`) is defined and never called, so a run's `ended_at` stays
+    NULL and the column reads `0.0` after every real compare — observed
+    2026-08-24 on the origin store after `compare lean heavy --max-ticks 5`:
+    both imported runs read `status=running`, `ended_at` empty. That is the
+    same defect class T3 cleared for `abandon_rate`, and it hits the brief's
+    "how long each took" directly. Call `telemetry_end_run` where a run
+    finishes, then assert a non-zero `wall_clock_s` from a driven compare, not
+    only from the seeded fixture.
+  - `import_store`'s `topology_edges` half is unchecked. The report fixture
+    syncs its own topologies into its own store, so `escalation_depth` is
+    asserted on rows that never crossed the importer. Assert `escalation_depth`
+    (or the edge rows) on the imported arms, so disabling the edge import turns
+    the suite red.
+- Paths: `tests/topology_compare_test.sh`,
+  `template/.agentic/pm_flow/driver.zsh` (the `telemetry_end_run` call site).
 - Reuse: the installed-layout harness in `tests/packaged_layout_test.sh`.
 - Acceptance IDs: A1-A6.
 - Validation: `zsh tests/topology_compare_test.sh`,
@@ -213,12 +290,10 @@ change of scope; every acceptance ID is unaffected.
   what migration removes from a copied install, so an unlisted engine file
   survives migration and turns `packaged_layout_test.sh:1020` red. Observed in
   cycle 001 for `topology.py` and `topologies`; `compare.py` repeats it at T2.
-- Arm copies are never deleted. `copy_checkout` uses `tempfile.mkdtemp` and
-  nothing removes it, so each real compare leaves two full clones of the
-  repository under `$TMPDIR`. That is defensible while the copies are the only
-  way to inspect an arm — the command prints each path — but once T3's report
-  exists the copies are dead weight. Decide at T3 whether to remove them on
-  success or to document the retention; do not leave it unstated.
+- Arm copies were never deleted: `copy_checkout` uses `tempfile.mkdtemp` and
+  nothing removed it, so each real compare left two full clones of the
+  repository under `$TMPDIR`. Settled at T3: removed once the arm's rows are
+  imported, kept only under `--keep-copies`, and the command says which.
 - Rollback removes the `compare` case, `compare.py` and `topology.py`; stored
   runs stay, since nothing about them is new.
 
