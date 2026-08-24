@@ -167,8 +167,9 @@
 
 ## Task T4 — Driver stops writing the ledger
 
-- Status: next; blocked on ownership (see the boundary conflict below); not
-  assignable as the brief stands.
+- Status: next; blocked on ownership (see the boundary conflict below).
+  Re-probed at the cycle 004 scope (`cycles/004/scope_probe.zsh`): unchanged,
+  so cycle 004 declared `BLOCKED_EXTERNAL`.
 - Outcome: `record_dispatch_cost` writes nothing — its call at
   `driver.zsh:1036` is outside the five named functions and stays, so the
   body becomes a documented no-op and must not import (call order above);
@@ -201,14 +202,22 @@
   under `runs/`, and a project seeded at `budget.max_usd` is refused its next
   dispatch with `project budget exhausted`; `git grep -n cost_ledger --
   template` → only the importer's lines in `cost.py`.
-- Boundary conflict (reported in `handoff.md`, cycle 003): A4 forbids the TSV
-  write and A5 requires `run.zsh` green, but
+- Boundary conflict (reported in `handoff.md`, cycle 003; declared
+  `BLOCKED_EXTERNAL` at the cycle 004 scope): A4 forbids the TSV write and A5
+  requires `run.zsh` green, but
   `template/.agentic/pm_flow/tests/{transitions,on_demand,governance}.zsh`
-  read or seed the TSV at the lines above. They are outside Owned paths and
-  no live section owns `template/.agentic/pm_flow/tests/` (`green-suite` and
-  `worktree-isolation` owned `tests/**` and are done). Unblocked by the brief's
-  Owned paths gaining the three files. If the brief is unchanged at the cycle
-  004 scope, that scope is `BLOCKED_EXTERNAL` naming this.
+  read or seed the TSV at the six lines above. They are outside Owned paths
+  and no section owns `template/.agentic/pm_flow/tests/` (`green-suite` and
+  `worktree-isolation` owned `tests/**` and are done; the owner's 2026-08-23
+  rebaseline allocated the engine files and left the engine tests unowned).
+  No partial T4 fits inside Owned paths: `record_dispatch_cost` as a no-op
+  fails `transitions.zsh:195,311` and `on_demand.zsh:158,160` (`cat` of a
+  missing file); `spent_usd` or `dispatch_count` on the store fails
+  `governance.zsh:198-199` (two rows keyed `y` import as one: `$0.50`, one
+  dispatch); `cost_ledger_file` cannot go before the other three. Unblocked
+  when `owned_paths.txt` lists the three files (a `brief.md` commit after
+  `3ba4ea7`), or when `grep -n cost_ledger template/.agentic/pm_flow/tests`
+  prints nothing because another owner moved the fixtures first.
 - Depends on: T3.
 
 ## Task T5 — End-to-end through the installed command

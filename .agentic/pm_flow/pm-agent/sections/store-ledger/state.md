@@ -2,8 +2,9 @@
 
 ## Current task
 
-- None assigned. T3 accepted in cycle 003 (GO); the driver merges it. T4 is
-  the next task and is blocked on ownership (see Blockers).
+- None assigned. T3 accepted in cycle 003 (GO) and merged to `main`
+  (`cae52de`, `6f469b9`). Cycle 004 scope: `BLOCKED_EXTERNAL` — T4 needs
+  three engine test files outside Owned paths (see Blockers).
 
 ## Completed tasks and evidence
 
@@ -122,25 +123,33 @@
 
 ## Blockers
 
-- T4 is blocked on ownership. With T3 done, nothing executable remains
-  inside the brief's Owned paths, so the cycle 004 scope is
-  `BLOCKED_EXTERNAL` unless the brief has changed. Probe (cycle 003, `grep -n
-  cost_ledger` over `template/.agentic/pm_flow/tests`):
-  `governance.zsh:198-199` seed two rows keyed `y`; `transitions.zsh:195,311`
-  `cat "$FLOW/demo/runs/cost_ledger.tsv"` expecting `0.500000` / `0.250000`;
-  `on_demand.zsh:158-160` `cat`/`awk` the TSV for `analysis alpha` and
-  section `alpha`; `on_demand.zsh:240` seeds one row keyed `y`. Owned paths
-  (`owned_paths.txt`): `cost.py`, `watch.py`, `driver.zsh`,
-  `tests/store_ledger_test.sh`; `git log -- brief.md` shows no change since
-  `3ba4ea7`. No live section owns `template/.agentic/pm_flow/tests/`
-  (`green-suite`, `worktree-isolation` owned `tests/**`, both `done`).
-  Unblocked by the brief's Owned paths gaining the three files; requested in
-  `handoff.md` (cycle 003).
+- T4 is blocked on ownership; cycle 004 scope declared `BLOCKED_EXTERNAL`.
+  With T3 merged, nothing executable remains inside the brief's Owned paths:
+  every T4 driver edit goes red on A5 while the engine fixtures stand
+  (workplan T4, boundary conflict), and T5 depends on T4. Probe run at the
+  cycle 004 scope (`cycles/004/scope_probe.zsh`, 2026-08-24):
+  `owned_paths.txt` is still `cost.py`, `watch.py`, `driver.zsh`,
+  `tests/store_ledger_test.sh`; last commit to `brief.md`/`owned_paths.txt`
+  is `3ba4ea7` (2026-08-23); `grep -n cost_ledger template/.agentic/pm_flow/tests/*.zsh`
+  prints seven lines — `governance.zsh:198-199` seed two rows keyed `y`,
+  `transitions.zsh:195,311` `cat` the TSV for `0.500000` / `0.250000`,
+  `on_demand.zsh:158,160` `cat`/`awk` it for `analysis alpha` / `alpha`,
+  `on_demand.zsh:240` seeds one row keyed `y` (no change needed);
+  `grep -l pm_flow/tests sections/*/owned_paths.txt` → none; the only
+  sections that ever owned `tests/**` (`green-suite`, `worktree-isolation`)
+  are `done`. On `main`, `driver.zsh:441-471,837-839` still hold
+  `cost_ledger_file`, `record_dispatch_cost` (called at :1036), `spent_usd`
+  on the `.tsv` arity and `dispatch_count` on the TSV. The request in
+  `handoff.md` was committed at `6f469b9` (2026-08-24 03:32), after
+  portfolio review 003 was recorded (`2045579`, 03:12), so no owner has
+  ruled on it yet. Unblocking observation: `owned_paths.txt` lists
+  `template/.agentic/pm_flow/tests/{transitions,on_demand,governance}.zsh`,
+  or that grep prints nothing because another owner moved the fixtures.
 
 ## Next eligible task
 
-- T4, only if Owned paths include the three engine test files
-  (`template/.agentic/pm_flow/tests/{transitions,on_demand,governance}.zsh`);
-  re-probe `owned_paths.txt` and `git log -- brief.md` at the cycle 004
-  scope. Otherwise that scope is `BLOCKED_EXTERNAL` naming this dependency
-  and the probe above.
+- T4, once the unblocking observation above holds; re-run
+  `zsh cycles/004/scope_probe.zsh` at the next scope before assigning. Until
+  then the section stays blocked; `cost.py total|report|import` and the
+  `pm-flow cost` command are already on `main` for `topology-compare` to
+  consume.
