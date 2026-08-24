@@ -2,7 +2,8 @@
 
 ## Current task
 
-- T2 — run two arms from one commit. T1 closed at cycle 002.
+- T3 — the report and its limits. T2 closed at cycle 003, carrying one defect
+  T3 must clear (the hardcoded persona swap; see Blockers).
 
 ## Completed tasks and evidence
 
@@ -37,6 +38,39 @@
     lists added to `clis.capabilities` do not change how `config.json`'s
     `gpt-stub` and `fixture-model` bindings resolve.
 
+- T2 — run two arms from one commit. Accepted cycle 003 with changes.
+  Acceptance IDs: A1, A5, plus the A6 regression gate.
+  - `zsh tests/topology_compare_test.sh` → exit 0,
+    `PASS: topology compare runs isolated arms and imports topology/persona provenance`.
+    After `pm-flow compare lean heavy --max-ticks 5` on the stub project,
+    `SELECT t.key || '|' || p.key FROM runs r JOIN topologies t … JOIN projects p … ORDER BY t.key`
+    returns exactly `heavy|topology-project` / `lean|topology-project` — the
+    asserted two-line string, not a count. Both arms' `copy_path` values are
+    read from the command's own stdout, differ from each other and from the
+    origin checkout; `starting_commit=` appears exactly once and equals the
+    origin's `git rev-parse HEAD`; each copy's `config.json` `cmp`s equal to its
+    arm's overlay and the origin `config.json` `cmp`s unchanged.
+  - A5 is asserted in both directions and is capable of failing. The store query
+    over `attempts.persona_stack` for `role_key='pm'`, base layer, returns
+    `heavy|pm` and `lean|cpo`. Reviewer mutation, 2026-08-24: replacing
+    `compare.py:363` `swap_first_arm(arms[0], engine, project)` with `pass`
+    turns the suite red —
+    `FAIL: persona swap is confined to the first arm: expected 'heavy|pm\nlean|cpo', got 'heavy|pm\nlean|pm'`.
+    `compare.py` was restored byte-identical (`cmp` clean) and the suite re-run
+    green afterwards.
+  - The import is idempotent at the run-key boundary: re-importing arm one's
+    store through `compare.py`'s own `import_store` leaves the `runs`/`attempts`
+    counts unchanged.
+  - Developer mutations, each reversed: both arms at one checkout →
+    `ERROR: topology 'heavy' produced no run`; validation dropped →
+    `FAIL: compare accepted a missing topology`; second import skipped →
+    `FAIL: compare imports both topology runs under one project: expected 'heavy|topology-project\nlean|topology-project', got 'lean|topology-project'`.
+  - `install.sh` names `compare.py` in `COPIED_ENGINE_FILES`.
+    `zsh tests/packaged_layout_test.sh` → exit 0, 13 `PASS:` lines;
+    `packaged_layout_test.sh` itself is untouched, so the exact migrated-directory
+    listing at `:1018-1020` is what proves it.
+    `zsh tests/pm_flow_test.sh` → exit 0, 10 `PASS:` lines.
+
 ## Active decisions
 
 - Engine Python lives in `template/.agentic/pm_flow/`, not `src/pm_flow/`.
@@ -66,11 +100,31 @@
   `cost_usd` would be the second accounting the brief rejects. The view stays
   in use for attempts, tokens, duration and status.
 - One disposable checkout per arm, from the same starting commit; rows
-  imported back under the arm's key.
+  imported back under the arm's key. Probed 2026-08-24: an arm needs no new
+  dispatch path — `telemetry_begin_run` (`driver.zsh:679-690`) already reads
+  `PM_FLOW_TOPOLOGY` into both `catalog.py sync --topology` and `telemetry.py
+  run-start --topology`, and `run-start` (`telemetry.py:412-446`) stamps
+  `runs.topology_id`. The import is store-to-store and has no existing helper;
+  it belongs in `compare.py`, keyed on `runs.run_key`. An arm copy is a
+  separate checkout rather than a `git worktree`, because worktrees are already
+  the sections' mechanism and `cmd_run` prunes them at every start.
 
 ## Blockers
 
-- None open. The migration blocker is closed for T1 and stays a standing rule
+- Open carried defect, from cycle 003: `compare.py` performs the A5 persona
+  swap itself. `run_compare` calls `swap_first_arm(arms[0], …)` at `:363`
+  unconditionally, and `swap_first_arm` hardcodes
+  `catalog.py persona swap pm cpo --topology <arms[0].key>`. So every real
+  `pm-flow compare a b` runs arm A with the CPO persona on the PM seat and arm B
+  with the PM persona, and the two arms then differ by more than their topology
+  — which is exactly the confound the section's headline sentence rules out.
+  It was written this way because cycle 003's assignment placed the swap inside
+  the compare flow; that instruction was mine and it was wrong. A5 asks that a
+  swapped persona be *visible* per arm, not that the command perform one.
+  T3 deletes `swap_first_arm` and its call site and has the test do the swap.
+  Not a blocker on T3 starting, and it does not invalidate cycle 003's A1
+  evidence: the clone-overlay-run-import path is independent of the swap.
+- The migration rule stays open as a standing rule
   for the rest of the section: every task that adds a file under
   `template/.agentic/pm_flow/` must add its name to `install.sh`'s
   `COPIED_ENGINE_FILES` or `COPIED_ENGINE_DIRS` in the same cycle, or
@@ -101,5 +155,7 @@
 
 ## Next eligible task
 
-- T2 — run two arms from one commit. Depends on T1, now done. Remember
-  `compare.py` in `COPIED_ENGINE_FILES` in the same cycle.
+- T3 — the report and its limits. Depends on T2, now done. Its first
+  requirement is removing `compare.py`'s hardcoded `swap_first_arm`; the rest is
+  `compare --report` over the imported rows, with `cost_usd` from `cost.py
+  total` and the limits sentence mutation-tested.

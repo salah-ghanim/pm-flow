@@ -98,7 +98,13 @@ change of scope; every acceptance ID is unaffected.
 
 ## Task T2 — Run two arms from one commit
 
-- Status: pending.
+- Status: done (cycle 003), with one carried defect that T3 must clear.
+  A1 and A5 met; the A6 regression gate holds. Carried defect: `compare.py`
+  performs the A5 persona swap itself — `swap_first_arm` at `:363` calls
+  `catalog.py persona swap pm cpo` on `arms[0]` unconditionally — so every real
+  `pm-flow compare a b` swaps the PM seat's base persona on the first arm only.
+  That is a confound in the shipped command, not a feature the brief asks for.
+  T3 removes it; see T3's first requirement.
 - Outcome: `pm-flow compare a b --max-ticks n` validates both topologies
   first, makes one disposable copy of the checkout per arm at the same
   starting commit, writes each arm's overlay into that copy's `config.json`,
@@ -109,10 +115,31 @@ change of scope; every acceptance ID is unaffected.
   `template/.agentic/pm_flow/pm_flow.sh` (the dispatcher case and `usage`),
   `install.sh` (`compare.py` in `COPIED_ENGINE_FILES`),
   `tests/topology_compare_test.sh`.
-- Reuse: the stub-CLI harness in `tests/pm_flow_test.sh`; `cmd_cost`
-  (`driver.zsh:466`) as the shape of a Python-backed command;
+- Reuse: the stub-CLI harness in `tests/pm_flow_test.sh`
+  (`install_driver_stub`, `:998-1010`, and `tests/fixtures/stub_success.zsh`);
+  `cmd_cost` (`driver.zsh:466`) as the shape of a Python-backed command;
   `catalog.py sync --topology` for registering each arm's seats;
-  `catalog.py persona swap --topology` for the swapped seat.
+  `catalog.py persona swap --topology` (`catalog.py:1631`) for the swapped seat.
+- Probed 2026-08-24, and settled for T2:
+  - An arm needs no new dispatch path. `telemetry_begin_run`
+    (`driver.zsh:679-690`) already reads `PM_FLOW_TOPOLOGY`, passes it to
+    `catalog.py sync --topology` and to `telemetry.py run-start --topology`,
+    and `run-start` (`telemetry.py:412-446`) inserts the `topologies` row and
+    stamps `runs.topology_id`. So an arm is `PM_FLOW_REPO_ROOT=<copy>
+    PM_FLOW_TOPOLOGY=<key> pm-flow run --max-ticks n`, and its own store
+    already carries the key. `PM_FLOW_REPO_ROOT` is how `tests/pm_flow_test.sh`
+    drives a second repository (`:1044-1046`).
+  - Each arm's store is `<copy>/.agentic/pm_flow/<project>/runs/pm_flow.db`
+    (`store.default_path`). The import is therefore store-to-store, and no such
+    helper exists: nothing in `store.py`, `cost.py` or `telemetry.py` reads a
+    second database. `cost.py import_legacy` (`:104`) is only TSV-to-store.
+    Write the importer in `compare.py`, keyed on `runs.run_key` (UNIQUE,
+    `store.py:287`) the way `cost.py` keys on `response_path`, re-pointing each
+    imported `attempts` row at the new `run_id`.
+  - `git worktree` is already taken for sections (`ensure_section_worktree`,
+    `driver.zsh:2310`; `prune_section_worktrees` runs at the top of every
+    `cmd_run`). An arm must not collide with that machinery, and the brief's
+    non-goal is two arms in one checkout, so an arm copy is its own checkout.
 - Acceptance IDs: A1, A5.
 - Validation: `zsh tests/topology_compare_test.sh` — after a compare of two
   arms with a persona swapped on one seat of one arm, `runs` holds rows under
@@ -124,6 +151,16 @@ change of scope; every acceptance ID is unaffected.
 ## Task T3 — The report and its limits
 
 - Status: pending.
+- First requirement, carried from T2: delete `swap_first_arm` and its call site
+  from `compare.py`. `pm-flow compare` must run both arms with the seats their
+  topology documents and the shared persona configuration give them, so the only
+  difference between arms is the topology. A5 is then evidenced the way the
+  brief words it — a persona the *operator* swapped shows up in that arm's
+  report column — which the test drives by calling `catalog.py persona swap`
+  against one arm before or between the arms, not by the command doing it.
+  Keep the existing two-directional store assertion
+  (`heavy|pm`, `lean|cpo`); it is mutation-tested and must stay capable of
+  failing when the swap is absent.
 - Outcome: `pm-flow compare --report <run-a> <run-b>` prints one row per
   metric in the column contract and one column per arm, then the arm sizes,
   then the limits sentence. `cost_usd` is read from `cost.py total`; nothing
@@ -176,6 +213,12 @@ change of scope; every acceptance ID is unaffected.
   what migration removes from a copied install, so an unlisted engine file
   survives migration and turns `packaged_layout_test.sh:1020` red. Observed in
   cycle 001 for `topology.py` and `topologies`; `compare.py` repeats it at T2.
+- Arm copies are never deleted. `copy_checkout` uses `tempfile.mkdtemp` and
+  nothing removes it, so each real compare leaves two full clones of the
+  repository under `$TMPDIR`. That is defensible while the copies are the only
+  way to inspect an arm — the command prints each path — but once T3's report
+  exists the copies are dead weight. Decide at T3 whether to remove them on
+  success or to document the retention; do not leave it unstated.
 - Rollback removes the `compare` case, `compare.py` and `topology.py`; stored
   runs stay, since nothing about them is new.
 
