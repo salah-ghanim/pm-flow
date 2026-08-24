@@ -2,10 +2,95 @@
 
 ## Current task
 
-- T4 — closeout (A7). T3 accepted cycle 003 (GO_WITH_CHANGES); the one change
-  is carried into T4 and recorded under `Carried into later tasks`.
+- None. T1–T4 are complete; T4 was accepted in cycle 004 (GO). Every brief
+  acceptance ID has evidence below and every carried item is closed.
 
 ## Completed tasks and evidence
+
+- T4 — closeout. Acceptance IDs A7, plus the brief deliverable "cards for the
+  packaged personas" and A1/A5 re-observed against shipped cards rather than
+  fixtures. Delivered in `template/.agentic/pm_flow/cards/**`,
+  `template/.agentic/pm_flow/catalog.py` and `tests/persona_cards_test.sh`;
+  `git status --short` in the developer worktree lists exactly six new
+  `<role>.card.json` files plus those two modified files, so `store.py`,
+  `compare.py`, `telemetry.py`, `FORBIDDEN_KEYS` and
+  `src/pm_flow/persona_card.py` are untouched.
+  - A7, both suites under both interpreters, all four runs by the reviewer
+    against the developer worktree. `zsh tests/persona_cards_test.sh` exit 0
+    with `.venv/bin/python3` first on PATH and exit 0 with it removed
+    (`/opt/homebrew/bin/python3`), 18 `PASS:` lines each.
+    `zsh tests/pm_flow_test.sh` exit 0 under both, ten `PASS:` lines each
+    (`summary venv_on=0 venv_off=0`).
+  - Packaged cards, end to end. A real
+    `python3 <worktree>/template/.agentic/pm_flow/catalog.py --db <fresh> sync
+    --flow <engine> --engine <engine>` printed `synced 6 personas, 7 bindings,
+    14 rules, 7 seats, 8 edges`. `persona show maintenance_engineer` and
+    `persona show consultant` each printed the authorship notice, then
+    `author: unverified claim: pm-flow contributors`, that role's own `purpose`
+    and both of its skills as JSON, and `version: 1.0.0`. `persona list` showed
+    all six roles on one row each under `AUTHOR (CLAIMED)`.
+  - A1 re-observed on shipped cards. `SELECT COUNT(*)` on `attempts` and
+    `spans` after both `persona show` calls: `attempts: 0 spans: 0` — no
+    dispatch. The suite additionally asserts equal before/after counts.
+  - The six cards are role-specific, checked against `roles/*.md` line by line
+    rather than by file existence: the 10x developer's card is about rescuing a
+    failed section by replacing its diagnosed assumption, the maintenance
+    engineer's about repairing a harness without changing the deliverable or
+    bypassing a gate, the consultant's about diagnosing without implementing,
+    the CPO's about portfolio governance and treating handoffs as claims. No
+    two `purpose` strings match; the suite asserts six distinct purposes.
+  - Cards reach an already-synced store. Reviewer hand-run: sync an engine copy
+    with `cards/pm.card.json` removed, restore the card, sync again — `pm` keeps
+    row id 6 and hash `161a7945ab6d`, gains `metadata.card`, and takes
+    `author: unverified claim: pm-flow contributors` and `version: 1.0.0`.
+  - `cards/` is not scanned. Base rows are exactly the six role keys and no
+    card among them carries `reviewer.card.json`'s `name`. The assignment asked
+    for the reviewer *author* instead; that assertion is not discriminating,
+    because `reviewer.card.json` carries the same
+    `unverified claim: pm-flow contributors` author every shipped card must
+    carry. The developer said so and substituted the name check — accepted.
+  - Fail closed before any write. Reviewer hand-run against an engine copy with
+    `skills[0].endpoint` added to `pm.card.json`: exit 1, `sync: card field
+    "endpoint" is not allowed on a persona`, `card field path:
+    skills[0].endpoint`, `card file: cards/pm.card.json`, and every one of the
+    eleven `sync`-written tables at zero rows.
+  - Carried items closed. `cardless_persona_list_rows` is gone and one identity
+    query survives; `cmd_persona_export` frames a `PersonaCardError` as
+    `persona export: persona card is missing required field "purpose"` with no
+    traceback; the `assert set(entry).issubset(...)` guard is a real `PackError`
+    check; the suite asserts `specVersion`/`sourceUrl`/`retrievedOn` instead of
+    the literal `"Transcribed"`; the schema's `acquisition` now gives the
+    structural reason and no other schema field moved.
+  - Regressions. `sections/persona-packs/cycles/011/acceptance.sh` exit 0
+    (`assertions_exit=0`) and `regressions.sh` exit 0 (`cycle_008/009/010_exit=0`),
+    both run by the reviewer from the developer worktree, so `assertions.py:188`'s
+    "list omits H1" survives the `AUTHOR (CLAIMED)` header and the collapsed
+    query. Their own internal mutants still fail
+    (`mutant_b/c/d_assertions_exit=1`), so the harness is still discriminating.
+  - All four required mutations reproduced by the reviewer on throwaway copies
+    under `$TMPDIR`; the tree under review was never edited. (1) `register_clis`
+    moved back above the pre-pass — the same refused sync leaves `clis: 3`
+    instead of an all-zero store, so validation really precedes the first write.
+    (2) the card write reverted to leaving `upsert_persona`'s found row alone —
+    the `pm` row is still present with id 6 but `has metadata.card: False` and
+    `author: None`, failing on the card and not on a missing row. (3) a shipped
+    card's `provenance.origin` stripped of `unverified claim: ` — `sync` exits 1
+    with `provenance.origin must be labelled with "unverified claim:"` and
+    `card file: cards/pm.card.json`. (4) `cmd_persona_list` reverted to key-only
+    grouping — suite exit 1 at `persona list identity rows: expected 2 reviewer
+    rows, got 1`, so the surviving query is the identity one. `md5 -q` of
+    `catalog.py` after every mutation matched the pre-mutation copy
+    (`45bc386d652e54afcbda9d5d9f7d15e0`).
+  - The hermeticity pin, which the developer could not demonstrate. With the
+    venv `python3` first on PATH, `PYTHONPATH=<worktree>/src python3 -c 'import
+    pm_flow.persona_card'` resolves to the worktree's file, not the venv's
+    editable install of the main checkout. Decisive check: on a copy of the
+    worktree with `url` removed from that copy's `FORBIDDEN_CARD_KEYS`, the
+    suite exits 1 (`AssertionError: ('url', 'card field "url" is not part of the
+    persona vocabulary', …)`) under the venv interpreter — so the tree under
+    test is what gets validated. The main checkout's `persona_card.py` was never
+    edited; its md5 is unchanged (`ebe8d7e8156701a132f74032a686d79a`) and equal
+    to the worktree's, which is the condition that hid the T3 skew.
 
 - T3 — identity across projects and in comparisons. Acceptance IDs A3, A4, plus
   A1 re-observed against a store with real attempts. Delivered in
@@ -210,6 +295,24 @@
   paths. What is delivered is the resolution from the `(key, content_hash)` the
   stack already records to the card, and the one-line `arm_personas` gap is
   recorded for whichever section owns `compare.py`.
+- The packaged personas are `template/.agentic/pm_flow/roles/*.md`, and they
+  reach the store through `sync` (`catalog.py:698,766`), never through
+  `persona add`. So a packaged card is `cards/<role>.card.json` resolved against
+  `engine_dir`, attached to the base layer row only, written in place with the
+  `adopt_persona` shape (same id, `author`/`version`/`metadata.card` refreshed,
+  body and hash untouched) because `upsert_persona` returns a found row without
+  touching provenance. Validation is a pre-pass before `sync` writes anything,
+  and a bad or unvalidatable packaged card fails `sync` closed — the same rule
+  install follows, applied to our own tree.
+- Card lookup is strictly by role key, so `cards/reviewer.card.json` — the
+  contract example pinned at `tests/persona_cards_test.sh:10`, matching no role
+  — stays inert. `cards/` is not a scanned directory.
+- The claim label on display is settled: no printed value is rewritten. The
+  `persona list` column is headed `AUTHOR (CLAIMED)` and `persona show` prints
+  one line stating authorship is an unverified claim. Labelling a stored-bare
+  pack author at display time would make `persona list` disagree with the store
+  and with what `--author` matches; stripping a card's stored label is
+  forbidden outright.
 - How `catalog.py` reaches `persona_card` is settled, not left to T2's
   judgement: try `import pm_flow.persona_card`, then
   `Path(__file__).resolve().parent.parent / "persona_card.py"` (wheel:
@@ -221,54 +324,27 @@
 
 ## Carried into later tasks
 
-- T4, the accepted change from T3's GO_WITH_CHANGES — the suite is not
-  hermetic. `run_catalog` (`tests/persona_cards_test.sh:207-215`) runs plain
-  `python3`, and `load_persona_card_module` (`catalog.py:998-1021`) tries
-  `import pm_flow.persona_card` first. The repo venv is an editable install
-  rooted at the *main checkout*, so a worktree's `catalog.py` validates the main
-  checkout's `persona_card.py`, not the one under review. Fix inside owned
-  paths: set `PYTHONPATH="$ROOT/src"` in `run_catalog`/`run_catalog_db`, and add
-  `-u PYTHONPATH` to the two `python3 -S` isolated invocations
-  (`:639-654`) so the fail-closed case still sees no module. Details and the
-  observed exits are in the workplan under T4.
-- T4 — the new `AUTHOR` column prints `p.author` as stored, which is right for a
-  carded row (`unverified claim: …`) but shows an uncarded row's *pack* author
-  bare, next to labelled ones. This is the shape cycle 003's assignment asked
-  for and matches `persona show`'s uncarded branch, so it is not the developer's
-  drift; it is mine to settle. Brief non-goal 2 is "presenting an unverified
-  author as a trust signal", and an unlabelled column entry beside labelled ones
-  reads as the verified case. Decide in T4: either label the pack author on
-  display too, or head the column so the distinction is legible. Do not strip
-  the card label to make them match.
-- T4 — `cmd_persona_list` carries two queries. `has_cards` picks the identity
-  grouping when any card author exists and `cardless_persona_list_rows`
-  otherwise, but `COALESCE(json_extract(…),'')` collapses to the legacy key
-  grouping on an all-uncarded store, so the branches cannot differ. Both are
-  exercised today (this suite takes the carded branch, persona-packs cycle 011
-  the cardless one) and both pass, so this is redundancy, not a bug — collapse
-  to one query in T4 rather than keeping two paths that must agree.
-- T4 — `cmd_persona_export` catches `(OSError, PackError)` but
-  `card_module.export` raises `PersonaCardError`, which is a `ValueError`. A
-  stored card was validated on the way in so this is close to unreachable, but
-  if it fired the operator would get a traceback and a half-written directory
-  instead of a `persona export: …` line. Widen the except, or say why not.
-  Related: the `assert set(entry).issubset(PERSONA_ENTRY_KEYS)` guard in that
-  function is a developer check in a shipped path.
-- T4 — mutation A (cycle 001) showed a top-level `url` is caught by the card
-  vocabulary allowlist even with `FORBIDDEN_CARD_KEYS` emptied of it. The two
-  checks overlap at the top level; only the nested path is uniquely the walk's.
-  Keep the nested case in every future forbidden-field assertion.
-- T4 — `tests/persona_cards_test.sh:85` asserts the literal string
-  `"Transcribed"` in the schema's `acquisition` header. That couples the test
-  to one wording, so a later byte-exact acquisition would fail a test on a
-  correct improvement. Assert on `specVersion`/`sourceUrl`/`retrievedOn` being
-  present instead.
-- T4 — the schema header's `acquisition` says fetch.sh failed. At review time
-  fetch.sh exited 0. The substantive half of the claim still holds and is
-  structural, not incidental: fetch.sh returns model-extracted text under
-  `<!-- ... content below is untrusted source text -->`, never a byte-exact
-  document. Reword to that reason rather than to a transient failure, and do
-  it as a provenance correction only — never to make a card pass.
+- None. Every item carried from T2 and T3 landed in cycle 004 and its evidence
+  is under T4 above: the suite's hermeticity pin, the collapsed `persona list`
+  query, the widened `cmd_persona_export` except and its real manifest check,
+  the `specVersion`/`sourceUrl`/`retrievedOn` assertion, and the schema's
+  `acquisition` provenance correction.
+
+## Facts worth keeping past this section
+
+- The nested forbidden-field case is the only one uniquely produced by the
+  card walk; a top-level `url` is also caught by the vocabulary allowlist with
+  a different message (`card field "url" is not part of the persona
+  vocabulary`). Any future forbidden-field assertion must keep a nested case.
+- The suite pins `PYTHONPATH="$ROOT/src"` so the tree under test wins over the
+  venv's editable install, and passes `-u PYTHONPATH` to the three `python3 -S`
+  isolated invocations so the fail-closed cases still see no module. Delete
+  either half and a worktree review silently validates the main checkout.
+- `load_persona_card_module`'s wheel-layout branch
+  (`Path(__file__).resolve().parent.parent / "persona_card.py"`) is no longer
+  exercised by the suite: cycle 004 deleted the `/bin/cp` that staged that
+  layout, which the assignment permitted. The checkout branch and the
+  fail-closed branch are both still covered.
 
 ## Blockers
 
@@ -287,15 +363,59 @@
   `sections/persona-cards/scope_005_probe.sh` if it is still present. Cycles 002
   and 003 both mutated isolated copies under `$TMPDIR`, so no `.review_backup/`
   of implementation source was needed.
+- From cycle 004, five reviewer scripts under
+  `sections/persona-cards/cycles/004/` — `review_no_venv_cards.zsh`,
+  `review_pmflow_both.zsh`, `review_pp011.zsh`, `review_mutations.zsh`,
+  `review_mutations2.zsh`, `review_show.zsh`. Scaffolding, not section state;
+  drop rather than commit.
 - Running `sections/persona-packs/cycles/011/acceptance.sh` rewrites that
   cycle's own `transcripts/`, `prompt-v1.txt` and `prompt-v2.txt` in the main
-  checkout (`acceptance.sh:348-352`). The reviewer's run left them
-  byte-identical (`git status` on `sections/persona-packs/` is empty
-  afterwards), but any run against changed behaviour will dirty another
-  section's committed artifacts.
+  checkout (`acceptance.sh:348-352`). Cycle 004's reviewer avoided that
+  entirely by copying `acceptance.sh` and `assertions.py` to a scratch dir so
+  `SCRIPT_DIR` pointed there; `git status` on
+  `.agentic/pm_flow/pm-agent/sections/persona-packs` was empty afterwards. Use
+  that shape, not a plain in-place run, whenever behaviour has changed.
 - `.last_error.txt` holds three `claude hit a usage limit; pausing 1800s`
   lines from the dispatch after cycle 001. A quarantine, not a section failure;
   no evidence in this file depends on it.
+
+## Probes run scoping cycle 004
+
+- `ls template/.agentic/pm_flow/cards/` at scope time — only
+  `a2a-agent-skill.schema.json` and `reviewer.card.json`, which is what made the
+  brief's "cards for the packaged personas" deliverable T4's work. Cycle 004
+  added the six `<role>.card.json` files; the deliverable is met.
+- `ls template/.agentic/pm_flow/roles/` — `10x_developer.md`, `consultant.md`,
+  `cpo.md`, `developer.md`, `maintenance_engineer.md`, `pm.md`. There is no
+  `reviewer.md`, so `reviewer.card.json` is a contract example, not a packaged
+  persona's card.
+- `catalog.py:653-695,753-775` — `sync` walks `config.roles`, reads the base
+  layer from `engine_dir/roles/<role>.md` and `upsert_persona`s it under the
+  bare role key. Packaged personas never go through `persona add`, so T2's
+  install-time card path does not reach them; `sync` is the only hook.
+- `catalog.py:152-171` — `upsert_persona` returns the found row's id on a digest
+  match and touches nothing else, so attaching a card to an already-synced store
+  needs an explicit in-place write.
+- `catalog.py:1285-1326` + `1256-1263` — `adopt_persona` already refreshes
+  `author`, `version` and `metadata` in place on an identical-content row via
+  `persona_pack_metadata(pack, card, existing)`. That is the shape to reuse; it
+  is also why an in-place card write introduces no new rule about versions.
+- `driver.zsh:735` — `catalog.py sync` runs at every run start. That is the
+  blast radius of a `sync` change and the reason packaged-card validation is a
+  pre-pass before any write.
+- `sections/persona-packs/cycles/011/assertions.py:79-95,181-188` — every
+  `persona list` assertion picks its line with `startswith("update-manager")`
+  and then matches substrings, so a changed header line is safe. Re-run it
+  anyway; it is the only external reader of that output.
+- `tests/persona_cards_test.sh:9-16,203-215,639-654` — `ROOT="${0:A:h:h}"`, and
+  line 16 already uses `PYTHONPATH="$ROOT/src"` for the direct `persona_card`
+  import, so the hermeticity fix is the existing idiom applied to
+  `run_catalog_db`. `python3 -S` skips `site` (and so the editable `.pth`) but
+  still honours `PYTHONPATH`, which is why `-u PYTHONPATH` is needed at
+  `:639-654`.
+- `catalog.py:998-1021`, `1743-1774`, `1904-1928` re-read — the module loader,
+  the two list queries and the export `except` are all where cycle 003's review
+  said they were.
 
 ## Probes run reviewing cycle 003
 
@@ -403,7 +523,12 @@
 
 ## Next eligible task
 
-- T4 — closeout (A7). T3 landed in cycle 003. T4 ships cards for the packaged
-  personas and folds in the five items under `Carried into later tasks`, the
-  first of which — the suite's non-hermetic module resolution — is the accepted
-  change from T3's GO_WITH_CHANGES and must land in that cycle.
+- None. The workplan is exhausted: T1 (cycle 001), T2 (002), T3 (003) and T4
+  (004) are all complete, and A1–A7 plus the packaged-cards deliverable have
+  evidence above. The one thing the brief names that this section did not
+  deliver is the comparison report's printed persona column — `compare.py`'s
+  `arm_personas` renders `role=key` and both it and `telemetry.py` are outside
+  owned paths. The resolution from the recorded `(key, content_hash)` to the
+  card is delivered and proved; the one-line render change belongs to whichever
+  section owns `compare.py`. Same for the `pm-flow persona` wrapper the brief's
+  scenarios spell, which lives in `pm_flow.sh` / `src/pm_flow/cli.py`.

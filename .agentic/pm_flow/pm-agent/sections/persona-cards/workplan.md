@@ -210,17 +210,73 @@
 
 ## Task T4 — Closeout
 
-- Status: pending.
-- Outcome: packaged cards ship for the default personas; both suites pass, and
-  the suite validates the tree it is run from rather than whichever
+- Status: complete (cycle 004, GO).
+- Outcome: the personas this repository actually ships carry cards and
+  `persona show <role>` prints them from a real synced store; both suites pass,
+  and the suite validates the tree it is run from rather than whichever
   `pm_flow.persona_card` happens to be importable.
-- Paths: `template/.agentic/pm_flow/cards/**`, `tests/persona_cards_test.sh`.
-- Reuse: T1–T3.
-- Acceptance IDs: A7.
+- Paths: `template/.agentic/pm_flow/cards/**`,
+  `template/.agentic/pm_flow/catalog.py`, `tests/persona_cards_test.sh`.
+- Reuse: T1–T3; `adopt_persona` (`catalog.py:1285`) and
+  `persona_pack_metadata` (`catalog.py:1256`) for the in-place card write;
+  `load_persona_card_module` (`catalog.py:998`); `read_pack`'s validate-before-
+  any-write shape (`catalog.py:1024`).
+- Acceptance IDs: A7, plus the brief deliverable "cards for the packaged
+  personas", and A1/A5 re-observed against shipped cards rather than fixtures.
 - Validation: `zsh tests/persona_cards_test.sh` and `zsh tests/pm_flow_test.sh`
   exit 0, run twice: once with the repo venv's `python3` on PATH and once
-  without it. Both must agree.
+  without it. Both must agree. Plus a real `catalog.py sync` of the template
+  engine directory followed by `persona show pm`, printing the packaged card.
 - Depends on: T3.
+
+### The packaged cards, and where they attach
+
+- The packaged personas are `template/.agentic/pm_flow/roles/*.md` —
+  `10x_developer`, `consultant`, `cpo`, `developer`, `maintenance_engineer`,
+  `pm`. They are not installed by `persona add`: `sync` (`catalog.py:698`)
+  walks `config.roles`, calls `read_persona_layers` (`catalog.py:653`) and
+  `upsert_persona` (`catalog.py:766`) per layer, and the base layer's row is
+  keyed by the bare role name. So `cards/<role>.card.json` is resolved against
+  `engine_dir`, which `sync` already takes, and attaches to the base layer
+  only. Domain (`<domain>/<role>`) and style (`<project>/<role>`) layers are
+  not packaged and take no card.
+- `upsert_persona` returns the found row's id without touching provenance, so a
+  store synced before cards existed would stay uncarded forever. The card write
+  is therefore the `adopt_persona` shape: same row id, `author`/`version`/
+  `metadata.card` refreshed in place through `persona_pack_metadata`, body and
+  `content_hash` untouched. In-place provenance refresh on an identical-content
+  row is already the settled behaviour for path→Git adoption, so this
+  introduces no new rule about what a version is.
+- Validation is a pre-pass, before `sync` writes anything, mirroring `read_pack`
+  validating a whole pack before the store is opened. A packaged card that is
+  malformed, carries a forbidden field, or cannot be validated because the card
+  module will not load makes `sync` exit non-zero naming the file and the field.
+  `driver.zsh:735` runs `sync` at every run start, so this stops every tick —
+  which is right for a defect in a card this repository ships, and is the same
+  fail-closed rule install already follows. Skipping an unvalidated packaged
+  card is the one outcome that reproduces brief A2's failure inside our own
+  tree.
+- `cards/reviewer.card.json` matches no role and stays the contract example the
+  suite pins at `tests/persona_cards_test.sh:10`. Lookup is strictly by role
+  key, so it is inert; the suite asserts it reaches no persona row, so nobody
+  later reads `cards/` as a scanned directory.
+
+### The claim label on display, settled
+
+- `persona_card` enforces `CLAIM_PREFIX` on a card's stored `author`
+  (cycle 001, mutation D), so a carded row prints `unverified claim: X` and an
+  uncarded row prints a bare pack author. Beside each other the bare one reads
+  as the verified case — brief non-goal 2.
+- Settled: do not rewrite either value on display. `persona list` heads the
+  column `AUTHOR (CLAIMED)`, and `persona show` prints one line above the
+  identity block saying authorship is a claim from the persona's own source and
+  nothing here verifies it. Values printed stay exactly as stored, so what
+  `--author` matches is still what is printed, and `persona list` and
+  `persona show` cannot disagree about what the store holds. Applying the label
+  at display time to a value stored without one would break both.
+- `sections/persona-packs/cycles/011/assertions.py:79-95,181-188` selects its
+  lines with `startswith("<key>")`, so a changed header line is safe — prove it
+  by re-running the harness, not by reading it.
 
 ### Carried from T3 — the suite is not hermetic
 
@@ -244,6 +300,33 @@
   recur for every future cycle that edits `src/pm_flow/**` and is reviewed in a
   worktree, which is every cycle.
 
+### Carried from T3 — the three shape items and the provenance line
+
+- `cmd_persona_list` (`catalog.py:1754-1774`) keeps two queries behind a
+  `has_cards` probe, but `COALESCE(json_extract(…),'')` collapses to the legacy
+  key grouping on an all-uncarded store, so the branches cannot differ. Collapse
+  to the identity query and delete `cardless_persona_list_rows`
+  (`catalog.py:1743`); `persona-packs` cycle 011 is the cardless case and must
+  still pass on the surviving query.
+- `cmd_persona_export` (`catalog.py:1925`) catches `(OSError, PackError)` but
+  `card_module.export` raises `PersonaCardError`, a `ValueError`. Widen it so a
+  failure is a `persona export: …` line rather than a traceback beside a
+  half-written directory, and replace the
+  `assert set(entry).issubset(PERSONA_ENTRY_KEYS)` developer check
+  (`catalog.py:1910`) — an `assert` in a shipped path vanishes under `-O`.
+- `tests/persona_cards_test.sh:89` asserts the literal `"Transcribed"` in the
+  schema's `acquisition` header, coupling the test to one wording. Assert
+  `specVersion`, `sourceUrl` and `retrievedOn` are present instead. Then reword
+  the header itself (`cards/a2a-agent-skill.schema.json:10`): it says fetch.sh
+  failed, but fetch.sh exited 0 at review time. The real, structural reason is
+  that `fetch.sh` returns model-extracted text under an untrusted-source marker
+  and never a byte-exact document. A provenance correction only — the schema's
+  fields are settled and are not edited to suit a card.
+- Cycle 001's mutation A showed a top-level `url` is caught by the card
+  vocabulary allowlist even with `FORBIDDEN_CARD_KEYS` emptied of it. Only the
+  nested path is uniquely the walk's, so keep the nested case in every
+  forbidden-field assertion.
+
 ## Integration and end-to-end validation
 
 - T3 is where scenario 3 is observable end to end, up to the ownership
@@ -251,6 +334,10 @@
   list, show and swap distinctly, and a real two-arm `compare report` resolves
   to a different card per arm. The report's own `personas` column still prints
   `role=key`, because `compare.py` is not an owned path.
+- T4 is where scenario 1 stops resting on a fixture: the personas this
+  repository ships carry cards, a real `sync` attaches them, and
+  `persona show pm` prints author, purpose, skills and version with no dispatch
+  recorded.
 
 ## Risks and rollback
 
@@ -289,4 +376,5 @@
 | A2 | T1, T2 | Refusal names the field; atomic rollback |
 | A3, A4 | T3 | Distinct listing; lossless round trip |
 | A6 | T1 | Independent schema validation |
-| A7 | T4 | Both suites exit 0 |
+| A7 | T4 | Both suites exit 0 under two interpreters |
+| A1, A5 re-observed | T4 | Shipped cards on real synced role rows; uncarded layers unchanged |
