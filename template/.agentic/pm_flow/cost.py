@@ -9,9 +9,8 @@ string with no top-level key. Those are exactly the dispatches worth counting -
 a call that died after the model had already answered is paid for and bought
 nothing - so the nested form is parsed too, with a regex as the last resort.
 
-Legacy totals remain available while the driver still uses their explicit TSV
-arity. New total and report calls silently absorb that history once, then answer
-only from attempts in the project store.
+Total and report calls silently absorb legacy history once, then answer only
+from attempts in the project store.
 """
 
 import json
@@ -263,53 +262,13 @@ def report_store(project_dir):
         )))
 
 
-def totals(project_dir, ledger_path):
-    """Per-section and project totals, counting each dispatch exactly once."""
-    per_section = {}
-    counted = set()
-
-    def add(section, amount):
-        per_section[section] = per_section.get(section, 0.0) + amount
-
-    for row in ledger_rows(ledger_path):
-        if row["response"]:
-            counted.add(row["response"])
-        if not row["cost"]:
-            continue
-        try:
-            add(row["section"], float(row["cost"]))
-        except ValueError:
-            continue
-
-    # Anything the ledger never saw: dispatches from before it existed, and
-    # dispatches whose cost the older harness discarded.
-    for path in response_files(project_dir):
-        key = str(path)
-        if key in counted:
-            continue
-        amount = cost_of(path)
-        if amount is None:
-            continue
-        add(section_of(path, project_dir), amount)
-
-    return per_section
-
-
 def main(argv):
     if len(argv) >= 3 and argv[1] == "one":
         amount = cost_of(argv[2])
         print("" if amount is None else f"{amount:.6f}")
         return 0
-    if (len(argv) in (4, 5) and argv[1] == "total"
-            and argv[3].endswith(".tsv")):
-        per_section = totals(argv[2], argv[3])
-        wanted = argv[4] if len(argv) > 4 else ""
-        if wanted:
-            print(f"{per_section.get(wanted, 0.0):.4f}")
-        else:
-            print(f"{sum(per_section.values()):.4f}")
-        return 0
-    if len(argv) in (3, 4) and argv[1] == "total":
+    if (len(argv) in (3, 4) and argv[1] == "total"
+            and (len(argv) == 3 or not argv[3].endswith(".tsv"))):
         import_legacy(argv[2])
         per_section = stored_totals(argv[2])
         wanted = argv[3] if len(argv) == 4 else ""
@@ -327,7 +286,6 @@ def main(argv):
         return 0
     print("usage: cost.py one <response.json>", file=sys.stderr)
     print("       cost.py total <project_dir> [section]", file=sys.stderr)
-    print("       cost.py total <project_dir> <ledger> [section]", file=sys.stderr)
     print("       cost.py report <project_dir>", file=sys.stderr)
     print("       cost.py import <project_dir>", file=sys.stderr)
     return 2

@@ -56,6 +56,19 @@ set_config governance.portfolio_review_dispatches 0
 set_config governance.portfolio_review_usd 0
 set_config governance.portfolio_review_idle_cycles 0
 
+seed_attempt() {
+  local section="$1" role="$2" label="$3" cost="$4" response="$5"
+  local run_output run_id attempt_output attempt_id
+  run_output="$(python3 "$FLOW/telemetry.py" --db "$FLOW/demo/runs/pm_flow.db" \
+    run-start --project demo --run-key "seed-${response:t}")"
+  run_id="$(printf '%s\n' "$run_output" | sed -n 's/^run_id=//p')"
+  attempt_output="$(python3 "$FLOW/telemetry.py" --db "$FLOW/demo/runs/pm_flow.db" \
+    attempt-start --run "$run_id" --role "$role" --task "$section" --label "$label")"
+  attempt_id="$(printf '%s\n' "$attempt_output" | sed -n 's/^attempt_id=//p')"
+  python3 "$FLOW/telemetry.py" --db "$FLOW/demo/runs/pm_flow.db" attempt-end \
+    --attempt "$attempt_id" --cost-usd "$cost" --response "$response"
+}
+
 export STUB_LOG="$W/dispatch.log"
 : > "$STUB_LOG"
 
@@ -154,10 +167,9 @@ eq      "D1 the section's next action is still its first scope" \
         "$("$FLOWSH" status | awk '$1 == "alpha" {print $4}')" "scope"
 
 printf '\n===== D1: the cost is recorded like any dispatch =====\n'
-has "D1 the ledger carries the analysis" \
-    "$(cat "$FLOW/demo/runs/cost_ledger.tsv")" "analysis alpha"
+has "D1 the store carries the analysis" "$("$FLOWSH" cost)" "analysis alpha"
 eq  "D1 and charges it to the section" \
-    "$(awk -F'\t' '$4 ~ /^analysis/ {print $2; exit}' "$FLOW/demo/runs/cost_ledger.tsv")" "alpha"
+    "$("$FLOWSH" cost | awk -F'\t' '$1 == "ATTEMPT" && $5 ~ /^analysis/ {print $3; exit}')" "alpha"
 
 printf '\n===== D1: a focusing question reaches the manager =====\n'
 : > "$STUB_LOG"
@@ -237,7 +249,7 @@ has    "D2 and carries this review's shortest path" \
 printf '\n===== D2: it advances the governance baseline =====\n'
 set_config governance.portfolio_review_dispatches 1
 absent "D2 the loop is not left about to convene another" "$("$FLOWSH" next)" "portfolio-review"
-printf 'x\tdemo\tpm\tscope\t0.5\ty\n' >> "$FLOW/demo/runs/cost_ledger.tsv"
+seed_attempt demo pm scope 0.5 "$FLOW/demo/runs/y"
 has    "D2 and one further dispatch arms it again" "$("$FLOWSH" next)" "portfolio-review"
 set_config governance.portfolio_review_dispatches 0
 

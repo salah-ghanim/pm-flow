@@ -165,8 +165,9 @@ sections carry on. `run` exits non-zero only when nothing can move — every liv
 section quarantined, or a dependent left waiting on a section that was
 cancelled.
 
-Every dispatch records what it cost to `runs/cost_ledger.tsv`. `status` and each
-tick line show the running total, and `budget.max_usd` and
+Every dispatch is one `attempts` row in `runs/pm_flow.db`, and `pm-flow cost`
+reports those rows. A legacy TSV is imported once. `status` and each tick line
+show the running total, and `budget.max_usd` and
 `budget.max_usd_per_section` stop a run before it spends past them. Both default
 to `0`, which means unlimited rather than nothing. Costs are reported by the
 `claude` backend; other backends record the dispatch with an unknown cost rather

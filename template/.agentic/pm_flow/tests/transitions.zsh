@@ -192,7 +192,8 @@ has "F11 summary.txt is no longer the creation text" \
     "$(cat "$FLOW/demo/sections/alpha/summary.txt")" "last action"
 
 printf '\n===== F7: the dispatch cost is recorded =====\n'
-has "F7 the ledger has a priced row" "$(cat "$FLOW/demo/runs/cost_ledger.tsv")" "0.500000"
+has "F7 the store has a priced row" \
+    "$("$FLOWSH" cost | awk -F'\t' '$1 == "ATTEMPT" {print $7}')" "0.5000"
 has "F7 status reports the total"    "$("$FLOWSH" status)" "total spent: \$0.5000"
 
 printf '\n===== F2: the developer status is parsed =====\n'
@@ -314,7 +315,7 @@ eq     "F4 status surfaces the quarantine" \
 absent "F4 a quarantined section leaves the queue" "$("$FLOWSH" next)" "zeta"
 has    "F4 the healthy sections stay in the queue" "$("$FLOWSH" next)" "alpha"
 has    "F7 a failed dispatch still records its cost" \
-       "$(cat "$FLOW/demo/runs/cost_ledger.tsv")" "0.250000"
+       "$("$FLOWSH" cost | awk -F'\t' '$1 == "ATTEMPT" {print $7}')" "0.2500"
 
 printf '\n===== F19: two drivers cannot run at once =====\n'
 STUB_SLEEP=4 PM_FLOW_STUB="$SCOPE_ASSIGN" PM_FLOW_SECTION=alpha "$FLOWSH" tick >/dev/null 2>&1 &
