@@ -183,7 +183,8 @@ if (( ! offline_only )); then
 fi
 
 exported_count() {
-  python3 - "$DB" <<'PY'
+  local database="${1:-$DB}"
+  python3 - "$database" <<'PY'
 import sqlite3
 import sys
 connection = sqlite3.connect(sys.argv[1])
@@ -194,7 +195,8 @@ PY
 }
 
 reset_exports() {
-  python3 - "$DB" <<'PY'
+  local database="${1:-$DB}"
+  python3 - "$database" <<'PY'
 import sqlite3
 import sys
 connection = sqlite3.connect(sys.argv[1])
@@ -350,30 +352,9 @@ assert_eq "$output" "exported $SPAN_COUNT span(s)" \
   "explicit endpoint overrides config"
 fi
 
-# A venv with a poison opentelemetry package proves the file path imports no
-# optional SDK. The written request passes the exporter's own check and a
-# separate JSON-Schema subset validator implemented only in this test.
-reset_exports
-NO_SDK_VENV="$TEST_ROOT/no-sdk"
-POISON_PATH="$TEST_ROOT/poison"
-OTLP_FILE="$TEST_ROOT/traces.otlp.jsonl"
-python3 -m venv "$NO_SDK_VENV"
-mkdir -p "$POISON_PATH/opentelemetry"
-printf 'raise ImportError("opentelemetry must not be imported")\n' \
-  > "$POISON_PATH/opentelemetry/__init__.py"
-sdk_code=0
-PYTHONPATH="$POISON_PATH" PATH="$NO_SDK_VENV/bin:$PATH" \
-  trace_command export --file "$OTLP_FILE" \
-  > "$TEST_ROOT/no-sdk.out" 2> "$TEST_ROOT/no-sdk.err" || sdk_code=$?
-if (( sdk_code != 0 )); then
-  /bin/cat "$TEST_ROOT/no-sdk.err" >&2
-  fail "SDK-less file export exited $sdk_code"
-fi
-output="$(/bin/cat "$TEST_ROOT/no-sdk.out")"
-assert_eq "$output" "exported $SPAN_COUNT span(s)" "SDK-less file export count"
-
-PYTHONPATH="$POISON_PATH" "$NO_SDK_VENV/bin/python" \
-  - "$EXPORTER" "$OTLP_FILE" <<'PY'
+validate_otlp_file() {
+  local interpreter="$1" exporter_path="$2" otlp_path="$3"
+  "$interpreter" - "$exporter_path" "$otlp_path" <<'PY'
 import importlib.util
 import json
 import sys
@@ -386,8 +367,11 @@ lines = Path(sys.argv[2]).read_text().splitlines()
 assert len(lines) == 1, lines
 module.validate_otlp_json(json.loads(lines[0]))
 PY
+}
 
-"$NO_SDK_VENV/bin/python" - "$OTLP_FILE" "$SPAN_COUNT" <<'PY'
+validate_schema_subset() {
+  local interpreter="$1" otlp_path="$2" expected_count="$3"
+  "$interpreter" - "$otlp_path" "$expected_count" <<'PY'
 import json
 import re
 import sys
@@ -471,6 +455,33 @@ validate(payload, schema)
 spans = payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
 assert len(spans) == int(sys.argv[2]), len(spans)
 PY
+}
+
+# A venv with a poison opentelemetry package proves the file path imports no
+# optional SDK. The written request passes the exporter's own check and a
+# separate JSON-Schema subset validator implemented only in this test.
+reset_exports
+NO_SDK_VENV="$TEST_ROOT/no-sdk"
+POISON_PATH="$TEST_ROOT/poison"
+OTLP_FILE="$TEST_ROOT/traces.otlp.jsonl"
+python3 -m venv "$NO_SDK_VENV"
+mkdir -p "$POISON_PATH/opentelemetry"
+printf 'raise ImportError("opentelemetry must not be imported")\n' \
+  > "$POISON_PATH/opentelemetry/__init__.py"
+sdk_code=0
+PYTHONPATH="$POISON_PATH" PATH="$NO_SDK_VENV/bin:$PATH" \
+  trace_command export --file "$OTLP_FILE" \
+  > "$TEST_ROOT/no-sdk.out" 2> "$TEST_ROOT/no-sdk.err" || sdk_code=$?
+if (( sdk_code != 0 )); then
+  /bin/cat "$TEST_ROOT/no-sdk.err" >&2
+  fail "SDK-less file export exited $sdk_code"
+fi
+output="$(/bin/cat "$TEST_ROOT/no-sdk.out")"
+assert_eq "$output" "exported $SPAN_COUNT span(s)" "SDK-less file export count"
+
+PYTHONPATH="$POISON_PATH" validate_otlp_file \
+  "$NO_SDK_VENV/bin/python" "$EXPORTER" "$OTLP_FILE"
+validate_schema_subset "$NO_SDK_VENV/bin/python" "$OTLP_FILE" "$SPAN_COUNT"
 
 # Reuse the headless stub harness: a disabled project performs one normal
 # scope tick while the pre-created store remains byte-for-byte span-neutral.
@@ -546,6 +557,11 @@ span_count() {
   python3 - "$1" <<'PY'
 import sqlite3
 import sys
+from pathlib import Path
+
+if not Path(sys.argv[1]).exists():
+    print(0)
+    raise SystemExit
 connection = sqlite3.connect(sys.argv[1])
 print(connection.execute("SELECT COUNT(*) FROM spans").fetchone()[0])
 PY
@@ -625,6 +641,250 @@ TRACE_FAILURE_MARKER="$TRACE_FAILURE_MARKER" \
 assert_eq "$mutant_tick_code" "0" "exporter exception preserves tick status"
 [[ -f "$TRACE_FAILURE_MARKER" ]] || \
   fail "exporter failure mutation did not execute"
+
+# Build the current wheel entirely from the vendored build wheelhouse, then
+# install only that wheel into a separate runtime venv. Every command below is
+# the installed entry point and resolves the repository from its working
+# directory; no checkout engine override participates.
+WHEELHOUSE="$REPO_ROOT/tests/packaging-build-wheelhouse"
+BUILD_REQUIREMENTS="$WHEELHOUSE/build-requirements.txt"
+BUILD_VENV="$TEST_ROOT/build-venv"
+VENV="$TEST_ROOT/venv"
+DIST="$TEST_ROOT/dist"
+BUILD_LOG="$TEST_ROOT/build.log"
+mkdir -p "$DIST"
+[[ -f "$BUILD_REQUIREMENTS" ]] || \
+  fail "no locked build requirements at $BUILD_REQUIREMENTS"
+
+unset VIRTUAL_ENV PYTHONPATH PYTHONHOME PYTHONSTARTUP
+for name in ${(k)parameters[(I)PIP_*]} ${(k)parameters[(I)UV_*]}; do
+  unset "$name"
+done
+export PIP_CACHE_DIR="$TEST_ROOT/pip-cache"
+export PIP_CONFIG_FILE="$TEST_ROOT/pip.conf"
+export PIP_DISABLE_PIP_VERSION_CHECK=1
+export PIP_NO_INPUT=1
+: > "$PIP_CONFIG_FILE"
+export ZDOTDIR="$TEST_ROOT/zdotdir"
+mkdir -p "$ZDOTDIR"
+
+python3 -m venv "$BUILD_VENV" > "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "build venv creation failed"
+}
+"$BUILD_VENV/bin/python" -m pip install \
+  --quiet --no-index --find-links "$WHEELHOUSE" --require-hashes \
+  --disable-pip-version-check --no-input \
+  -r "$BUILD_REQUIREMENTS" >> "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "locked build requirements did not install from the wheelhouse"
+}
+"$BUILD_VENV/bin/python" -m pip wheel \
+  --no-index --no-build-isolation --no-deps \
+  --disable-pip-version-check --no-input \
+  --wheel-dir "$DIST" "$REPO_ROOT" >> "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "offline wheel build failed"
+}
+built_wheels="$(find "$DIST" -maxdepth 1 -type f -name 'pm_flow-*.whl' | sort)"
+wheel_count="$(printf '%s' "$built_wheels" | grep -c . || true)"
+assert_eq "$wheel_count" "1" "built wheel count"
+WHEEL="$built_wheels"
+
+python3 -m venv "$VENV" >> "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "runtime venv creation failed"
+}
+"$VENV/bin/python" -m pip install \
+  --quiet --no-index --no-deps \
+  --disable-pip-version-check --no-input \
+  "$WHEEL" >> "$BUILD_LOG" 2>&1 || {
+  /bin/cat "$BUILD_LOG" >&2
+  fail "installing the built wheel into the runtime venv failed"
+}
+PM_FLOW="$VENV/bin/pm-flow"
+[[ -x "$PM_FLOW" ]] || fail "the wheel install produced no pm-flow command"
+! "$VENV/bin/python" -c 'import opentelemetry' >/dev/null 2>&1 || \
+  fail "the runtime venv unexpectedly contains OpenTelemetry"
+PACKAGED_EXPORTER="$("$VENV/bin/python" - <<'PY'
+from pathlib import Path
+import pm_flow
+print(Path(pm_flow.__file__).resolve().parent / "engine" / "trace_export.py")
+PY
+)"
+[[ -f "$PACKAGED_EXPORTER" ]] || \
+  fail "the installed package has no trace exporter"
+
+configure_packaged_repo() {
+  local config_path="$1" enabled="$2"
+  python3 - "$config_path" "$enabled" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+for role in ("cpo", "pm", "developer", "10x_developer"):
+    config["roles"][role] = {
+        "cli": "claude", "model": "", "difficulty": "low",
+    }
+config["telemetry"]["enabled"] = sys.argv[2] == "1"
+config["telemetry"]["otlp_endpoint"] = ""
+config["telemetry"]["headers"] = {}
+path.write_text(json.dumps(config, indent=2) + "\n")
+PY
+}
+
+PACKAGED_BIN="$TEST_ROOT/packaged-bin"
+mkdir -p "$PACKAGED_BIN"
+cp "$REPO_ROOT/tests/fixtures/stub_success.zsh" "$PACKAGED_BIN/claude"
+chmod +x "$PACKAGED_BIN/claude"
+
+drain_packaged_project_work() {
+  local repo="$1" done_flag="$2" guard=0
+  while [[ "$(cd "$repo" && "$PM_FLOW" status)" == *"portfolio review due"* ]]; do
+    (( guard += 1 ))
+    (( guard <= 8 )) || fail "the packaged portfolio review queue would not drain"
+    ( cd "$repo" && PM_DONE_FLAG="$done_flag" \
+      PATH="$PACKAGED_BIN:$PATH" "$PM_FLOW" tick ) > /dev/null 2>&1
+  done
+}
+
+# An enabled run records the spans that the installed trace command exports.
+PACKAGED_REPO="$TEST_ROOT/packaged trace repo"
+PACKAGED_PROJECT="packaged-trace"
+PACKAGED_FLOW="$PACKAGED_REPO/.agentic/pm_flow"
+PACKAGED_DB="$PACKAGED_FLOW/$PACKAGED_PROJECT/runs/pm_flow.db"
+PACKAGED_FLAG="$TEST_ROOT/packaged-done.flag"
+mkdir -p "$PACKAGED_REPO"
+"$REPO_ROOT/install.sh" "$PACKAGED_REPO" --name "Packaged Trace" \
+  --project-key "$PACKAGED_PROJECT" > "$TEST_ROOT/packaged-install.out"
+configure_packaged_repo "$PACKAGED_FLOW/config.json" 1
+( cd "$PACKAGED_REPO" && "$PM_FLOW" init-section widget \
+  --file "$BRIEF_FILE" ) > "$TEST_ROOT/packaged-init.out"
+packaged_before="$(span_count "$PACKAGED_DB")"
+assert_eq "$packaged_before" "0" "packaged pre-tick span count"
+drain_packaged_project_work "$PACKAGED_REPO" "$PACKAGED_FLAG"
+packaged_tick_code=0
+( cd "$PACKAGED_REPO" && PM_DONE_FLAG="$PACKAGED_FLAG" \
+  PATH="$PACKAGED_BIN:$PATH" "$PM_FLOW" tick ) \
+  > "$TEST_ROOT/packaged-tick.out" 2>&1 || packaged_tick_code=$?
+assert_eq "$packaged_tick_code" "0" "packaged enabled tick status"
+stored_count="$(span_count "$PACKAGED_DB")"
+(( stored_count > 0 )) || fail "the packaged tick recorded no spans"
+
+recorded_ids="$(python3 - "$PACKAGED_DB" <<'PY'
+import sqlite3
+import sys
+
+connection = sqlite3.connect(sys.argv[1])
+rows = connection.execute(
+    "SELECT span_id FROM spans WHERE ended_at IS NOT NULL "
+    "ORDER BY started_at ASC, span_id ASC"
+).fetchall()
+print(",".join(row[0] for row in rows))
+PY
+)"
+recorded_count="$(python3 - "$PACKAGED_DB" <<'PY'
+import sqlite3
+import sys
+connection = sqlite3.connect(sys.argv[1])
+print(connection.execute(
+    "SELECT COUNT(*) FROM spans WHERE ended_at IS NOT NULL"
+).fetchone()[0])
+PY
+)"
+(( recorded_count > 0 )) || fail "the packaged tick recorded no finished spans"
+in_flight_before="$(python3 - "$PACKAGED_DB" <<'PY'
+import sqlite3
+import sys
+connection = sqlite3.connect(sys.argv[1])
+print(connection.execute(
+    "SELECT COUNT(*) FROM spans WHERE ended_at IS NULL"
+).fetchone()[0])
+PY
+)"
+
+# Keep one live span beside the real run. Status must exclude it from the
+# finished-unexported number without hiding that work is still in flight.
+python3 - "$PACKAGED_DB" <<'PY'
+import sqlite3
+import sys
+
+connection = sqlite3.connect(sys.argv[1])
+with connection:
+    connection.execute(
+        "INSERT INTO spans (span_id, trace_id, parent_span_id, name, kind, "
+        "started_at, ended_at, status, attributes) "
+        "VALUES ('ffffffffffffffff', "
+        "'ffffffffffffffffffffffffffffffff', NULL, 'still-running', "
+        "'INTERNAL', 1.0, NULL, 'UNSET', '{}')"
+    )
+PY
+expected_in_flight=$(( in_flight_before + 1 ))
+packaged_status="$(cd "$PACKAGED_REPO" && "$PM_FLOW" trace status)"
+[[ "$packaged_status" == *"unexported spans: $recorded_count"* ]] || \
+  fail "packaged status did not match the next export count"
+[[ "$packaged_status" == *"in-flight spans: $expected_in_flight"* ]] || \
+  fail "packaged status did not report the open span separately"
+
+if (( ! offline_only )); then
+  : > "$REQUESTS_FILE"
+  printf '200\n' > "$STATUS_FILE"
+  output="$(cd "$PACKAGED_REPO" && "$PM_FLOW" trace export --otlp "$ENDPOINT")"
+  assert_eq "$output" "exported $recorded_count span(s)" \
+    "packaged OTLP export count"
+  assert_eq "$(exported_count "$PACKAGED_DB")" "$recorded_count" \
+    "packaged OTLP export checkpoint"
+  assert_eq "$(request_count)" "1" "packaged OTLP request count"
+  assert_eq "$(body_ids 0)" "$recorded_ids" \
+    "packaged OTLP export carries the tick's span ids"
+
+  output="$(cd "$PACKAGED_REPO" && "$PM_FLOW" trace export --otlp "$ENDPOINT")"
+  assert_eq "$output" "exported 0 span(s)" "packaged second export count"
+  assert_eq "$(request_count)" "1" \
+    "packaged second export sends no request"
+fi
+
+reset_exports "$PACKAGED_DB"
+PACKAGED_OTLP_FILE="$TEST_ROOT/packaged-traces.otlp.jsonl"
+output="$(cd "$PACKAGED_REPO" && "$PM_FLOW" trace export \
+  --file "$PACKAGED_OTLP_FILE")"
+assert_eq "$output" "exported $recorded_count span(s)" \
+  "packaged file export count"
+validate_otlp_file "$VENV/bin/python" "$PACKAGED_EXPORTER" \
+  "$PACKAGED_OTLP_FILE"
+validate_schema_subset "$VENV/bin/python" "$PACKAGED_OTLP_FILE" \
+  "$recorded_count"
+
+# Scenario 3 gets its own installed repository: recording starts disabled, the
+# stub tick remains successful, and the store stays span-neutral.
+PACKAGED_DISABLED_REPO="$TEST_ROOT/packaged disabled repo"
+PACKAGED_DISABLED_PROJECT="packaged-disabled"
+PACKAGED_DISABLED_FLOW="$PACKAGED_DISABLED_REPO/.agentic/pm_flow"
+PACKAGED_DISABLED_DB="$PACKAGED_DISABLED_FLOW/$PACKAGED_DISABLED_PROJECT/runs/pm_flow.db"
+PACKAGED_DISABLED_FLAG="$TEST_ROOT/packaged-disabled-done.flag"
+mkdir -p "$PACKAGED_DISABLED_REPO"
+"$REPO_ROOT/install.sh" "$PACKAGED_DISABLED_REPO" \
+  --name "Packaged Disabled" --project-key "$PACKAGED_DISABLED_PROJECT" \
+  > "$TEST_ROOT/packaged-disabled-install.out"
+configure_packaged_repo "$PACKAGED_DISABLED_FLOW/config.json" 0
+( cd "$PACKAGED_DISABLED_REPO" && "$PM_FLOW" init-section widget \
+  --file "$BRIEF_FILE" ) > "$TEST_ROOT/packaged-disabled-init.out"
+drain_packaged_project_work "$PACKAGED_DISABLED_REPO" "$PACKAGED_DISABLED_FLAG"
+packaged_disabled_before="$(span_count "$PACKAGED_DISABLED_DB")"
+packaged_disabled_code=0
+( cd "$PACKAGED_DISABLED_REPO" && PM_DONE_FLAG="$PACKAGED_DISABLED_FLAG" \
+  PATH="$PACKAGED_BIN:$PATH" "$PM_FLOW" tick ) \
+  > "$TEST_ROOT/packaged-disabled-tick.out" 2>&1 || packaged_disabled_code=$?
+assert_eq "$packaged_disabled_code" "0" "packaged disabled tick status"
+packaged_disabled_after="$(span_count "$PACKAGED_DISABLED_DB")"
+assert_eq "$packaged_disabled_after" "$packaged_disabled_before" \
+  "packaged disabled tick span count"
+packaged_disabled_status="$(cd "$PACKAGED_DISABLED_REPO" && \
+  "$PM_FLOW" trace status)"
+[[ "$packaged_disabled_status" == *"recording: disabled"* ]] || \
+  fail "packaged status did not report disabled recording"
 
 if (( offline_only )); then
   printf 'A2 and A4 trace command tests passed; receiver-backed A1/A3 not run in offline mode\n'
