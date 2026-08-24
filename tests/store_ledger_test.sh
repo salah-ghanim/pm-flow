@@ -323,6 +323,161 @@ assert_eq "$(cd "$COMMAND_WORK" && "$FLOW/pm_flow.sh" cost | \
   "budget refusal does not add an attempt"
 [[ ! -e "$LEDGER" ]] || fail "budget refusal depended on a legacy TSV"
 
+installed() {
+  ( cd "$COMMAND_WORK" && PYTHONPATH="$REPO_ROOT/src" PM_FLOW_ENGINE_ROOT="$FLOW" \
+    python3 -c 'import sys; from pm_flow.cli import main; sys.exit(main())' "$@" )
+}
+
+# Exercise a fresh legacy project through the console-script entry point. The
+# expected total is independent arithmetic over the TSV and envelope-only file.
+PROJECT2="$FLOW/legacy-two"
+PROJECT2_LEDGER="$PROJECT2/runs/cost_ledger.tsv"
+PROJECT2_DB="$PROJECT2/runs/pm_flow.db"
+PROJECT2_ALPHA_ONE="$PROJECT2/sections/alpha/cycles/001/first.response.json"
+PROJECT2_ALPHA_BLANK="$PROJECT2/sections/alpha/cycles/001/blank.response.json"
+PROJECT2_BETA_ONE="$PROJECT2/sections/beta/cycles/001/first.response.json"
+PROJECT2_EXTRA="$PROJECT2/sections/beta/cycles/002/extra.response.json"
+mkdir -p "$PROJECT2/runs" \
+  "$PROJECT2/project_state" \
+  "$PROJECT2/sections/alpha/cycles/001" \
+  "$PROJECT2/sections/beta/cycles/001" \
+  "$PROJECT2/sections/beta/cycles/002"
+printf '%s\n' '{"domain":"generic"}' > "$PROJECT2/project.json"
+printf '# Legacy Two Task Contract\n\nrules\n' > "$PROJECT2/task_contract.md"
+printf '# Plan\n\nexercise installed legacy import\n' > \
+  "$PROJECT2/project_state/plan.md"
+printf '%s\n' '{"total_cost_usd": 7.777}' > "$PROJECT2_ALPHA_BLANK"
+printf '%s\n' '{"total_cost_usd": 0.625}' > "$PROJECT2_EXTRA"
+{
+  printf '2026-02-02T03:04:05Z\talpha\tdeveloper\tfirst\t1.250000\t%s\n' \
+    "$PROJECT2_ALPHA_ONE"
+  printf '2026-02-02T03:05:05Z\talpha\treviewer\tblank\t\t%s\n' \
+    "$PROJECT2_ALPHA_BLANK"
+  printf '2026-02-02T03:06:05Z\tbeta\tdeveloper\tfirst\t2.500000\t%s\n' \
+    "$PROJECT2_BETA_ONE"
+} > "$PROJECT2_LEDGER"
+[[ ! -e "$PROJECT2_DB" ]] || fail "legacy-two unexpectedly starts with a store"
+
+project2_tsv_total="$(awk -F'\t' '{s+=$5} END {printf "%.4f", s}' \
+  "$PROJECT2_LEDGER")"
+project2_extra_total="$(python3 -c \
+  'import json,sys; print(json.load(open(sys.argv[1]))["total_cost_usd"])' \
+  "$PROJECT2_EXTRA")"
+project2_expected="$(awk -v tsv="$project2_tsv_total" \
+  -v extra="$project2_extra_total" 'BEGIN {printf "%.4f", tsv + extra}')"
+project2_first="$TEST_ROOT/legacy-two-first.txt"
+project2_second="$TEST_ROOT/legacy-two-second.txt"
+installed --project legacy-two cost > "$project2_first"
+installed --project legacy-two cost > "$project2_second"
+grep -Fx $'TOTAL\t'"$project2_expected" "$project2_first" >/dev/null || \
+  fail "installed legacy-two cost differs from independent legacy arithmetic"
+cmp -s "$project2_first" "$project2_second" || \
+  fail "repeated installed legacy-two cost output is not byte-identical"
+assert_eq "$(python3 "$COST" import "$PROJECT2")" "imported=0" \
+  "installed legacy-two cost import is idempotent"
+
+# Live telemetry may use a different projects.key from the importer's basename.
+# A per-project store reader must still include the row and resolve its task.
+mixed_run_output="$(python3 "$TELEMETRY" --db "$PROJECT2_DB" run-start \
+  --project other-key --run-key mixed-project-key)"
+mixed_run_id="$(printf '%s\n' "$mixed_run_output" | sed -n 's/^run_id=//p')"
+mixed_attempt_output="$(python3 "$TELEMETRY" --db "$PROJECT2_DB" attempt-start \
+  --run "$mixed_run_id" --role developer --task alpha --label mixed-key --cli claude)"
+mixed_attempt_id="$(printf '%s\n' "$mixed_attempt_output" | \
+  sed -n 's/^attempt_id=//p')"
+python3 "$TELEMETRY" --db "$PROJECT2_DB" attempt-end \
+  --attempt "$mixed_attempt_id" --cost-usd 0.25 \
+  --response "$PROJECT2/runs/mixed-key-does-not-exist.response.json"
+project2_mixed_report="$(installed --project legacy-two cost)"
+project2_mixed_expected="$(awk -v total="$project2_expected" \
+  'BEGIN {printf "%.4f", total + 0.25}')"
+grep -Fx $'TOTAL\t'"$project2_mixed_expected" <<< "$project2_mixed_report" \
+  >/dev/null || fail "mixed projects.key row does not raise the total by 0.2500"
+printf '%s\n' "$project2_mixed_report" | awk -F'\t' \
+  '$1 == "ATTEMPT" && $3 == "alpha" && $5 == "mixed-key" && $7 == "0.2500" {found=1} END {exit !found}' || \
+  fail "mixed projects.key row is not reported under alpha"
+
+# Reopen spending and dispatch through pm_flow.cli.main, keeping the copied
+# engine's stub in force for the whole invocation.
+set_config budget.max_usd 100
+installed_before_report="$(installed cost)"
+installed_attempts_before="$(printf '%s\n' "$installed_before_report" | \
+  grep -c '^ATTEMPT' || true)"
+installed_priced_before="$(printf '%s\n' "$installed_before_report" | \
+  awk -F'\t' '$1 == "ATTEMPT" && $7 == "0.5000" {n++} END {print n+0}')"
+PM_FLOW_STUB="$ANALYSIS" installed section-analysis dispatch-check >/dev/null
+installed_after_report="$(installed cost)"
+installed_attempts_after="$(printf '%s\n' "$installed_after_report" | \
+  grep -c '^ATTEMPT' || true)"
+installed_priced_after="$(printf '%s\n' "$installed_after_report" | \
+  awk -F'\t' '$1 == "ATTEMPT" && $7 == "0.5000" {n++} END {print n+0}')"
+assert_eq "$installed_attempts_after" "$(( installed_attempts_before + 1 ))" \
+  "installed dispatch adds exactly one attempt"
+assert_eq "$installed_priced_after" "$(( installed_priced_before + 1 ))" \
+  "installed dispatch adds exactly one 0.5000 attempt"
+printf '%s\n' "$installed_after_report" | grep -F $'ATTEMPT\t' | grep -F \
+  $'\talpha\tdeveloper\tcodex-one\tcodex\t0.0400\t13937\t5' >/dev/null || \
+  fail "installed cost omits live Codex attempt fields"
+
+runs_listing="$(ls "$PROJECT_DIR/runs")"
+[[ "$runs_listing" == *pm_flow.db* ]] || \
+  fail "installed dispatch did not retain pm_flow.db"
+[[ "$runs_listing" != *cost_ledger.tsv* ]] || \
+  fail "installed dispatch wrote cost_ledger.tsv"
+git -C "$COMMAND_WORK" status --porcelain | grep 'runs/' >/dev/null && \
+  fail "installed dispatch dirtied a path under runs/"
+
+assert_eq "$(python3 "$COST" import "$PROJECT_DIR")" "imported=0" \
+  "installed dispatch envelope is not re-imported"
+duplicate_response_paths="$(python3 -c '
+import sqlite3, sys
+connection = sqlite3.connect(sys.argv[1])
+rows = connection.execute(
+    "SELECT response_path, COUNT(*) FROM attempts "
+    "WHERE response_path IS NOT NULL GROUP BY response_path"
+)
+print("\\n".join(path for path, count in rows if count > 1))
+' "$DB")"
+assert_eq "$duplicate_response_paths" "" \
+  "no response_path is represented more than once"
+python3 -c '
+import sqlite3, sys
+sys.path.insert(0, sys.argv[3])
+import cost
+connection = sqlite3.connect(sys.argv[1])
+recorded = {
+    row[0] for row in connection.execute(
+        "SELECT response_path FROM attempts "
+        "WHERE status != ? AND response_path IS NOT NULL", ("imported",)
+    )
+}
+discovered = {str(path) for path in cost.response_files(sys.argv[2])}
+missing = sorted(recorded - discovered)
+if missing:
+    print("\\n".join(missing))
+    raise SystemExit(1)
+' "$DB" "$PROJECT_DIR" "$FLOW" || \
+  fail "live response_path values differ from cost.response_files strings"
+
+set_config budget.max_usd 12.66
+installed_budget_stdout="$TEST_ROOT/installed-budget.stdout"
+installed_budget_stderr="$TEST_ROOT/installed-budget.stderr"
+installed_budget_status=0
+PM_FLOW_STUB="$ANALYSIS" installed section-analysis dispatch-check \
+  > "$installed_budget_stdout" 2> "$installed_budget_stderr" || \
+  installed_budget_status=$?
+[[ "$installed_budget_status" -ne 0 ]] || \
+  fail "installed budget refusal returned success"
+grep -F "project budget exhausted" "$installed_budget_stderr" >/dev/null || \
+  fail "installed command did not report project budget exhaustion"
+assert_eq "$(installed cost | grep -c '^ATTEMPT' || true)" \
+  "$installed_attempts_after" \
+  "installed budget refusal does not add an attempt"
+[[ ! -e "$LEDGER" ]] || \
+  fail "installed budget refusal depended on a legacy TSV"
+grep -F "cost.py total reported nothing" "$installed_budget_stderr" >/dev/null && \
+  fail "healthy store reader entered spent_usd fallback"
+
 assert_eq "$(grep -c cost_ledger_file \
   "$REPO_ROOT/template/.agentic/pm_flow/driver.zsh" || true)" "0" \
   "driver has no cost_ledger_file reference"
