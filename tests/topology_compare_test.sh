@@ -367,6 +367,183 @@ unswapped_personas="$(sqlite3 "$DB" \
 assert_eq "$unswapped_personas" $'heavy|pm\nlean|pm' \
   "compare without --persona performs no persona swap"
 
+# Exercise compare from the installed layout: the repository owns only project
+# data, while topology documents, domain definitions and personas stay in the
+# engine. Two complete sections make each arm dispatch twice in one run.
+DATA_WORK="$TEST_ROOT/data-only-work"
+DATA_FLOW="$DATA_WORK/.agentic/pm_flow"
+DATA_PROJECT_KEY="data-topology-project"
+DATA_PROJECT_DIR="$DATA_FLOW/$DATA_PROJECT_KEY"
+DATA_DB="$DATA_PROJECT_DIR/runs/pm_flow.db"
+mkdir -p "$DATA_PROJECT_DIR/runs"
+cp "$TEST_ROOT/config.before.json" "$DATA_FLOW/config.json"
+printf '%s\n' "$DATA_PROJECT_KEY" > "$DATA_FLOW/.project-key"
+printf 'export PATH="%s:$PATH"\n' "$STUB_BIN" > "$DATA_FLOW/local_env.sh"
+printf '%s\n' '{"domain":"generic"}' > "$DATA_PROJECT_DIR/project.json"
+printf '# Data-only fixture contract\n\n- Use only stubbed CLIs.\n' \
+  > "$DATA_PROJECT_DIR/task_contract.md"
+
+for section_key in alpha beta; do
+  PM_FLOW_ENGINE_ROOT="$FLOW" PM_FLOW_FLOW_DIR="$DATA_FLOW" \
+    PM_FLOW_REPO_ROOT="$DATA_WORK" \
+    zsh "$FLOW/pm_flow.sh" --project "$DATA_PROJECT_KEY" \
+    init-section "$section_key" <<SECTIONBRIEF \
+    > "$TEST_ROOT/data-init-$section_key.out"
+## Objective
+
+- Build data-only comparison fixture $section_key.
+
+## Scope
+
+- The fixture only.
+
+## Priority
+
+- must-have: the comparison needs a real dispatch
+
+## Owned paths
+
+- \`fixture/$section_key/**\`
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- The fixture run completes.
+
+## Rejection conditions
+
+- A real backend is reached.
+SECTIONBRIEF
+  mkdir -p "$DATA_PROJECT_DIR/sections/$section_key/cycles/001"
+  printf 'COMPLETE\n' \
+    > "$DATA_PROJECT_DIR/sections/$section_key/cycles/001/decision.txt"
+done
+
+data_flow_entries="$(for entry in "$DATA_FLOW"/*(DN); do
+  basename "$entry"
+done | sort)"
+assert_eq "$data_flow_entries" \
+  $'.project-key\nconfig.json\ndata-topology-project\nlocal_env.sh' \
+  "data-only flow directory contains no engine assets"
+
+git -C "$DATA_WORK" init --quiet
+git -C "$DATA_WORK" add .
+git -C "$DATA_WORK" add -f \
+  ".agentic/pm_flow/$DATA_PROJECT_KEY/sections/alpha/cycles/001/decision.txt" \
+  ".agentic/pm_flow/$DATA_PROJECT_KEY/sections/beta/cycles/001/decision.txt"
+git -C "$DATA_WORK" -c user.name=pm-flow -c user.email=pm-flow@localhost \
+  commit --quiet -m "data-only comparison fixture"
+
+python3 - "$FLOW" "$DATA_DB" <<'PY'
+import sys
+
+sys.path.insert(0, sys.argv[1])
+import store
+
+store.connect(sys.argv[2]).close()
+PY
+
+# The data-only refusal names both places searched and leaves the origin store
+# untouched, before a checkout or report can write anything to stdout.
+DATA_REFUSAL_OUT="$TEST_ROOT/data-refusal.out"
+DATA_REFUSAL_ERR="$TEST_ROOT/data-refusal.err"
+data_attempts_before="$(sqlite3 "$DATA_DB" 'SELECT COUNT(*) FROM attempts')"
+if (cd "$DATA_WORK" && PATH="$STUB_BIN:$PATH" \
+    PM_FLOW_ENGINE_ROOT="$FLOW" PM_FLOW_FLOW_DIR="$DATA_FLOW" \
+    PM_FLOW_REPO_ROOT="$DATA_WORK" \
+    zsh "$FLOW/pm_flow.sh" --project "$DATA_PROJECT_KEY" \
+    compare heavy missing --max-ticks 5) \
+    > "$DATA_REFUSAL_OUT" 2> "$DATA_REFUSAL_ERR"; then
+  fail "data-only compare accepted a missing topology"
+fi
+[[ ! -s "$DATA_REFUSAL_OUT" ]] || \
+  fail "data-only refusal wrote to stdout"
+data_refusal_error="$(<"$DATA_REFUSAL_ERR")"
+[[ "$data_refusal_error" == *"$DATA_FLOW/topologies/missing.json"* ]] || \
+  fail "data-only refusal omitted the flow topology path"
+[[ "$data_refusal_error" == *"$FLOW/topologies/missing.json"* ]] || \
+  fail "data-only refusal omitted the engine topology path"
+assert_eq "$(sqlite3 "$DATA_DB" 'SELECT COUNT(*) FROM attempts')" \
+  "$data_attempts_before" "data-only refusal dispatched no arm"
+
+python3 - "$FLOW/compare.py" "$DATA_FLOW" "$FLOW" <<'PY' || \
+  fail "data-only persona swap could not resolve a packaged persona"
+import importlib.util
+import sys
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("pm_flow_compare", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+flow = Path(sys.argv[2])
+engine = Path(sys.argv[3])
+overlays = {
+    key: module.topology.validate(key, flow, engine)[0]
+    for key in ("lean", "heavy")
+}
+assert module.parse_persona_swaps(
+    ["lean:pm=cpo"], ("lean", "heavy"), overlays, flow, engine
+) == {"lean": [("pm", "cpo")], "heavy": []}
+PY
+
+DATA_COMPARE_OUT="$TEST_ROOT/data-compare.out"
+(cd "$DATA_WORK" && PATH="$STUB_BIN:$PATH" \
+  PM_FLOW_ENGINE_ROOT="$FLOW" PM_FLOW_FLOW_DIR="$DATA_FLOW" \
+  PM_FLOW_REPO_ROOT="$DATA_WORK" \
+  zsh "$FLOW/pm_flow.sh" --project "$DATA_PROJECT_KEY" \
+  compare lean heavy --max-ticks 5 --keep-copies) \
+  > "$DATA_COMPARE_OUT"
+data_compare_output="$(<"$DATA_COMPARE_OUT")"
+
+data_copy_paths=("${(@f)$(printf '%s\n' "$data_compare_output" | \
+  sed -n 's/^arm_key=[^ ]* copy_path=\(.*\) imported_run_key=[^ ]* copy_status=[^ ]*$/\1/p')}")
+assert_eq "${#data_copy_paths[@]}" "2" \
+  "data-only compare prints both copy paths"
+[[ "${data_copy_paths[1]}" != "${data_copy_paths[2]}" ]] || \
+  fail "data-only compare used one checkout for both arms"
+[[ "${data_copy_paths[1]}" != "$DATA_WORK" && \
+   "${data_copy_paths[2]}" != "$DATA_WORK" ]] || \
+  fail "data-only compare drove an arm in the origin checkout"
+
+data_project_topologies="$(sqlite3 "$DATA_DB" \
+  "SELECT DISTINCT t.key || '|' || p.key FROM runs r JOIN topologies t ON t.id=r.topology_id JOIN projects p ON p.id=r.project_id ORDER BY t.key")"
+assert_eq "$data_project_topologies" \
+  $'heavy|data-topology-project\nlean|data-topology-project' \
+  "data-only compare imports both topology runs under one project"
+
+data_arm_sizes="$(sqlite3 "$DATA_DB" \
+  "SELECT t.key || '|' || COUNT(DISTINCT r.id) || '|' || COUNT(a.id) FROM runs r JOIN topologies t ON t.id=r.topology_id JOIN attempts a ON a.run_id=r.id GROUP BY t.key ORDER BY t.key")"
+assert_eq "$data_arm_sizes" $'heavy|1|2\nlean|1|2' \
+  "data-only arm size counts one run containing two attempts"
+assert_eq "$(printf '%s\n' "$data_compare_output" | tail -n 1)" \
+  "Limits: lean n=1; heavy n=1. No difference between the arms can be inferred." \
+  "data-only limits count runs rather than dispatches"
+
+printf '%s\n' "$data_compare_output" | awk -F'\t' \
+  '$1 == "wall_clock_s" && $2 + 0 > 0 && $3 + 0 > 0 {found=1} END {exit !found}' || \
+  fail "data-only compare wall clocks are not both greater than zero"
+data_finished_runs="$(sqlite3 "$DATA_DB" \
+  "SELECT t.key || '|' || COUNT(*) FROM runs r JOIN topologies t ON t.id=r.topology_id WHERE r.ended_at IS NOT NULL AND r.status <> 'running' GROUP BY t.key ORDER BY t.key")"
+assert_eq "$data_finished_runs" $'heavy|1\nlean|1' \
+  "data-only compare imports finished runs"
+
+data_arm_personas="$(sqlite3 "$DATA_DB" \
+  "SELECT DISTINCT t.key || '|' || json_extract(stack.value, '$.key') FROM attempts a JOIN runs r ON r.id=a.run_id JOIN topologies t ON t.id=r.topology_id JOIN json_each(a.persona_stack) stack WHERE a.role_key='pm' AND json_extract(stack.value, '$.layer')='base' ORDER BY t.key")"
+assert_eq "$data_arm_personas" $'heavy|pm\nlean|pm' \
+  "data-only compare records base personas from the engine"
+
+data_origin_edges="$(sqlite3 "$DATA_DB" \
+  "SELECT e.from_role || '|' || e.to_role || '|' || e.kind FROM topology_edges e JOIN topologies t ON t.id=e.topology_id WHERE t.key='lean' ORDER BY e.from_role, e.to_role, e.kind")"
+[[ -n "$data_origin_edges" ]] || fail "data-only import omitted topology edges"
+data_arm_edges="$(sqlite3 \
+  "${data_copy_paths[1]}/.agentic/pm_flow/$DATA_PROJECT_KEY/runs/pm_flow.db" \
+  "SELECT e.from_role || '|' || e.to_role || '|' || e.kind FROM topology_edges e JOIN topologies t ON t.id=e.topology_id WHERE t.key='lean' ORDER BY e.from_role, e.to_role, e.kind")"
+assert_eq "$data_origin_edges" "$data_arm_edges" \
+  "imported topology edges equal the retained arm store"
+
 # Seed a separate report-only project through the public telemetry commands.
 # Timestamps are normalized afterwards so wall-clock expectations are literal,
 # while attempts, prices, tokens, personas, cycles and outcomes all enter

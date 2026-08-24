@@ -342,7 +342,7 @@ def apply_persona_swap(
 
 
 def parse_persona_swaps(values: list[str], keys: tuple[str, str],
-                        overlays: dict[str, dict], flow: Path):
+                        overlays: dict[str, dict], flow: Path, engine: Path):
     swaps = {key: [] for key in keys}
     for value in values:
         match = re.fullmatch(r"([^:=]+):([^:=]+)=([^:=]+)", value)
@@ -361,6 +361,8 @@ def parse_persona_swaps(values: list[str], keys: tuple[str, str],
         persona_paths = (
             flow / "roles" / f"{persona}.md",
             flow / "domains" / domain / "roles" / f"{persona}.md",
+            engine / "roles" / f"{persona}.md",
+            engine / "domains" / domain / "roles" / f"{persona}.md",
         )
         if not any(path.is_file() for path in persona_paths):
             raise CompareError(
@@ -591,14 +593,15 @@ def run_compare(first: str, second: str, flow: Path, project: str,
                 max_ticks: int, persona_values: list[str],
                 keep_copies: bool) -> int:
     flow = flow.resolve()
+    engine = Path(__file__).resolve().parent
 
     # Preflight is deliberately complete before the repository or temp area is
     # touched. A bad second arm must not leave a valid first arm half-started.
     overlays = {}
     for key in (first, second):
-        overlays[key], _summaries = topology.validate(key, flow)
+        overlays[key], _summaries = topology.validate(key, flow, engine)
     swaps = parse_persona_swaps(
-        persona_values, (first, second), overlays, flow)
+        persona_values, (first, second), overlays, flow, engine)
 
     repo = repository_root(flow)
     commit = checked(["git", "-C", repo, "rev-parse", "HEAD"]).strip()
@@ -621,7 +624,6 @@ def run_compare(first: str, second: str, flow: Path, project: str,
             "overlay": overlays[key],
         })
 
-    engine = Path(__file__).resolve().parent
     for arm in arms:
         sync_arm(arm, engine, project)
         for role, persona in swaps[arm["key"]]:
