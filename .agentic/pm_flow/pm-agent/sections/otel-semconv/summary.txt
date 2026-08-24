@@ -1,1 +1,1 @@
-Not started; T1 pins the convention revision in one module.
+Cycle 0; last action scope.

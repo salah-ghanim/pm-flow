@@ -1,0 +1,4 @@
+UNSTARTED_DEPENDENCY	FOUND	topology-compare` and `agent-bindings` wait on `store-ledger` (0 cycles, waits on nothing) — same head as review 001; cure is a project-wide run, which the priority sort now routes to `store-ledger` first.
+UNREACHABLE_SECTION	CLEAR	
+MUST_HAVE_INFLATION	CLEAR	
+LINEAR_CHAIN_RISK	CLEAR	

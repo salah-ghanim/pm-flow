@@ -1,0 +1,8 @@
+agent-bindings	CONTINUE	(now waits on `store-ledger`: A5 reads `pm-flow cost`, which `store-ledger` rewrites; brief's `Dependencies: None` to be synced by its manager)
+artifact-quality	CONTINUE	
+codex-usage	CONTINUE	
+otel-semconv	CONTINUE	
+persona-cards	CONTINUE	
+store-ledger	CONTINUE	
+topology-compare	CONTINUE	
+trace-commands	CONTINUE	

@@ -26,6 +26,14 @@
   when its cost column is blank (then `cost_usd` is NULL and the envelope is
   not re-parsed); only envelopes absent from the TSV get `cost_of()`. Any
   "smarter" re-derivation changes the cents and fails A1.
+- Interim safety (decided cycle 002): `cost.py total|report` run the T1 import
+  silently before reading `attempts`, so a legacy project never reads zero at
+  any point in the T2→T4 sequence, and the driver's TSV-seeded budget tests
+  stay green while `spent_usd` still passes the ledger path. The readers'
+  *figures* come from `attempts` only; the import is the single legacy
+  absorber. A trailing operand ending `.tsv` is recognised as the legacy
+  ledger argument and ignored (the unchanged driver keeps calling with it
+  until T3, which deletes the shim).
 
 ## Task T1 — Idempotent legacy import
 
@@ -55,17 +63,31 @@
 
 ## Task T2 — Readers on the store
 
-- Status: pending.
-- Outcome: `cost.py total|report` and `watch.py` read `attempts` only; a Codex
-  attempt row shows its tokens in `report`.
+- Status: assigned (cycle 002).
+- Outcome: `cost.py total|report` compute all figures from `attempts` (after a
+  silent idempotent import); `watch.py` reads the store read-only; a Codex
+  attempt row shows its non-zero tokens in `report`. Final CLI arity lands
+  now: `total <project_dir> [section]`, `report <project_dir>`, with the
+  `.tsv`-operand shim from the interim-safety note.
 - Paths: `template/.agentic/pm_flow/cost.py`, `template/.agentic/pm_flow/watch.py`,
   `tests/store_ledger_test.sh`.
-- Reuse: T1's store access; `watch.py in_flight` unchanged.
+- Reuse: T1's `import_legacy` (refactored to return its count; only the
+  `import` subcommand prints `imported=N` — `spent_usd` parses `total` stdout
+  as one number); `store.connect`/`store.default_path`; `watch.py in_flight`
+  unchanged.
+- Query shape: sum `COALESCE(cost_usd, 0)` over all attempts regardless of
+  `status`, no project-id filter (per-project DB; a key-mismatch filter is a
+  read-zero risk); section is `COALESCE(tasks.key, '(project)')` via LEFT
+  JOIN. `watch.py` never writes: no import, `mode=ro` connection, missing DB
+  is an empty view (may under-report until the first `cost` run imports;
+  display-only, accepted).
 - Acceptance IDs: A1, A2.
-- Validation: `zsh tests/store_ledger_test.sh` — report on a seeded store
-  matches hand-computed totals; a row with `input_tokens=76195` prints those
-  tokens; deleting the TSV changes nothing; a mutation restoring the TSV read
-  fails.
+- Validation: `zsh tests/store_ledger_test.sh` — totals match figures computed
+  independently from the fixture files; old and new arity agree; a row with
+  `input_tokens=76195` prints those tokens; deleting the TSV after the first
+  read changes nothing; inflating an already-imported TSV row's cost changes
+  nothing (the TSV is not a summing source); `grep cost_ledger watch.py` finds
+  nothing.
 - Depends on: T1.
 
 ## Task T3 — Driver stops writing the ledger
