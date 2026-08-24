@@ -40,6 +40,7 @@ class _Client:
     silent_stall_seconds: float
     started_at: float
     last_activity_at: float
+    access_tier: str
     session_id: str | None = None
     buffer: bytes = b""
 
@@ -131,11 +132,34 @@ class _Client:
         if "id" not in frame:
             return
         if frame["method"] == "session/request_permission":
+            params = frame.get("params")
+            options = params.get("options") if isinstance(params, dict) else None
+            selected = None
+            if self.access_tier in {"write", "scoped"} and isinstance(options, list):
+                for kind in ("allow_once", "allow_always"):
+                    selected = next(
+                        (
+                            option
+                            for option in options
+                            if isinstance(option, dict)
+                            and option.get("kind") == kind
+                            and isinstance(option.get("optionId"), str)
+                        ),
+                        None,
+                    )
+                    if selected is not None:
+                        break
+            outcome = {"outcome": "cancelled"}
+            if selected is not None:
+                outcome = {
+                    "outcome": "selected",
+                    "optionId": selected["optionId"],
+                }
             self.send(
                 {
                     "jsonrpc": "2.0",
                     "id": frame["id"],
-                    "result": {"outcome": {"outcome": "cancelled"}},
+                    "result": {"outcome": outcome},
                 }
             )
         else:
@@ -205,6 +229,30 @@ def _is_enforceable(initialize: dict[str, Any], access_tier: str) -> bool:
     return False
 
 
+def _record_access(
+    log_path: Path | None,
+    role: str,
+    label: str,
+    enforceable: bool,
+) -> None:
+    if log_path is None:
+        return
+    record = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "role": role,
+        "label": label,
+        "tool": "ACP",
+        "targets": [],
+        "outside": False,
+        "reaches_user_files": False,
+        "access": "enforced" if enforceable else "prompt-level",
+        "source": "acp-capabilities",
+    }
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+
+
 def _reap(client: _Client) -> None:
     process = client.process
     if process.stdin is not None:
@@ -233,7 +281,15 @@ def _reap(client: _Client) -> None:
     process.wait()
 
 
-def run(prompt: str, params: dict[str, Any], access_tier: str) -> Result:
+def run(
+    prompt: str,
+    params: dict[str, Any],
+    access_tier: str,
+    *,
+    access_log: Path | None = None,
+    role: str = "",
+    label: str = "",
+) -> Result:
     """Run one ACP prompt against the command in a binding's ``cli_params``."""
 
     if access_tier not in {"read", "write", "scoped"}:
@@ -255,7 +311,7 @@ def run(prompt: str, params: dict[str, Any], access_tier: str) -> Result:
         bufsize=0,
     )
     now = time.monotonic()
-    client = _Client(process, max_seconds, stall_seconds, now, now)
+    client = _Client(process, max_seconds, stall_seconds, now, now, access_tier)
     previous_handlers: dict[int, Any] = {}
 
     def request_cancel(_signum: int, _frame: Any) -> None:
@@ -278,6 +334,7 @@ def run(prompt: str, params: dict[str, Any], access_tier: str) -> Result:
         )
         initialized = client.response(1)
         enforceable = _is_enforceable(initialized, access_tier)
+        _record_access(access_log, role, label, enforceable)
         client.request(2, "session/new", {"cwd": os.getcwd(), "mcpServers": []})
         session = client.response(2)
         session_id = session.get("sessionId")
@@ -329,6 +386,9 @@ def _parser() -> argparse.ArgumentParser:
     prompts.add_argument("--prompt-file", type=Path)
     parser.add_argument("--params-json", required=True)
     parser.add_argument("--access-tier", required=True, choices=("read", "write", "scoped"))
+    parser.add_argument("--access-log", type=Path)
+    parser.add_argument("--role", default="")
+    parser.add_argument("--label", default="")
     parser.add_argument("--max-attempt-seconds", type=float)
     parser.add_argument("--silent-stall-seconds", type=float)
     return parser
@@ -345,7 +405,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.silent_stall_seconds is not None:
             params["silent_stall_seconds"] = args.silent_stall_seconds
         prompt = args.prompt_file.read_text() if args.prompt_file is not None else args.prompt
-        result = run(prompt, params, args.access_tier)
+        result = run(
+            prompt,
+            params,
+            args.access_tier,
+            access_log=args.access_log,
+            role=args.role,
+            label=args.label,
+        )
         reason = "none" if result.enforceable else "acp_capability_missing"
         payload = {
             "failure_reason": reason,

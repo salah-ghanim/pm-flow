@@ -196,7 +196,7 @@ if not isinstance(binding, dict):
     raise SystemExit(f"role {role!r} has an invalid binding")
 
 cli = binding.get("cli", "")
-if cli not in {"claude", "codex", "copilot"}:
+if cli not in {"claude", "codex", "copilot", "acp"}:
     raise SystemExit(f"role {role!r} has an unsupported cli: {cli!r}")
 difficulty = binding.get("difficulty", "medium")
 if difficulty not in {"low", "medium", "high", "xhigh", "max"}:
@@ -355,13 +355,14 @@ print(positive_int(supervision, "silent_stall_seconds", 3600))
 # A hard ceiling on one attempt, so a process that keeps producing output while
 # making no progress still ends.
 print(positive_int(supervision, "max_attempt_seconds", 10800))
-# Single line, always last: the scoped-access policy as JSON.
+# Single line: the scoped-access policy as JSON.
 print(json.dumps({
     "roots": scoped_roots,
     "bash": [str(entry) for entry in scoped_bash],
     "deny": scoped_deny,
     "isolate_settings": bool(access_config.get("scoped_isolate_settings", True)),
 }))
+print(json.dumps(binding.get("cli_params") or {}))
 PY
 )" || fail "could not resolve role '$ROLE' from $CONFIG_FILE"
 
@@ -377,6 +378,7 @@ STALL_SECONDS="$(printf '%s\n' "$role_binding" | sed -n '9p')"
 SILENT_STALL_SECONDS="$(printf '%s\n' "$role_binding" | sed -n '10p')"
 MAX_ATTEMPT_SECONDS="$(printf '%s\n' "$role_binding" | sed -n '11p')"
 SCOPED_POLICY="$(printf '%s\n' "$role_binding" | sed -n '12p')"
+CLI_PARAMS="$(printf '%s\n' "$role_binding" | sed -n '13p')"
 
 file_mtime() {
   stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0\n'
@@ -664,6 +666,18 @@ build_command() {
         write|scoped) AGENT_ARGV+=(--allow-all-tools) ;;
       esac
       ;;
+    acp)
+      local acp_path="$SCRIPT_DIR/../acp.py"
+      if [[ ! -f "$acp_path" ]]; then
+        acp_path="$SCRIPT_DIR/../../../src/pm_flow/acp.py"
+      fi
+      [[ -f "$acp_path" ]] || fail "ACP client not found beside the installed engine or in the checkout"
+      AGENT_ARGV=(python3 "$acp_path" --prompt-file "$PROMPT_FILE"
+                  --params-json "$CLI_PARAMS" --access-tier "$AGENT_ACCESS"
+                  --max-attempt-seconds "$MAX_ATTEMPT_SECONDS"
+                  --silent-stall-seconds "$SILENT_STALL_SECONDS"
+                  --access-log "$PM_FLOW_ACCESS_LOG" --role "$ROLE" --label "$LABEL")
+      ;;
   esac
 }
 
@@ -864,8 +878,16 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-command -v "$AGENT_CLI" >/dev/null 2>&1 || \
-  fail "role '$ROLE' is bound to '$AGENT_CLI', which is not in PATH"
+AGENT_COMMAND="$AGENT_CLI"
+if [[ "$AGENT_CLI" == "acp" ]]; then
+  AGENT_COMMAND="$(printf '%s' "$CLI_PARAMS" | python3 -c '
+import json, sys
+command = json.load(sys.stdin).get("command")
+print(command[0] if isinstance(command, list) and command and isinstance(command[0], str) else "")
+')"
+fi
+command -v "$AGENT_COMMAND" >/dev/null 2>&1 || \
+  fail "role '$ROLE' is bound to '$AGENT_COMMAND', which is not in PATH"
 
 if [[ -n "$HEARTBEAT_FILE" ]]; then
   mkdir -p "$(dirname "$HEARTBEAT_FILE")"
@@ -885,6 +907,29 @@ while (( attempt <= MAX_ATTEMPTS )); do
   attempt_status=0
   run_attempt || attempt_status=$?
 
+  # An ACP success is identified by the process status, not by the outcome's
+  # failure_reason: a capability-missing reason accompanies a valid exit-0
+  # prompt-level exchange. Only after that decision is the agent's prose
+  # unwrapped onto the standard response path.
+  if [[ "$AGENT_CLI" == "acp" ]] && (( attempt_status == 0 )) && \
+      [[ "$STALLED" == "0" ]] && [[ -s "$RAW_OUTPUT" ]]; then
+    if ! python3 - "$RAW_OUTPUT" <<'PY_ACP_TEXT'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text())
+text = payload.get("text")
+if not isinstance(text, str):
+    raise SystemExit("ACP outcome omitted text")
+path.write_text(text)
+PY_ACP_TEXT
+    then
+      attempt_status=1
+    fi
+  fi
+
   if (( attempt_status == 0 )) && [[ "$STALLED" == "0" ]] && [[ -s "$RAW_OUTPUT" ]]; then
     final_reason="none"
     break
@@ -892,6 +937,25 @@ while (( attempt <= MAX_ATTEMPTS )); do
 
   if [[ "$STALLED" == "1" ]]; then
     reason="stall"
+  elif [[ "$AGENT_CLI" == "acp" ]]; then
+    acp_reason="$(python3 - "$RAW_OUTPUT" <<'PY_ACP_REASON'
+import json
+import sys
+from pathlib import Path
+
+try:
+    value = json.loads(Path(sys.argv[1]).read_text()).get("failure_reason", "")
+except (OSError, ValueError, AttributeError):
+    value = ""
+print(value if isinstance(value, str) else "")
+PY_ACP_REASON
+)"
+    case "$acp_reason" in
+      acp_child_exited) reason="network" ;;
+      acp_attempt_timeout|acp_silent_stall|acp_cancelled) reason="stall" ;;
+      acp_malformed_frame|acp_invalid_params) reason="permanent" ;;
+      *) reason="unknown" ;;
+    esac
   else
     reason="$(classify_failure "$ATTEMPT_LOG" "$RAW_OUTPUT")"
   fi
