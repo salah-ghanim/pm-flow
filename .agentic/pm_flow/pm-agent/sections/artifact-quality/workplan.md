@@ -16,7 +16,7 @@
 
 ## Task T1 — Rubric and scorer
 
-- Status: pending.
+- Status: accepted cycle 001 (A1, A4, A5 met; precision defects carried to T1b).
 - Outcome: `artifact_quality.md` defines budgets and the five dimensions;
   `quality.py` loads it and scores a fixture tree for `length`, `echo`,
   `shape`, `boundaries`, `stale` with no composite total.
@@ -30,6 +30,29 @@
   per-file dimension findings, no composite; echo/shape/stale mutations
   flip the named finding and nothing else.
 - Depends on: None.
+
+## Task T1b — Make shape and boundaries discriminate
+
+- Status: pending.
+- Outcome: a finding in either dimension means something is wrong with the
+  file. Two defects observed in cycle 001's first real run:
+  - `has_heading` matches only `^##`, but the engine's own brief validator
+    (`pm_flow.sh:1156`) accepts `^#{1,6}`. Six live briefs write all seven
+    required headings at depth 3 and are reported as missing all seven.
+    Match the engine's depth range.
+  - `looks_like_path` returns true for any inline-code token with a dot or a
+    slash, so `0.25`, `os.environ`, `2>/dev/null` and `v1.36.0` are scored as
+    out-of-ownership paths. `boundaries` then fires on nearly every artifact
+    with dozens of non-path entries and carries no signal.
+- Paths: `src/pm_flow/quality.py`, `tests/artifact_quality_test.sh`.
+- Reuse: the rubric's existing dimension prose; no new dimension.
+- Acceptance IDs: A1.
+- Validation: `zsh tests/artifact_quality_test.sh` — a fixture brief whose
+  headings are all `###` produces no heading `shape` finding, while one that
+  genuinely omits a heading still does; a fixture file quoting `0.25` and
+  `os.environ` produces no `boundaries` finding, while one quoting a real
+  unowned path still does.
+- Depends on: T1.
 
 ## Task T2 — Metadata-only record
 
@@ -75,7 +98,7 @@
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1 | T1, T3 | Per-file dimension lines; no composite |
+| A1 | T1, T1b, T3 | Per-file dimension lines; no composite; a finding names a real defect |
 | A2 | T2 | `git status` unchanged; no write under `sections/` |
 | A3 | T2, T3 | `quality/latest.md` + `latest.json` + snapshot |
 | A4 | T1 | Echo finding flips with the copied paragraph |
