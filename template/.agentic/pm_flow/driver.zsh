@@ -436,35 +436,21 @@ dispatch_path() {
 #
 # `--max-ticks` counts events whose cost varies by more than an order of
 # magnitude and rises with cycle depth, so it is not a budget. Every dispatch
-# appends what it actually cost to a ledger, and the run is governed on the sum.
-
-cost_ledger_file() {
-  printf '%s/cost_ledger.tsv\n' "$RUNS_DIR"
-}
+# records what it actually cost in the store, and the run is governed on the sum.
 
 record_dispatch_cost() {
-  local response_json="$1"
-  local section_key="$2"
-  local role="$3"
-  local label="$4"
-  local ledger cost
-  ledger="$(cost_ledger_file)"
-  mkdir -p "$RUNS_DIR"
-  cost="$(python3 "$SCRIPT_DIR/cost.py" one "$response_json" 2>/dev/null || printf '')"
-  # The response path is recorded so the same dispatch is never counted twice:
-  # once from this row and again from the envelope still sitting on disk.
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$(now_iso_utc)" "${section_key:-(project)}" "$role" "${label//$'\t'/ }" \
-    "$cost" "$response_json" >> "$ledger"
+  # The attempts row opened by telemetry_begin_attempt and priced by
+  # telemetry_end_attempt is the durable dispatch-cost record.
+  :
 }
 
 # What the project has spent. With no section key this is the whole project.
 #
-# This is the ledger plus every response envelope the ledger has never seen, so
-# a project that was already deep into its spend before the ledger existed does
-# not read as zero and get authorised for the whole budget again.
+# The store silently absorbs legacy records before answering, so a project that
+# was already deep into its spend does not read as zero and get authorised for
+# the whole budget again.
 spent_usd() {
-  python3 "$SCRIPT_DIR/cost.py" total "$PROJECT_DIR" "$(cost_ledger_file)" "${1:-}"
+  python3 "$SCRIPT_DIR/cost.py" total "$PROJECT_DIR" "${1:-}"
 }
 
 cmd_cost() {
@@ -831,14 +817,12 @@ portfolio_usd_threshold() {
   config_number governance portfolio_review_usd 20
 }
 
-# One row per dispatch. A tick count is not persisted anywhere and would not
-# survive a fresh process; the ledger row is the durable unit, and a tick buys
-# exactly one dispatch except at a parallel rescue.
+# One store row per dispatch. A tick count is not persisted anywhere and would
+# not survive a fresh process; the attempts row is the durable unit, and a tick
+# buys exactly one dispatch except at a parallel rescue.
 dispatch_count() {
-  local ledger count
-  ledger="$(cost_ledger_file)"
-  [[ -f "$ledger" ]] || { printf '0\n'; return; }
-  count="$(/usr/bin/wc -l < "$ledger" | tr -d '[:space:]')"
+  local count
+  count="$(python3 "$SCRIPT_DIR/cost.py" report "$PROJECT_DIR" | grep -c '^ATTEMPT' || true)"
   printf '%s\n' "${count:-0}"
 }
 

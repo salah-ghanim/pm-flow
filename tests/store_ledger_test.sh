@@ -1,5 +1,6 @@
 #!/bin/zsh -f
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 for name in ${(k)parameters[(I)PM_FLOW_*]}; do
   unset "$name"
@@ -87,9 +88,9 @@ printf '%s\n' '{"total_cost_usd": 0.625}' > "$BETA_EXTRA"
   printf '2026-01-02T03:08:05Z\tbeta\treviewer\tsecond\t4.000000\t%s\n' "$BETA_TWO"
 } > "$LEDGER"
 
-before="$(python3 "$COST" total "$PROJECT_DIR" "$LEDGER")"
-legacy_alpha="$(python3 "$COST" total "$PROJECT_DIR" "$LEDGER" alpha)"
-legacy_beta="$(python3 "$COST" total "$PROJECT_DIR" "$LEDGER" beta)"
+before="12.1250"
+legacy_alpha="3.7500"
+legacy_beta="8.3750"
 first_import="$(python3 "$COST" import "$PROJECT_DIR")"
 assert_eq "$first_import" "imported=6" "first import count"
 
@@ -189,6 +190,10 @@ legacy_report_status=0
 python3 "$COST" report "$PROJECT_DIR" "$LEDGER" >/dev/null 2>&1 || \
   legacy_report_status=$?
 assert_eq "$legacy_report_status" "2" "legacy report arity exit status"
+legacy_total_status=0
+python3 "$COST" total "$PROJECT_DIR" "$LEDGER" >/dev/null 2>&1 || \
+  legacy_total_status=$?
+assert_eq "$legacy_total_status" "2" "legacy total arity exit status"
 
 cmd_cost_body="$(sed -n '/^cmd_cost()/,/^}/p' \
   "$REPO_ROOT/template/.agentic/pm_flow/driver.zsh")"
@@ -220,5 +225,109 @@ PM_FLOW_PROJECT=empty-project python3 "$WATCH_FLOW/watch.py" >/dev/null
   fail "watch created a store for an empty project"
 assert_eq "$(grep -c cost_ledger "$WATCH" || true)" "0" \
   "watch has no legacy ledger references"
+
+set_config() {
+  python3 -c '
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+raw = p.read_text().replace(chr(34) + "{{DOMAIN}}" + chr(34), chr(34) + "generic" + chr(34))
+c = json.loads(raw)
+section, key = sys.argv[2].split(".")
+value = sys.argv[3]
+c.setdefault(section, {})[key] = float(value) if "." in value else int(value)
+p.write_text(json.dumps(c, indent=2))
+' "$FLOW/config.json" "$1" "$2"
+}
+
+cat > "$FLOW/agent_exec.sh" <<'STUB'
+#!/bin/zsh -f
+set -euo pipefail
+OUT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output) OUT="$2"; shift 2 ;;
+    --heartbeat|--label|--prompt-file|--seat) shift 2 ;;
+    *) shift ;;
+  esac
+done
+python3 -c '
+import json, sys
+from pathlib import Path
+Path(sys.argv[1]).parent.mkdir(parents=True, exist_ok=True)
+Path(sys.argv[1]).write_text(json.dumps({"is_error": False, "result": sys.argv[2],
+    "failure_reason": "none", "total_cost_usd": 0.5}))
+' "$OUT" "${PM_FLOW_STUB:-}"
+STUB
+chmod +x "$FLOW/agent_exec.sh" "$FLOW/pm_flow.sh"
+
+brief() {
+  printf '## Objective\n\n- %s\n\n## Scope\n\n- one thing\n\n## Priority\n\n- must-have: without it there is no product\n\n## Owned paths\n\n- `%s`\n\n## Dependencies\n\n- None.\n\n## Acceptance\n\n- `.venv/bin/python -m pytest -q` exits 0\n\n## Rejection conditions\n\n- nothing runs\n' \
+    "$1" "$2"
+}
+
+brief dispatch-check "src/" > "$TEST_ROOT/dispatch-brief.md"
+(cd "$COMMAND_WORK" && "$FLOW/pm_flow.sh" init-section dispatch-check \
+  --file "$TEST_ROOT/dispatch-brief.md" >/dev/null)
+git -C "$COMMAND_WORK" add -A >/dev/null
+git -C "$COMMAND_WORK" commit -qm fixture
+
+ANALYSIS='## Where the section stands
+
+- The store-backed dispatch is under test.
+
+## What is blocking it
+
+- Nothing.
+
+## What I would do next and why
+
+- Verify the cost and budget behavior.
+
+## What I cannot settle myself
+
+- Nothing.'
+
+attempts_before="$(cd "$COMMAND_WORK" && "$FLOW/pm_flow.sh" cost | \
+  grep -c '^ATTEMPT' || true)"
+total_before="$(python3 "$COST" total "$PROJECT_DIR")"
+assert_eq "$attempts_before" "7" "pre-dispatch attempt count"
+assert_eq "$total_before" "12.1650" "pre-dispatch store total"
+
+(cd "$COMMAND_WORK" && PM_FLOW_STUB="$ANALYSIS" \
+  "$FLOW/pm_flow.sh" section-analysis dispatch-check >/dev/null)
+
+runs_listing="$(ls "$PROJECT_DIR/runs")"
+[[ "$runs_listing" == *pm_flow.db* ]] || fail "dispatch did not retain pm_flow.db"
+[[ "$runs_listing" != *cost_ledger.tsv* ]] || fail "dispatch wrote cost_ledger.tsv"
+git -C "$COMMAND_WORK" status --porcelain | grep 'runs/' >/dev/null && \
+  fail "dispatch dirtied a path under runs/"
+
+after_report="$(cd "$COMMAND_WORK" && "$FLOW/pm_flow.sh" cost)"
+attempts_after="$(printf '%s\n' "$after_report" | grep -c '^ATTEMPT' || true)"
+assert_eq "$attempts_after" "$(( attempts_before + 1 ))" \
+  "dispatch adds exactly one attempt"
+printf '%s\n' "$after_report" | awk -F'\t' \
+  '$1 == "ATTEMPT" && $5 == "analysis dispatch-check" && $7 == "0.5000" {found=1} END {exit !found}' || \
+  fail "dispatch attempt does not carry its 0.5000 cost"
+assert_eq "$(python3 "$COST" total "$PROJECT_DIR")" "12.6650" \
+  "dispatch raises the store total"
+
+set_config budget.max_usd 12.66
+budget_output="$(cd "$COMMAND_WORK" && PM_FLOW_STUB="$ANALYSIS" \
+  "$FLOW/pm_flow.sh" section-analysis dispatch-check 2>&1 || true)"
+[[ "$budget_output" == *"project budget exhausted"* ]] || \
+  fail "store-backed budget did not refuse the next dispatch"
+assert_eq "$(cd "$COMMAND_WORK" && "$FLOW/pm_flow.sh" cost | \
+  grep -c '^ATTEMPT' || true)" "$attempts_after" \
+  "budget refusal does not add an attempt"
+[[ ! -e "$LEDGER" ]] || fail "budget refusal depended on a legacy TSV"
+
+assert_eq "$(grep -c cost_ledger_file \
+  "$REPO_ROOT/template/.agentic/pm_flow/driver.zsh" || true)" "0" \
+  "driver has no cost_ledger_file reference"
+legacy_refs="$(grep -rl cost_ledger "$REPO_ROOT/template" || true)"
+assert_eq "$legacy_refs" "$REPO_ROOT/template/.agentic/pm_flow/cost.py" \
+  "only the importer references cost_ledger"
 
 printf 'store ledger tests passed\n'

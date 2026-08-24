@@ -57,6 +57,19 @@ set_config governance.portfolio_review_dispatches 0
 set_config governance.portfolio_review_usd 0
 set_config governance.portfolio_review_idle_cycles 0
 
+seed_attempt() {
+  local section="$1" role="$2" label="$3" cost="$4" response="$5"
+  local run_output run_id attempt_output attempt_id
+  run_output="$(python3 "$FLOW/telemetry.py" --db "$FLOW/demo/runs/pm_flow.db" \
+    run-start --project demo --run-key "seed-${response:t}")"
+  run_id="$(printf '%s\n' "$run_output" | sed -n 's/^run_id=//p')"
+  attempt_output="$(python3 "$FLOW/telemetry.py" --db "$FLOW/demo/runs/pm_flow.db" \
+    attempt-start --run "$run_id" --role "$role" --task "$section" --label "$label")"
+  attempt_id="$(printf '%s\n' "$attempt_output" | sed -n 's/^attempt_id=//p')"
+  python3 "$FLOW/telemetry.py" --db "$FLOW/demo/runs/pm_flow.db" attempt-end \
+    --attempt "$attempt_id" --cost-usd "$cost" --response "$response"
+}
+
 cat > "$FLOW/agent_exec.sh" <<'STUB'
 #!/bin/zsh -f
 set -euo pipefail
@@ -195,8 +208,8 @@ set_config governance.portfolio_review_idle_cycles 0
 absent "C2 switching the trigger off disarms it" "$("$FLOWSH" next)" "portfolio-review"
 
 printf '\n===== C2: the dispatch-count trigger fires =====\n'
-printf 'x\tdemo\tpm\tscope\t0.5\ty\n' > "$FLOW/demo/runs/cost_ledger.tsv"
-printf 'x\tdemo\tpm\treview\t0.5\ty\n' >> "$FLOW/demo/runs/cost_ledger.tsv"
+seed_attempt demo pm scope 0.5 "$FLOW/demo/runs/y1"
+seed_attempt demo pm review 0.5 "$FLOW/demo/runs/y2"
 set_config governance.portfolio_review_dispatches 2
 eq "C2 two recorded dispatches arm the review" \
    "$("$FLOWSH" next | sed -n 1p | awk '{print $3}')" "portfolio-review"
