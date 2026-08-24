@@ -2,9 +2,12 @@
 
 ## Current task
 
-- T4 — end to end through the installed command. T3 closed at cycle 004,
-  carrying two gaps T4 must close (inert `wall_clock_s`; unchecked
-  `topology_edges` import — see Blockers).
+- T5 — scenarios 1-3 through the installed wheel. T4 closed at cycle 005: the
+  command now runs from a flow directory that holds project data only, a `runs`
+  row is one invocation rather than one dispatch subshell, and the
+  `topology_edges` import is mutation-tested. What is left is the brief's three
+  user-visible scenarios driven through a `pm-flow` entry point installed from a
+  built wheel, including the topology key on `pm-flow cost`'s attempt lines.
 
 ## Completed tasks and evidence
 
@@ -128,6 +131,58 @@
     and leaves 8. `topology_edges` has `UNIQUE (topology_id, from_role,
     to_role, kind)`, so the `INSERT OR IGNORE` is sound.
 
+- T4 — the command outside the fixture's flow directory. Accepted cycle 005.
+  Acceptance IDs: A1, A2, A3, A4, plus the A6 regression gate.
+  - `zsh tests/topology_compare_test.sh` → exit 0,
+    `PASS: topology compare reports literal metrics, limits, personas, and copy retention`.
+    The suite gains a second work tree whose `.agentic/pm_flow/` is asserted to
+    hold exactly `.project-key config.json data-topology-project local_env.sh` —
+    no `topologies/`, `roles/`, `domains/`, no engine files — driven with
+    `PM_FLOW_ENGINE_ROOT` at the engine copy. Every prior assertion is kept
+    (177 insertions, 0 deletions in the test), so the `cmp` at `:125` and T1's
+    `$FLOW/topologies/missing.json` refusal still stand where they were.
+  - A4, from the data-only tree. `compare heavy missing` exits non-zero, writes
+    nothing to stdout, and leaves `attempts` unchanged. Reviewer read the actual
+    stderr, 2026-08-24:
+    `ERROR: topology 'missing' is missing; expected document at <data-only>/.agentic/pm_flow/topologies/missing.json; also looked at <engine>/topologies/missing.json`
+    — the flow path first, the engine path named after it.
+  - A1, from the data-only tree. `SELECT DISTINCT t.key || '|' || p.key …`
+    returns exactly `heavy|data-topology-project` / `lean|data-topology-project`.
+    Both `copy_path` values are read from the command's own stdout, differ from
+    each other and from the origin checkout.
+  - A2. Reviewer read the driven report off the command's stdout, 2026-08-24:
+    the `wall_clock_s` row is `4.4` / `702.4`, both greater than zero, where
+    cycle 004 could only ever print `0.0 0.0`. Both imported runs have a
+    non-NULL `ended_at` and a status other than `running`
+    (`heavy|1` / `lean|1`). The seeded fixture's literal values are unchanged.
+  - A3. Each arm dispatches twice — two sections, each with a `COMPLETE`
+    decision — and the store reads `heavy|1|2` / `lean|1|2` (runs|attempts),
+    while the report's last line is
+    `Limits: lean n=1; heavy n=1. No difference between the arms can be inferred.`
+    The sentence is therefore shown to count runs, not dispatches.
+  - Edge import. `topology_edges` for `lean` in the origin store equals the
+    retained arm store's set and is non-empty.
+  - A6. `zsh tests/pm_flow_test.sh` → exit 0, 10 `PASS:` lines;
+    `zsh tests/packaged_layout_test.sh` → exit 0, 13 `PASS:` lines;
+    `zsh tests/store_ledger_test.sh` → exit 0, `store ledger tests passed`;
+    `zsh tests/trace_commands_test.sh` → exit 0, `trace command tests passed`.
+    The developer could not run the trace suite — its loopback receiver could
+    not bind in their sandbox — and reported the cycle PARTIAL for that reason.
+    The reviewer ran it against the same tree and it is green, so the run's
+    changed scope regresses neither store suite.
+  - Reviewer mutations, 2026-08-24, each applied to the developer's tree, run,
+    and reversed (the worktree diff is byte-identical to the reviewed state
+    afterwards). All five the assignment required reproduce a failure line:
+    engine fallback out of `load_document` →
+    `FAIL: data-only refusal omitted the flow topology path`; out of the persona
+    lookup → `FAIL: data-only persona swap could not resolve a packaged persona`;
+    `telemetry_end_run` call sites neutralised →
+    `FAIL: data-only compare wall clocks are not both greater than zero`;
+    the two parent `telemetry_begin_run` calls removed →
+    `FAIL: data-only arm size counts one run containing two attempts: expected 'heavy|1|2 lean|1|2', got 'heavy|2|2 lean|2|2'`
+    — the `n_runs` assertion goes red, not merely `wall_clock_s`;
+    the edge SELECT disabled → `FAIL: data-only import omitted topology edges`.
+
 ## Active decisions
 
 - Engine Python lives in `template/.agentic/pm_flow/`, not `src/pm_flow/`.
@@ -181,6 +236,18 @@
   than a matter of style.
 - Arm copies are deleted once imported, unless `--keep-copies`. Settled at T3;
   before the report existed, the clone was the only way to inspect an arm.
+- Packaged assets resolve flow-first, engine-second, and are never copied into a
+  repository. The flow directory is the repository's own data; `topologies`,
+  `roles` and `domains` ship in the wheel, and migration removes them from any
+  repository that still holds a copy. So the fix for the installed case is a
+  fallback in the reader, never an install.sh entry that writes documents into a
+  repository — that would put the engine back in the data directory and turn
+  `packaged_layout_test.sh:1018-1020` red.
+- A `runs` row is one invocation of `pm-flow run`/`tick`, not one dispatch.
+  Settled at T4 scoping: the lazy `telemetry_begin_run` inside the dispatch
+  subshell makes a run an accident of subshell scoping, which the report then
+  prints as an arm size. The cost is that an invocation which dispatches nothing
+  records a run; that is the honest reading of "n_runs".
 - One disposable checkout per arm, from the same starting commit; rows
   imported back under the arm's key. Probed 2026-08-24: an arm needs no new
   dispatch path — `telemetry_begin_run` (`driver.zsh:679-690`) already reads
@@ -193,30 +260,34 @@
 
 ## Blockers
 
-- Open carried defect, from cycle 004: `wall_clock_s` cannot be non-zero in a
-  real run. `telemetry_end_run` (`driver.zsh:752`) is defined and has no call
-  site anywhere under `template/` — the only other mention is a comment at
-  `:827`. So `runs.ended_at` stays NULL, `SUM(ended_at - started_at)` is NULL,
-  and the column reads `0.0`. Observed 2026-08-24 on the origin store
-  immediately after `compare lean heavy --max-ticks 5`: both imported runs read
-  `status=running` with `ended_at` empty, and the printed report's
-  `wall_clock_s` row is `0.0 0.0`. This is the defect class T3 cleared for
-  `abandon_rate`, left standing for the column that answers the brief's "how
-  long each took". It is pre-existing engine behaviour, not introduced this
-  cycle, and cycle 004's assignment fenced the driver to `cmd_compare` and the
-  outcome helper, so it was outside the developer's writable paths — which is
-  why A2 stands on the seeded fixture and the cycle was accepted. T4 owns it:
-  call `telemetry_end_run` where a run finishes, and assert a non-zero
-  `wall_clock_s` from a driven compare rather than only from a fixture.
-- Open coverage gap, from cycle 004: nothing observes `import_store` carrying
-  `topology_edges`. The suite asserts `escalation_depth` only on the
-  `report-project` fixture, whose topologies are synced into its own store by
-  `catalog.py sync --topology` and never cross the importer; the driven
-  compare's `escalation_depth` value is not asserted at all. Reviewer mutation,
-  2026-08-24: disabling the edge SELECT in `import_store` leaves
-  `tests/topology_compare_test.sh` green (exit 0). The importer itself is
-  correct — probed separately, 8 edges in and 8 out across two imports — so
-  this is a missing check, not a missing behaviour. T4 closes it.
+- Open residual, disclosed by the developer at cycle 005 and confirmed by the
+  reviewer: an exit through `fail` or `set -e` after `telemetry_begin_run`
+  leaves the run open. Every explicit `return` in `cmd_run` and `cmd_tick` now
+  calls `telemetry_end_run` — including `cmd_run`'s deadlock and quarantine
+  returns and `cmd_tick`'s `waiting`/`quarantined`/`idle` returns — but
+  `assert_within_budget` (`cmd_tick:2811`, `cmd_run:2889`) exits the process
+  through `fail`, so that invocation's `runs.ended_at` stays NULL and it drops
+  out of `wall_clock_s`. Closing it needs an `EXIT` trap at driver top level,
+  which was outside T4's writable fence (`driver.zsh`, the `cmd_run` and
+  `cmd_tick` call sites only). Not a T5 acceptance; give it its own task if the
+  budget-exhausted run has to be measurable.
+- Booked for T5, not a blocker: scenario 3 needs a topology key on
+  `pm-flow cost`'s attempt lines, and `cost.py` has no notion of a topology
+  (no match for `topology` in the file, 2026-08-24). One trailing field on the
+  `ATTEMPT` line (`cost.py:251-262`), joined through `runs.topology_id`, is a
+  presentation change and not a second accounting; every current consumer reads
+  fields 1-7 or a `grep -F` substring, so nothing breaks. `cost.py` is
+  `store-ledger`'s file and that section has handed off, so the edit is named in
+  our handoff when it lands.
+
+- Open risk for T5, observed 2026-08-24: the data-only compare's arm runs vary
+  wildly in wall clock. In five reviewer runs the whole suite finished inside
+  600s; in a sixth the `heavy` arm's run alone measured `702.4` seconds against
+  `lean`'s `4.4`, and the suite exceeded a 600s timeout. `wall_clock_s` is
+  measuring real elapsed time, which is what it is for, so this is not a
+  reporting defect — but nothing bounds an arm's run, and T5 adds a wheel build
+  on top. If the suite starts timing out, bound the arm rather than loosening
+  the assertion.
 - The migration rule stays open as a standing rule
   for the rest of the section: every task that adds a file under
   `template/.agentic/pm_flow/` must add its name to `install.sh`'s
@@ -248,10 +319,11 @@
 
 ## Next eligible task
 
-- T4 — end to end through the installed command. Depends on T3, now done. It
-  drives scenarios 1-3 through `.venv/bin/pm-flow`, including `pm-flow cost`
-  after a compare showing attempts from both arms under their topology keys,
-  and it closes cycle 004's two carried items: give `telemetry_end_run` a call
-  site so `wall_clock_s` is non-zero in a driven compare, and assert
-  `escalation_depth` on imported arms so the `topology_edges` import has a
-  check behind it.
+- T5 — scenarios 1-3 through the installed wheel. Depends on T4, now done. It
+  drives `compare lean heavy --max-ticks 6`, `compare heavy missing` and
+  `pm-flow cost` through a `pm-flow` entry point installed from a built wheel
+  into a repository holding project data only, and appends the attempt's run
+  topology key as one trailing field on `cost.py`'s `ATTEMPT` line. It is the
+  section's gate: T4 made the command work outside a flow directory that
+  happens to hold the engine, and T5 is where that is shown through the
+  installed entry point rather than `zsh pm_flow.sh`.

@@ -43,7 +43,11 @@ change of scope; every acceptance ID is unaffected.
   object or a list of seat objects, each `{cli, model, difficulty}`.
 - `topology.py` module CLI, in the style of `cost.py`: `validate <key>
   --flow <dir>`, `overlay <key> --flow <dir>` (prints merged config JSON to
-  stdout), `list --flow <dir>`.
+  stdout), `list --flow <dir>`; T4 adds `--engine <dir>`, defaulting to the
+  module's own directory, and every document, domain and persona lookup reads
+  the flow directory first and the engine second.
+- `cost.py report`'s `ATTEMPT` line gains one trailing field at T5, the
+  attempt's run topology key. Nothing else about `cost.py` changes.
 - `pm-flow compare <a> <b> [--max-ticks n]` and `pm-flow compare --report
   <run-a> <run-b>`; the column contract `cost_usd`, `tokens`,
   `cycles_to_done`, `rescue_rate`, `abandon_rate`, `escalation_depth`,
@@ -240,39 +244,127 @@ change of scope; every acceptance ID is unaffected.
   mutation; the swapped persona key appears in its arm's column.
 - Depends on: T2.
 
-## Task T4 — End to end through the installed command
+## Task T4 — The command outside the fixture's flow directory
+
+- Status: done (cycle 005). A1, A2, A3, A4 met from a data-only flow directory;
+  the A6 regression gate holds across all four named suites. T3's two carried
+  gaps are cleared: `wall_clock_s` reads a real elapsed time in a driven compare
+  and the `topology_edges` import has a mutation-tested check. One residual,
+  booked in `state.md`: a `fail`/`set -e` exit after `telemetry_begin_run` still
+  leaves `runs.ended_at` NULL, because closing it needs a trap outside this
+  task's writable fence.
+- Outcome: `pm-flow compare` runs in a repository that holds project data only,
+  resolving its topology documents, domain definition and persona files from the
+  engine; a driven compare's `wall_clock_s` is the elapsed time of the arm's run
+  and its `n_runs` counts runs rather than dispatch subshells; and the
+  `topology_edges` half of `import_store` has a check behind it.
+- Three requirements, in the order they matter.
+
+  1. **Packaged assets resolve from the engine.** Probed 2026-08-24:
+     `topology.py` reads `flow/topologies/<key>.json` (`:101`, and `list` at
+     `:225`), `flow/domains/<domain>.json` (`:135`), `flow/roles/<role>.md` and
+     `flow/domains/<domain>/roles/<role>.md` (`:157-158`); `compare.py`'s
+     `parse_persona_swaps` reads the same two persona paths (`:361-364`). None of
+     those exist in an installed repository. `install.sh` lists `topologies`,
+     `roles` and `domains` in `COPIED_ENGINE_DIRS` (`:72-81`), which the comment
+     at `:40-46` calls the whole of what migration removes, and this repository's
+     own `.agentic/pm_flow/` holds exactly `config.json`, `local_env.sh.example`,
+     `pm-agent` and `projects.md`. The engine ships them instead: the wheel
+     force-includes `template/.agentic/pm_flow` at `pm_flow/engine`
+     (`pyproject.toml:47-51`). So each of those lookups takes the flow directory
+     first and the engine root second — the precedence `catalog.py sync --flow …
+     --engine …` already uses (`compare.py:328-332`), and the same rule
+     `pm_flow.sh:558-559` applies to `roles` and `domains` for the shell engine.
+     `topology.py`'s CLI gains `--engine`, defaulting to
+     `Path(__file__).resolve().parent`; `validate`, `overlay` and `list` all
+     honour it, and `list` unions both directories with the flow's copy winning
+     by stem. Refusals keep naming the flow path and add the engine path, so
+     T1's A4 assertion on `$FLOW/topologies/missing.json` stays green and still
+     says where else the command looked.
+  2. **A run is one invocation.** `telemetry_end_run` (`driver.zsh:752`) has no
+     call site, so `runs.ended_at` stays NULL and `wall_clock_s` reads `0.0`.
+     Calling it at the end of `cmd_run` is not enough on its own:
+     `TELEMETRY_RUN_KEY` is set lazily by `telemetry_begin_attempt` (`:792`)
+     inside the dispatch subshell `perform_action` opens deliberately (`:2642`),
+     so the parent never sees it and each dispatching action opens a run of its
+     own. That is why the fixture has to make the project finish in one PM
+     dispatch to get one run per arm (`tests/topology_compare_test.sh:215-216`),
+     and why a real project would report its dispatch count as the arm size in
+     the limits sentence. Open the run in the parent instead: call
+     `telemetry_begin_run` in `cmd_run` and `cmd_tick` once the lock is taken,
+     and `telemetry_end_run ok|error` on the way out of each. A subshell inherits
+     the variable, so the lazy call at `:792` becomes a no-op, every attempt of
+     the invocation lands on one run, `n_runs` counts invocations and
+     `wall_clock_s` measures them — which is what the report already claims.
+  3. **The edge import gets its check.** `import_store` carries
+     `topology_edges` and nothing observes it: the report fixture syncs its own
+     topologies into its own store, and the driven compare's
+     `escalation_depth` is not asserted at all. With `--keep-copies` the arm
+     store survives, so assert the arm topology's edge set in the origin store
+     equals the arm store's and is non-empty.
+- Paths: `template/.agentic/pm_flow/topology.py`,
+  `template/.agentic/pm_flow/compare.py`,
+  `template/.agentic/pm_flow/driver.zsh` (the `cmd_run` and `cmd_tick` call
+  sites only), `tests/topology_compare_test.sh`. No new engine file, so
+  `install.sh` needs no entry. `cost.py` belongs to T5.
+- Reuse: the `PM_FLOW_ENGINE_ROOT` idiom for a data-only repository
+  (`tests/store_ledger_test.sh:326-329`, `tests/packaged_layout_test.sh:79-85`);
+  this suite's own `install_driver_stub` (`:159-182`) and its
+  `init-section`-plus-`COMPLETE`-decision fixture (`:184-219`).
+- Acceptance IDs: A1, A2, A3, A4, plus the A6 regression gate.
+- Validation: `zsh tests/topology_compare_test.sh` — a second work tree whose
+  flow directory holds project data only drives `compare lean heavy` to a
+  printed table and limits sentence; both arms' `wall_clock_s` columns are
+  greater than zero and both imported runs have a non-NULL `ended_at`; an arm
+  with two dispatching sections still reports `n_runs` 1; `compare heavy
+  missing` there still refuses before dispatch, naming both searched paths; the
+  arm topology's edge rows match between the retained arm store and the origin.
+  `zsh tests/pm_flow_test.sh`, `zsh tests/packaged_layout_test.sh`,
+  `zsh tests/store_ledger_test.sh` and `zsh tests/trace_commands_test.sh` exit 0
+  — the last two because the run's scope changes what the store records.
+- Depends on: T3.
+
+## Task T5 — Scenarios 1-3 through the installed wheel
 
 - Status: pending.
-- Outcome: scenarios 1-3 driven through `.venv/bin/pm-flow`, including
-  `pm-flow cost` after a compare showing attempts from both arms with their
-  topology keys.
-- Carried from T3, both to be closed here:
-  - `wall_clock_s` is inert in the shipped command. `telemetry_end_run`
-    (`driver.zsh:752`) is defined and never called, so a run's `ended_at` stays
-    NULL and the column reads `0.0` after every real compare — observed
-    2026-08-24 on the origin store after `compare lean heavy --max-ticks 5`:
-    both imported runs read `status=running`, `ended_at` empty. That is the
-    same defect class T3 cleared for `abandon_rate`, and it hits the brief's
-    "how long each took" directly. Call `telemetry_end_run` where a run
-    finishes, then assert a non-zero `wall_clock_s` from a driven compare, not
-    only from the seeded fixture.
-  - `import_store`'s `topology_edges` half is unchecked. The report fixture
-    syncs its own topologies into its own store, so `escalation_depth` is
-    asserted on rows that never crossed the importer. Assert `escalation_depth`
-    (or the edge rows) on the imported arms, so disabling the edge import turns
-    the suite red.
-- Paths: `tests/topology_compare_test.sh`,
-  `template/.agentic/pm_flow/driver.zsh` (the `telemetry_end_run` call site).
-- Reuse: the installed-layout harness in `tests/packaged_layout_test.sh`.
+- Outcome: the brief's three user-visible scenarios driven through a `pm-flow`
+  entry point installed from a built wheel, in a repository that holds project
+  data only: `compare lean heavy --max-ticks 6` prints the table, the arm sizes
+  and the limits sentence; `compare heavy missing` exits non-zero before any
+  dispatch; `pm-flow cost` afterwards shows attempts from both arms, each
+  carrying its topology key.
+- Scenario 3 needs one field that does not exist. `cost.py` knows nothing about
+  topologies (probed 2026-08-24: no match for `topology` in the file), and its
+  `ATTEMPT` line is
+  `ATTEMPT\t<started_at>\t<section>\t<role>\t<label>\t<cli>\t<cost>\t<in>\t<out>`
+  (`cost.py:251-262`). Append one trailing field, the attempt's run topology key
+  through `runs.topology_id → topologies.key`, `-` when a run has none. This is
+  presentation only: `stored_totals`, `import_legacy` and every sum stay
+  untouched, so it is not a second accounting. Every existing consumer reads
+  positional fields 1-7 or a `grep -F` substring
+  (`store_ledger_test.sh:173-176`, `:311`, `:397`, `:407`, `:417-419`;
+  `agent_bindings_test.sh:367-370`), so a trailing field breaks none of them —
+  which `zsh tests/store_ledger_test.sh` must prove. `cost.py` is `store-ledger`'s
+  file and that section has handed off, so this edit is named in the handoff.
+- Paths: `template/.agentic/pm_flow/cost.py` (the report join only),
+  `tests/topology_compare_test.sh`.
+- Reuse: `tests/packaged_layout_test.sh`'s wheel-and-venv harness (`:99-244`,
+  `install_pinned_venv` at `:1158-1171`) for a real `<venv>/bin/pm-flow`; the
+  stub-CLI harness for the arms.
 - Acceptance IDs: A1-A6.
-- Validation: `zsh tests/topology_compare_test.sh`,
-  `zsh tests/pm_flow_test.sh` and `zsh tests/packaged_layout_test.sh` exit 0.
-- Depends on: T3.
+- Validation: `zsh tests/topology_compare_test.sh` drives all three scenarios
+  through the venv entry point and asserts the printed report, the refusal, and
+  `pm-flow cost` output carrying both arms' topology keys with the total
+  unchanged; `zsh tests/pm_flow_test.sh`, `zsh tests/packaged_layout_test.sh`
+  and `zsh tests/store_ledger_test.sh` exit 0.
+- Depends on: T4.
 
 ## Integration and end-to-end validation
 
-- T4 is the gate. T2 is the first point at which the brief's headline
-  sentence — the same project run under two named designs — is observable.
+- T5 is the gate. T2 is the first point at which the brief's headline
+  sentence — the same project run under two named designs — is observable, and
+  T4 is the first at which it is observable outside a flow directory that
+  happens to hold a copy of the engine.
 
 ## Risks and rollback
 
@@ -294,6 +386,17 @@ change of scope; every acceptance ID is unaffected.
   nothing removed it, so each real compare left two full clones of the
   repository under `$TMPDIR`. Settled at T3: removed once the arm's rows are
   imported, kept only under `--keep-copies`, and the command says which.
+- Every fixture so far copies the whole engine into the flow directory
+  (`tests/topology_compare_test.sh:44`), which is the layout install.sh stopped
+  writing. That is why nothing caught `topology.py` resolving documents,
+  domains and personas from the flow directory alone. T4's fixture holds project
+  data only; T5's is a built wheel. Any future check added to this suite should
+  go in the data-only tree unless it is specifically about the copied layout.
+- Opening the run in `cmd_run`/`cmd_tick` changes what a `runs` row means:
+  one invocation rather than one dispatch subshell, and an invocation that
+  dispatches nothing now records a run. That is the point — the limits sentence
+  states arm sizes — but it moves rows other suites may count, so T4 runs
+  `store_ledger_test.sh` and `trace_commands_test.sh` as well as the A6 three.
 - Rollback removes the `compare` case, `compare.py` and `topology.py`; stored
   runs stay, since nothing about them is new.
 
@@ -301,9 +404,9 @@ change of scope; every acceptance ID is unaffected.
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1 | T2, T4 | Runs under both keys, one project key |
-| A2 | T3, T4 | Every column equals the hand-computed fixture |
-| A3 | T3, T4 | Limits sentence present; its removal fails |
-| A4 | T1 | Refusal before dispatch; no new attempt row |
+| A1 | T2, T4, T5 | Runs under both keys, one project key |
+| A2 | T3, T4, T5 | Every column equals the hand-computed fixture; `wall_clock_s` non-zero when driven |
+| A3 | T3, T4, T5 | Limits sentence present; its removal fails; arm size counts runs |
+| A4 | T1, T4, T5 | Refusal before dispatch; no new attempt row; both searched paths named |
 | A5 | T2, T3 | Persona key per arm, in the store and the column |
-| A6 | T4 | Three suites exit 0 |
+| A6 | T4, T5 | The three named suites exit 0, plus `store_ledger_test.sh` |
