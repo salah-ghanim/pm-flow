@@ -2527,20 +2527,27 @@ snapshot_worktree() {
   } > "$target"
 }
 
+# The driver's own bookkeeping changes between the two snapshots by design:
+# the progress stamp, the summary, the cycle record, the quarantine file
+# itself. Listing those sent the operator to review nothing.
+without_driver_bookkeeping() {
+  grep -v -E '/(status|summary|updated_at|last_dispatch|quarantine|orphaned_worktree)\.txt$|/project_state/sections\.md$|/cycles/' "$1" || true
+}
+
 report_orphaned_worktree() {
   local section_dir="$1"
   local before="$section_dir/.pre_dispatch.txt"
   local after="$section_dir/.post_dispatch.txt"
   [[ -f "$before" ]] || return 0
   snapshot_worktree "$after" "$(section_tree_root "$(basename "$section_dir")")"
-  if ! diff -q "$before" "$after" >/dev/null 2>&1; then
+  if ! diff -q <(without_driver_bookkeeping "$before") <(without_driver_bookkeeping "$after") >/dev/null 2>&1; then
     {
       printf '# Uncommitted changes left by a failed dispatch\n\n'
       printf 'Recorded at %s for section %s.\n\n' "$(now_iso_utc)" "$(basename "$section_dir")"
       printf 'The dispatch failed after changing the working tree, and nothing\n'
       printf 'committed it. Review and either commit or discard these paths before\n'
       printf 'the section is released from quarantine.\n\n```diff\n'
-      diff "$before" "$after" || true
+      diff <(without_driver_bookkeeping "$before") <(without_driver_bookkeeping "$after") || true
       printf '```\n'
     } > "$section_dir/orphaned_worktree.txt"
   fi

@@ -313,7 +313,14 @@ STUB_EXIT=1 STUB_DIRTY="$W/docs/leftover.txt" PM_FLOW_SECTION=beta "$FLOWSH" tic
 exists "F15 orphaned_worktree.txt is written" "$FLOW/demo/sections/beta/orphaned_worktree.txt"
 has    "F15 it names the file the dispatch left behind" \
        "$(cat "$FLOW/demo/sections/beta/orphaned_worktree.txt" 2>/dev/null)" "docs/leftover.txt"
-rm -f "$W/docs/leftover.txt" "$FLOW/demo/sections/beta/quarantine.txt"
+rm -f "$W/docs/leftover.txt" "$FLOW/demo/sections/beta/quarantine.txt" "$FLOW/demo/sections/beta/orphaned_worktree.txt"
+STUB_EXIT=1 PM_FLOW_SECTION=beta "$FLOWSH" tick >/dev/null 2>&1 || true
+if [[ -f "$FLOW/demo/sections/beta/orphaned_worktree.txt" ]]; then
+  bad "F15 the driver's own bookkeeping is not reported as a leftover" "$(cat "$FLOW/demo/sections/beta/orphaned_worktree.txt")"
+else
+  ok "F15 the driver's own bookkeeping is not reported as a leftover"
+fi
+rm -f "$FLOW/demo/sections/beta/quarantine.txt"
 
 printf '\n===== F12: the scope context is windowed, not cumulative =====\n'
 for cycle in 1 2 3 4; do
