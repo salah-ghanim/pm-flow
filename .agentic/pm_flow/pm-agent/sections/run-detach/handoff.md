@@ -40,33 +40,45 @@
 
 ## Risks
 
-- **`zsh tests/packaged_layout_test.sh` is red on main and stays red until this
-  section is allowed to touch `install.sh`.** Observed: `FAIL: the migrated flow
-  directory holds project data only: expected '… projects.md salvage-legacy ',
-  got '… projects.md run_detach.zsh salvage-legacy '`. Cause read in the source,
-  not inferred: `remove_copied_engine` (`install.sh:350-355`) deletes a copied
-  engine file from a migrated flow directory only if it is named in
-  `COPIED_ENGINE_FILES` (`install.sh:47-67`), and `packaged_layout_test.sh:905`
-  builds its legacy fixture by copying the whole engine template in. Any
-  unregistered new engine file is stranded by design.
+- **`zsh tests/packaged_layout_test.sh` is red on main, and this section can no
+  longer make it green.** Run on main 2026-08-25, 8 PASS then: `FAIL: the
+  migrated flow directory holds project data only: expected '.gitignore
+  .project-key config.json local_env.sh.example projects.md salvage-legacy ',
+  got '.gitignore .project-key artifact_quality.md cards config.json
+  local_env.sh.example projects.md run_detach.zsh salvage-legacy '`. Three
+  engine entries are stranded, not one: `artifact_quality.md` is
+  artifact-quality's, `cards/` is persona-cards', `run_detach.zsh` is this
+  section's. Cause read in the source, not inferred: `remove_copied_engine`
+  (`install.sh:350-355`) deletes a copied engine file from a migrated flow
+  directory only if it is named in `COPIED_ENGINE_FILES` (`install.sh:47-67`),
+  and `packaged_layout_test.sh:905` builds its legacy fixture by copying the
+  whole engine template in. Any unregistered new engine file is stranded by
+  design; `cards` is a directory and belongs in `COPIED_ENGINE_DIRS`.
 - **The request, unchanged from cycle 001 and still unanswered.** Add one line
   to `brief.md`'s Owned paths naming `install.sh`'s `COPIED_ENGINE_FILES`
   entry as this section's, on the model of the `pm_flow.sh` extension
   authorized 2026-08-24. `install.sh` is not an owned path and "any file
   outside Owned paths is modified" is a rejection condition, so this section
-  cannot grant it to itself. The fix is proven: adding the single line
-  `run_detach.zsh` to that array in a scratch copy makes the suite exit 0 with
-  all 13 groups passing, including `PASS: a copied-engine repository migrates
-  losslessly and keeps running`.
+  cannot grant it to itself.
+- **A second decision is now needed, and only the portfolio review can make
+  it.** Three sections are each stranding an engine entry, so this is a
+  product-level gap in how engine files are registered, not one section's
+  oversight. Either one owner takes `install.sh` for all three entries, or the
+  rule is enforced where engine files get added. Until then, `brief.md`'s A7
+  clause "`zsh tests/packaged_layout_test.sh` still exits 0" and A8's third
+  suite are unreachable from this section's owned paths — T3 is being reviewed
+  on the two suites it can turn green, and T1a's reachable outcome is narrowed
+  to taking `run_detach.zsh` off the stranded list.
 - Cycle 001's review said this was escalated here. It was not — `handoff.md`
   was still the init scaffold, so no portfolio review could have seen the
   request. That is corrected with this file; the delay is the section's, not
   the reviewer's.
 - **The omission generalises.** Registering a new engine file in `install.sh` is
   a standing cost of adding one, for every section, not a one-off of this one.
-- T1a is held rather than blocking. It touches `install.sh` alone, so T2
-  proceeds in parallel; only T3 is genuinely gated, since it claims A8 in full
-  and cannot be accepted while a suite is red.
+- T1a is held rather than blocking. It touches `install.sh` alone, so the rest
+  of the section proceeds around it. T3 is no longer gated behind it: the reason
+  it was — T3 claiming A8 in full — assumed T1a could clear the suite, and it
+  cannot.
 
 ## What is unproven
 
@@ -83,6 +95,8 @@
 
 ## Next action
 
-- Cycle 002 develops T2. The portfolio review's part is the one-line owned-path
-  extension for `install.sh` above; without it the repository keeps a red suite
-  and T3 cannot be accepted.
+- Cycle 003 develops T3: the `pm-flow run-detach` routing arm, `docs/run-detach.md`,
+  and an end-to-end group driving all four of `brief.md`'s scenarios through the
+  arm. The portfolio review's part is the two decisions above — the owned-path
+  extension for `install.sh`, and who registers the other two stranded engine
+  entries. Neither blocks T3; both keep `packaged_layout_test.sh` red.

@@ -122,9 +122,22 @@
   path: it touches `install.sh` and nothing else, while they touch
   `run_detach.zsh`, its test, its fixtures and `pm_flow.sh`. So it is held, not
   blocking, and T2 goes first rather than the section idling behind a
-  permission it cannot grant itself. Cost of the wait: `packaged_layout_test.sh`
+  permission it cannot grant itself. Cost of the wait: the migration group
   stays red on main meanwhile, which is why the escalation is repeated in
   `handoff.md` for every portfolio review until it is answered.
+- Scope corrected 2026-08-25, from a run of the suite on main rather than from
+  cycle 002's carried claim: `run_detach.zsh` is no longer the only unregistered
+  engine file. Observed
+  `FAIL: the migrated flow directory holds project data only: expected
+  '.gitignore .project-key config.json local_env.sh.example projects.md
+  salvage-legacy ', got '.gitignore .project-key artifact_quality.md cards
+  config.json local_env.sh.example projects.md run_detach.zsh salvage-legacy '`.
+  `artifact_quality.md` is the artifact-quality section's and `cards` is the
+  persona-cards section's — and `cards` is a directory, so it belongs in
+  `COPIED_ENGINE_DIRS`, not `COPIED_ENGINE_FILES`. Neither is this section's to
+  register. So T1a's one line no longer makes the suite exit 0, and no task in
+  this workplan can: the suite's exit 0 is now a portfolio-level outcome. T1a's
+  outcome is narrowed to removing this section's own entry from that list.
 - Why it exists: `install.sh` removes a copied engine file from a migrated flow
   directory only if the file is named in `COPIED_ENGINE_FILES`
   (`install.sh:47-67`, `remove_copied_engine` at `install.sh:350-355`).
@@ -133,8 +146,10 @@
   registered or migration strands it. `run_detach.zsh` is the first new engine
   file this section adds, so shipping T1 turns
   `packaged_layout_test.sh:1017-1020` red until this lands.
-- Outcome: `zsh tests/packaged_layout_test.sh` exits 0 again; a migrated flow
-  directory holds project data only, with no `run_detach.zsh` left behind.
+- Outcome: a migrated flow directory has no `run_detach.zsh` left behind — the
+  migration group's `got` list no longer names it. The group still fails while
+  `artifact_quality.md` and `cards` are unregistered; that is the other
+  sections' work, escalated in `handoff.md`, not a defect of this task.
 - Paths: `install.sh` — one line, `run_detach.zsh` added to
   `COPIED_ENGINE_FILES`, and nothing else.
 - Authorization required: `install.sh` is not in `brief.md`'s Owned paths, and
@@ -144,11 +159,12 @@
 - Behaviour: insert `run_detach.zsh` into the `COPIED_ENGINE_FILES` array. No
   other install, migration or packaging change; `pyproject.toml:47-51` already
   force-includes the file into the wheel.
-- Acceptance IDs: A8's `packaged_layout_test.sh` leg.
-- Validation: `zsh tests/packaged_layout_test.sh` exits 0, with
-  `PASS: a copied-engine repository migrates losslessly and keeps running`
-  present. Verified in review against a scratch copy of the developer's tree
-  with exactly this one line added: all 13 groups passed, exit 0.
+- Acceptance IDs: this section's share of A8's `packaged_layout_test.sh` leg.
+- Validation: `zsh tests/packaged_layout_test.sh`; the migration group's `got`
+  list no longer contains `run_detach.zsh`. Exit 0 is no longer the expected
+  observation and was not when cycle 002's review recorded it — the scratch-copy
+  run that produced 13 passing groups predates `artifact_quality.md` and
+  `cards`. That claim is superseded, not carried.
 - Depends on: T1.
 
 ## Task T2 — graceful stop, and a resume that repeats nothing
@@ -200,7 +216,10 @@
 
 ## Task T3 — the command reaches the operator, and the doc says how
 
-- Status: pending
+- Status: done — A7 (its reachable clauses), A6 and A8 (the two suites this
+  section can turn green) met, accepted cycle 003. A7's and A8's
+  `packaged_layout_test.sh` legs remain portfolio-level; T1a still holds this
+  section's share.
 - Outcome: `pm-flow run-detach start|stop|status` reaches the supervisor
   through the routing arm; `pm-flow help` lists the command; `docs/run-detach.md`
   tells an operator how to start a run, find its log, stop it and resume, and
@@ -219,11 +238,37 @@
   start` supervises one section. Nothing else in `pm_flow.sh` changes. The doc
   states that the runtime files live under `<project>/runs/`, that stop is
   graceful only, and that `kill <pid>` remains the hard exit.
-- Acceptance IDs: A7; A6 and A8 in full.
-- Validation: `zsh tests/run_detach_test.sh`, `zsh tests/pm_flow_test.sh` and
-  `zsh tests/packaged_layout_test.sh` all exit 0; `pm-flow help` output
-  contains `run-detach`; the fixture repository's `git status --porcelain` is
-  empty after the full scenario.
+- Argument shape, which the arm has to get right because the two parsers differ.
+  `main()` (`pm_flow.sh:1885-1903`) has already stripped `--project` and
+  `--section` into `PROJECT_OVERRIDE` and `SECTION_OVERRIDE` before the `case`
+  is reached, while `run_detach.zsh` takes `--project` *before* the subcommand
+  (`:281-291`) and `--section` only *inside* `start` (`:203-207`); `stop` and
+  `status` `fail` on any argument at all (`:296-297`). So the arm rebuilds:
+  `--project` first when `PROJECT_OVERRIDE` is set, then the subcommand and its
+  arguments, then `--section` appended only when the subcommand is `start`.
+- Project resolution has to agree across the two entry paths or the routed
+  `status` reads a different runs directory than the script path does.
+  `initialize_project_paths` exports `PM_FLOW_PROJECT` (`pm_flow.sh:555`), and
+  `cli.py:77-79` exports `PM_FLOW_FLOW_DIR` always but `PM_FLOW_RUNS_DIR` and
+  `PM_FLOW_PROJECT_DIR` only when `--project` was given
+  (`paths.py:242-256`). `resolve_project` (`run_detach.zsh:67-93`) falls through
+  to `$PM_FLOW_FLOW_DIR/$PROJECT_KEY/runs`, which is `$PROJECT_DIR/runs`
+  (`pm_flow.sh:560`), so the two agree in both cases — the test pins it rather
+  than the workplan asserting it.
+- Acceptance IDs: A7 except its `packaged_layout_test.sh` clause; A6 and A8
+  across the two suites this section can turn green.
+- Validation: `zsh tests/run_detach_test.sh` and `zsh tests/pm_flow_test.sh`
+  exit 0; `zsh tests/packaged_layout_test.sh` fails on the migration group and
+  only that group, with a `got` list unchanged by this task; the engine `help`
+  output contains `run-detach`; the fixture repository's
+  `git status --porcelain` is empty after the full scenario.
+- What this task cannot deliver, and why it is not a defect of it: A7's
+  "`packaged_layout_test.sh` still exits 0" and A8's third suite are not
+  reachable from this section's owned paths. `artifact_quality.md` and `cards`
+  strand migration too, and both belong to other sections. Escalated in
+  `handoff.md`; the review should accept T3 on the two suites plus an unchanged
+  migration `got` list, and must not accept a T3 that fixes the other sections'
+  entries.
 - Carried from T2's review: `start`'s stale-stop clearing
   (`run_detach.zsh:221`) is shipped but unproven — a gracefully stopped loop
   always removes its own stop file, so no test manufactures a stale one.
@@ -255,5 +300,5 @@
 | A3 | T2 | in-flight dispatch recorded, no further tick, final log line names the tick, `status` reads `stopping` then `idle` |
 | A5 | T2 | `pm-flow next` before the stop matches the action taken after the restart; tick numbering shows no repeat |
 | A6 | T1, T2, T3 | `git status --porcelain` empty in the fixture repo after start, stop, start; every runtime file under `<project>/runs/` |
-| A7 | T3 | `pm-flow run-detach status` reaches the script, `pm-flow help` lists it, `zsh tests/packaged_layout_test.sh` exits 0 |
-| A8 | T1, T1a, T2, T3 | all three suites exit 0; the new suite opens with the `PM_FLOW_*` unset guard. T1a carries the `packaged_layout_test.sh` leg: a new engine file has to be registered in `install.sh`'s `COPIED_ENGINE_FILES` or migration strands it |
+| A7 | T3 | `run-detach status` reaches the script through the routing arm, `help` lists the command. Its `packaged_layout_test.sh` clause is **not reachable from this section**: `artifact_quality.md` and `cards` strand migration alongside `run_detach.zsh` and belong to other sections. T3 proves the arm adds no new failure; T1a removes this section's entry |
+| A8 | T1, T1a, T2, T3 | `run_detach_test.sh` and `pm_flow_test.sh` exit 0 and the new suite opens with the `PM_FLOW_*` unset guard — T1, T2, T3. The `packaged_layout_test.sh` leg is portfolio-level: T1a takes `run_detach.zsh` off the stranded list, the other two entries are other sections' |

@@ -2,10 +2,11 @@
 
 ## Current task
 
-- None assigned. T2 was accepted in cycle 002; T3 is next eligible.
-- T1a is held, not blocking: it touches `install.sh` alone and is on neither
-  T2's nor T3's path, so the section worked T2 first while the owned-path
-  authorization is outstanding (see Blockers).
+- None assigned. T3 was accepted in cycle 003; T1 and T2 were accepted in
+  cycles 001 and 002. Every task this section can reach is done.
+- T1a is the only task left and it cannot be assigned: it touches `install.sh`
+  alone, which is not an owned path. The section is idle until the boundary
+  extension is authorized (see Blockers).
 
 ## Completed tasks and evidence
 
@@ -80,6 +81,51 @@
     PASS. `zsh tests/packaged_layout_test.sh` exits 1 on the migration group
     and only that group, as expected while T1a is unauthorized.
 
+- T3 — the command reaches the operator, and the doc says how. Accepted cycle
+  003. Changes exactly the three assigned paths: `git status --porcelain` in the
+  worktree lists ` M template/.agentic/pm_flow/pm_flow.sh`,
+  ` M tests/run_detach_test.sh`, `?? docs/run-detach.md` and nothing else.
+  `install.sh`, `driver.zsh`, `agent_exec.sh`, `cli.py` and `run_detach.zsh`
+  untouched; `git diff --stat` is `pm_flow.sh | 11 +++`, `run_detach_test.sh |
+  137 +++`, so the engine edit is the one `case` arm (`pm_flow.sh:1932-1941`)
+  and the one `usage()` line (`:50`) the boundary extension authorizes.
+  - A7 (reachable clauses) — `zsh tests/run_detach_test.sh` exits 0 in 56s with
+    the new group passing: `PASS: routed run-detach covers help, start, status,
+    stop, refusal, and stale-stop restart`. The group routes every command
+    through `engine_command run-detach …`, never the script path, and asserts
+    `log=$routed_log_path` on the routed `status` against the `log=` the routed
+    `start` printed.
+  - A7's `help` clause is not vacuous: `git show HEAD:…/pm_flow.sh | grep -c
+    run-detach` is `0`, so the word the test looks for exists only because the
+    `usage()` line was added.
+  - A7's third clause — `zsh tests/packaged_layout_test.sh` exits 1 on the
+    migration group and only that group, 8 PASS before it, `got` list
+    `.gitignore .project-key artifact_quality.md cards config.json
+    local_env.sh.example projects.md run_detach.zsh salvage-legacy `,
+    byte-identical to the baseline in Blockers. T3 stranded nothing new and
+    removed none of the three.
+  - A6 — the routed group's captures printed verbatim from an instrumented run
+    (restored byte for byte afterwards, `shasum -a 256` equal before and after):
+    `A6 porcelain@506=[]`, `A6 stray-runtime@509=[]`, `A6 porcelain@534=[]`,
+    `A6 stray-runtime@537=[]`, `A6 porcelain@546=[]`, `A6 stray-runtime@549=[]`
+    — empty after the routed `start`, after the refused second `start` and after
+    `stop`. The test commits the driver's own tracked cycle artifacts between
+    steps, as `tests/run_detach_test.sh:188-192` does, rather than weakening the
+    assertion.
+  - A8 (reachable legs) — `zsh tests/run_detach_test.sh` exit 0 in 56s (9 groups
+    PASS), `zsh tests/pm_flow_test.sh` exit 0 in 154s (10 groups PASS). The new
+    group keeps the suite inside the two-minute budget.
+  - The stale-stop case that T2's review carried is now proven, not shipped
+    blind. Mutating `run_detach.zsh:221` from `rm -f -- "$PID_FILE" "$STOP_FILE"`
+    to `rm -f -- "$PID_FILE"` turns the suite red — `FAIL: a stale stop request
+    prevented the routed run from reaching two ticks`, exit 1 — and the file was
+    restored to the same sha256.
+  - The arm's `--section` guard is load-bearing too. Mutating
+    `if [[ "${1:-}" == "start" && -n "$SECTION_OVERRIDE" ]]` to
+    `if [[ -n "$SECTION_OVERRIDE" ]]` turns the suite red with
+    `ERROR: status takes no arguments`, exit 1. That is the rejection condition
+    about appending `--section` to `stop`/`status`, measured rather than assumed.
+
 ## Superseded
 
 - The 2026-08-24 claim that "`pyproject.toml:47-51` force-includes all of
@@ -126,42 +172,44 @@
 
 ## Blockers
 
-- `zsh tests/packaged_layout_test.sh` exits 1 with T1 merged, and stays red
-  until T1a lands. Observed:
+- `zsh tests/packaged_layout_test.sh` exits 1 on main and no task in this
+  workplan can make it exit 0 any more. Run today on main, 8 PASS then:
   `FAIL: the migrated flow directory holds project data only: expected
   '.gitignore .project-key config.json local_env.sh.example projects.md
-  salvage-legacy ', got '… projects.md run_detach.zsh salvage-legacy '`.
-  Cause, read in the source rather than inferred: `remove_copied_engine`
+  salvage-legacy ', got '.gitignore .project-key artifact_quality.md cards
+  config.json local_env.sh.example projects.md run_detach.zsh salvage-legacy '`.
+  Three entries are stranded, not one. `ls template/.agentic/pm_flow/` confirms
+  `artifact_quality.md` (artifact-quality's) and `cards/` (persona-cards') now
+  sit beside `run_detach.zsh`; `cards` is a directory, so it belongs in
+  `COPIED_ENGINE_DIRS`, not `COPIED_ENGINE_FILES`. `install.sh:47-67` still
+  lists `pm_flow.sh … README.md` and names none of the three.
+- Cause, read in the source rather than inferred: `remove_copied_engine`
   (`install.sh:350-355`) deletes a copied engine file from a migrated flow
-  directory only if it is named in `COPIED_ENGINE_FILES` (`install.sh:47-67`),
-  and `packaged_layout_test.sh:905` builds its legacy fixture with
-  `/bin/cp -R "$REPO_ROOT/template/.agentic/pm_flow/." "$LEGACY_FLOW/"`, so an
+  directory only if it is named in `COPIED_ENGINE_FILES`, and
+  `packaged_layout_test.sh:905` builds its legacy fixture with
+  `/bin/cp -R "$REPO_ROOT/template/.agentic/pm_flow/." "$LEGACY_FLOW/"`, so any
   unregistered new engine file is left behind by design.
-  Fix, already proven: adding the single line `run_detach.zsh` to
-  `COPIED_ENGINE_FILES` in a scratch copy of the developer's tree makes the
-  suite exit 0 with all 13 groups passing, including
-  `PASS: a copied-engine repository migrates losslessly and keeps running`.
-  This is not the developer's failure — `install.sh` was outside the three
-  writable paths the assignment named, and the assignment was wrong to require
-  A8 in full without it.
-- That fix needs an owned-path extension. `install.sh` is not in `brief.md`'s
-  Owned paths and "any file outside Owned paths is modified" is a rejection
-  condition, so this section cannot authorize it for itself. The observation
-  that unblocks it is one line in `brief.md` naming `install.sh`'s
-  `COPIED_ENGINE_FILES` entry as this section's, on the model of the
-  `pm_flow.sh` extension authorized 2026-08-24.
-- Cycle 001's review recorded this as "escalated in `handoff.md`"; it was not.
-  `handoff.md` was still the init scaffold at the start of cycle 002 and carried
-  no request, so no portfolio review could have seen it. Written for real now,
-  and it stays in `handoff.md` until answered.
-- Confirmed still true at the start of cycle 002, read from the tracked tree
-  rather than carried over: `git show --stat 9a2a1e7` lists exactly
-  `template/.agentic/pm_flow/run_detach.zsh`, `tests/fixtures/stub_detach.zsh`
-  and `tests/run_detach_test.sh`, and `COPIED_ENGINE_FILES`
-  (`install.sh:47-67`) still runs `pm_flow.sh … README.md` with no
-  `run_detach.zsh` entry. The red suite on main is unchanged and unattended.
+- This supersedes cycle 002's carried claim that one line in `install.sh` makes
+  the suite exit 0. That was measured against a scratch tree that predates the
+  other two entries; the *suite* is now a portfolio-level outcome, and T1a's
+  reachable outcome is narrower: `run_detach.zsh` gone from the `got` list.
+- What this section still needs, unchanged and now twice-unanswered: one line in
+  `brief.md` naming `install.sh`'s `COPIED_ENGINE_FILES` entry as this
+  section's, on the model of the `pm_flow.sh` extension authorized 2026-08-24.
+  `install.sh` is not an owned path and "any file outside Owned paths is
+  modified" is a rejection condition, so this section cannot grant it to itself.
+- What the portfolio review additionally has to decide, which is new this cycle:
+  three sections are each stranding an engine entry, so the registration rule is
+  a product-level gap rather than this section's oversight. Either one section
+  is given `install.sh` for all three entries, or the rule is enforced where
+  engine files are added. Until then A7's "`packaged_layout_test.sh` still exits
+  0" and A8's third suite are unreachable from this section's owned paths, and
+  T3 must be reviewed on the two suites it can turn green.
+- Cycle 001's review recorded the escalation as made in `handoff.md`; it was
+  not — the file was still the init scaffold. Corrected in cycle 002 and it
+  stays there until answered.
 
-## Active decisions (added this cycle)
+## Active decisions (added cycle 001)
 
 - Any new engine file under `template/.agentic/pm_flow/` has to be registered in
   `install.sh`'s `COPIED_ENGINE_FILES`, or migration strands it and
@@ -197,19 +245,34 @@
   the stopped run's log performs the pre-stop action, and the restart's log
   performs the post-stop one, with the pre-stop artifact's mtime unchanged.
   Any re-wording of A5 in a future assignment must keep that pairing.
-- `start`'s stale-stop-file clearing is implemented but unproven. Mutating
-  `run_detach.zsh:221` back to `rm -f -- "$PID_FILE"` alone leaves the suite
-  green, because a gracefully stopped loop always removes its own stop file, so
-  the test never manufactures a stale one. The gap is real but narrow: it only
-  bites after a `kill -9`. T3's end-to-end group should write a stray
-  `run-detach.stop`, `start`, and assert the run does more than one tick.
+- The claim that `start`'s stale-stop-file clearing is unproven is closed by
+  T3's group and its mutation; see T3's evidence above.
+
+## Active decisions (added cycle 003)
+
+- The routed and script-path entries resolve one runs directory, pinned by the
+  test rather than asserted: the routed `start`'s `log=` is checked to be under
+  the same `$RUNS_DIR` the script-path groups use, the test writes its stray
+  `run-detach.stop` into that directory and the routed `start` clears it, and
+  the stale-stop tick count is read from the same `$STATE_FILE`.
+- The routed group exercises project resolution only in the `--project`-given
+  case, because `engine_command` (`tests/run_detach_test.sh:141-146`) always
+  passes `--project`. `resolve_project`'s no-`--project` fallthrough to
+  `$PM_FLOW_FLOW_DIR/$PROJECT_KEY/runs` is unexercised through the arm. Not a
+  defect of T3 — the assignment fixed that wrapper — but it is the one routing
+  path with no test.
+- Two of `brief.md`'s four scenarios are routed end to end (the graceful stop of
+  scenario 2 and the refusal of scenario 4); scenario 1's launcher-hangup leg
+  and scenario 3's no-repeat assertion stay on the script-path groups from T1
+  and T2. The arm is a pure argv rebuild with no behaviour of its own, and both
+  mutations show the routed group reaches the supervisor, so re-driving those
+  two legs would re-measure the supervisor rather than the arm.
 
 ## Next eligible task
 
-- T3 (routing arm, operator doc, end-to-end; A7), whose `pm_flow.sh` case
-  arm and `help` line are already this section's under the 2026-08-24
-  extension.
-- T1a (one line in `install.sh`; A8's packaged-layout leg) lands whenever the
-  boundary extension is authorized — before T3 if the answer arrives in time,
-  since T3 claims A8 in full and cannot be accepted while
-  `packaged_layout_test.sh` is red.
+- None this section can assign. T1, T2 and T3 are done and T1a is blocked on an
+  owned-path authorization it cannot grant itself.
+- T1a lands whenever the boundary extension is authorized. Its outcome is
+  narrow — `run_detach.zsh` off the migration `got` list — and it does not make
+  `packaged_layout_test.sh` exit 0; `artifact_quality.md` and `cards` are other
+  sections'.
