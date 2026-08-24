@@ -261,21 +261,37 @@
 
 ## Task T5 — End-to-end through the installed command
 
-- Status: pending.
-- Outcome: a packaged install with a legacy TSV runs `pm-flow cost` before and
-  after import with equal totals, dispatches once, and shows the new attempt
-  with no file written under `runs/`.
+- Status: done (cycle 006, GO; merge by the driver).
+- Outcome: the three user-visible scenarios hold through `pm_flow.cli.main`,
+  the entry point the `pm-flow` console script binds
+  (`pyproject.toml [project.scripts]`): a legacy project's own TSV arithmetic
+  equals the total the command prints after the silent import, a repeat run is
+  byte-identical, one dispatch adds exactly one attempt and writes nothing
+  under `runs/`, and the ceiling still refuses — all with the store as the only
+  source.
 - Paths: `tests/store_ledger_test.sh`.
-- Reuse: the packaged-layout harness in `tests/packaged_layout_test.sh`
-  (`legacy_engine`/`installed` at lines 972 and 1073).
+- Reuse: the existing suite's fixture, stub `agent_exec.sh`, `set_config`,
+  `brief` helper and `section-analysis` dispatch (`:229-324`); the real CLI
+  reached as `PYTHONPATH="$REPO_ROOT/src" python3 -c 'import sys; from
+  pm_flow.cli import main; sys.exit(main())' <args>` from `$COMMAND_WORK`.
+  `paths.engine_root()` honours `PM_FLOW_ENGINE_ROOT` (`src/pm_flow/paths.py:59`),
+  so the suite points it at its own stubbed copy `$FLOW` — the CLI is real,
+  the engine is the copy under test, and no dispatch can reach a real agent.
+  `Paths.as_env()` (`:240-257`) then exports `PM_FLOW_FLOW_DIR` and
+  `PM_FLOW_PROJECT_DIR`, both `resolve()`d, and `pm_flow.sh:17,549` derives
+  `PROJECT_DIR="$FLOW_DIR/$PROJECT_KEY"` from them; `--project <key>` selects a
+  project other than `.project-key`'s. The wheel-built engine stays covered by
+  `tests/packaged_layout_test.sh` (not an owned path); this suite does not
+  rebuild it, so "installed" here means the CLI entry point, not a second
+  hermetic wheel build.
 - Acceptance IDs: A1–A5.
 - Validation: `zsh tests/store_ledger_test.sh`, `zsh tests/pm_flow_test.sh`,
-  `zsh tests/packaged_layout_test.sh` exit 0. Two checks the T2 suite cannot
-  see (cycle 002 review): a store whose live rows sit under a different
+  `zsh tests/packaged_layout_test.sh` exit 0, plus the two checks the T2 suite
+  cannot see (cycle 002 review): a store whose live rows sit under a different
   `projects.key` than the importer's (`basename(project_dir)` vs the driver's
-  `PROJECT_KEY`) is summed whole, and the TSV `response_path` string written
-  by the real driver matches `cost.response_files()` byte for byte (a
-  non-normalised `PROJECT_DIR`, e.g. `a//b`, imports the same envelope twice).
+  `PROJECT_KEY`) is summed whole, and the `response_path` strings the real
+  driver records match `cost.response_files()` byte for byte, so a post-dispatch
+  `cost.py import` adds nothing.
 - Depends on: T4.
 
 ## Integration and end-to-end validation
@@ -298,6 +314,16 @@
   own readers are safe: `assert_within_budget` runs at `:973`, before the
   attempt opens, and `record_portfolio_baseline` (`:3407`, `:3450`) runs
   after the review's dispatch has ended its attempt.
+- `spent_usd` fails open as of `9452a80` (an out-of-cycle driver fix, main,
+  2026-08-24): a `cost.py total` that errors or prints nothing is reported as
+  `0` with a stderr warning, because the tick banner's arithmetic died on an
+  empty result under a live pre-T4 driver. A store the reader cannot read
+  therefore re-authorises the whole budget — the brief's first rejection
+  condition, reached through a broken reader rather than a wrong sum. Failing
+  closed would have to happen in `assert_within_budget` (`driver.zsh:610-624`),
+  outside the five owned functions, so it needs a boundary extension and is not
+  in T5. T5 pins what is in scope: a project whose store answers never enters
+  that fallback.
 - Cost of the budget check after T4: every `spent_usd` call runs the silent
   import, which globs `**/*.response.json` under the project. Acceptable at
   today's project sizes; a large project would want the glob bounded. Not in

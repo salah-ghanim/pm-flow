@@ -2,11 +2,54 @@
 
 ## Current task
 
-- T5 — end-to-end through the installed command (next to assign; A1–A5).
-  Its validation carries the two checks the T2 suite cannot see (mixed
-  `projects.key` sum, `response_path` byte equality from the real driver).
+- None. T5 was accepted in cycle 006; every workplan task is done and every
+  brief acceptance ID has current evidence. The section's next action is its
+  handoff.
 
 ## Completed tasks and evidence
+
+- T5 — end-to-end through the installed command (cycle 006, GO; A1–A5).
+  Diff is `tests/store_ledger_test.sh` alone, +155/-0, so no earlier assertion
+  was deleted or loosened; `git status --porcelain` in the worktree lists that
+  one path. All four suites rerun against the worktree by absolute path:
+  `zsh tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0;
+  `zsh tests/pm_flow_test.sh` → 10 `PASS:`; `zsh
+  template/.agentic/pm_flow/tests/run.zsh` → `all suites passed`
+  (35/41/32/58/74); `zsh tests/packaged_layout_test.sh` → 13 `PASS:`.
+  The suite reaches the real entry point through an `installed()` helper —
+  `PYTHONPATH=$REPO_ROOT/src PM_FLOW_ENGINE_ROOT=$FLOW python3 -c 'from
+  pm_flow.cli import main; sys.exit(main())'` inside a subshell, so no
+  `PM_FLOW_*` escapes and the guard at `:9` stands. New coverage: a second
+  legacy project `legacy-two` (3 TSV rows, one blank-cost, plus one
+  envelope-only file, no store) whose `installed --project legacy-two cost`
+  prints `TOTAL\t4.3750`, the figure `awk`/`python3` compute from the TSV's
+  column 5 and the envelope's own price — the blank row's `7.777` envelope is
+  excluded, which is the parity rule observed through the command; a repeat
+  run is byte-identical (`cmp`) and `cost.py import` then prints `imported=0`;
+  a row seeded under `projects.key = other-key` raises the total to `4.6250`
+  and reports under `alpha`; a CLI `section-analysis` dispatch adds exactly
+  one `ATTEMPT` line with cost field `0.5000` (the stub's price, so the
+  stubbed engine was in force), leaves `runs/` holding `pm_flow.db` and no
+  `cost_ledger.tsv`, and the live Codex row still reads
+  `…\talpha\tdeveloper\tcodex-one\tcodex\t0.0400\t13937\t5`; after it
+  `cost.py import` adds nothing, no `response_path` has more than one row, and
+  the 3 live `response_path` strings are a subset of the 6 paths
+  `cost.response_files()` discovers; with `budget.max_usd` back at `12.66` the
+  next CLI dispatch exits non-zero with `project budget exhausted` on stderr,
+  the `ATTEMPT` count is unchanged, `$LEDGER` does not exist and stderr
+  carries no `cost.py total reported nothing`.
+  Mutations on scratch copies, each reversible and each restored green
+  (`cycles/006/review_probe{,2,3,4}.zsh`): a `WHERE a.project_id = 1` filter in
+  `stored_totals`/`stored_attempts` → `FAIL: mixed projects.key row does not
+  raise the total by 0.2500`; the driver recording `${response_json:t}` →
+  `FAIL: dispatch adds exactly one attempt: expected '8', got '9'`; a live row
+  injected with `/nowhere/injected.response.json` → `FAIL: live response_path
+  values differ from cost.response_files strings` (the instrumented check
+  compares 3 recorded against 6 discovered, so it is not vacuous); `spent_usd`
+  emitting the fallback warning while still returning the true figure →
+  `FAIL: healthy store reader entered spent_usd fallback`; the CLI ignoring
+  `--project` → `FAIL: installed legacy-two cost differs from independent
+  legacy arithmetic`.
 
 - T4 — driver stops writing the ledger (cycle 005, GO; A4, A5). Review
   reran everything against the worktree (probes in `cycles/005/`):
@@ -129,16 +172,30 @@
   disk and an import in that window inserts it a second time.
 - `watch.py` is read-only against the store (`mode=ro`, no import, no file
   creation).
+- `spent_usd` fails open, by an out-of-cycle driver fix on main (`9452a80`,
+  2026-08-24, verified in the working tree): the reader's output is captured,
+  a failure or empty result prints `WARNING: cost.py total reported nothing …`
+  on stderr and returns `0`, because a live pre-T4 driver met the deleted TSV
+  arity and the tick banner's arithmetic took the run down. The store is still
+  the only source. T5 keeps this body and asserts the fallback is not reached
+  on a project whose store answers.
+- "The installed command" for T5 means `pm_flow.cli.main` with
+  `PM_FLOW_ENGINE_ROOT` pointed at the suite's stubbed engine copy; the
+  wheel-built engine is `tests/packaged_layout_test.sh`'s job and that file is
+  not an owned path.
 
-## Open risks carried to T5
+## Open risks
 
-- The T2 suite cannot see a `project_id` filter: its importer key and its
-  telemetry key are both `legacy-project`. The code has none (probe: two keys
-  sum to `1.2900`); T5's validation requires a mixed-key check.
-- T1 keys the import on the raw `response_path` string. `Path.glob` normalises
-  `//` and the TSV does not, so a non-canonical `PROJECT_DIR` (only reachable
-  through a `PM_FLOW_FLOW_DIR` override; the default is `pwd -P`) imports the
-  same envelope twice. T5 checks the real driver's strings match.
+- Closed by T5: the `project_id` blind spot (a mixed-key row is summed and
+  attributed, and a `project_id` filter now fails the suite) and the
+  `response_path` string blind spot (the driver's live strings are a subset of
+  `cost.response_files()`, so a post-dispatch import adds nothing).
+- A4's `git -C "$COMMAND_WORK" status --porcelain | grep 'runs/'` assertion
+  cannot fail while the template `.gitignore` carries `*/runs/*`: any file the
+  driver wrote under `runs/` is ignored either way. It is the assignment's
+  wording and it is harmless, but the assertion that actually carries A4 is
+  `ls "$PROJECT_DIR/runs"` holding `pm_flow.db` and no `cost_ledger.tsv`
+  (mutation-proven in cycle 005). Not worth a further cycle.
 - `watch.py` returns an empty view on any `sqlite3.Error` (old schema,
   read-only `runs/` with no `-shm`), so it can show `$0.00` for a project that
   has spent. Display only; the budget check never reads watch.
@@ -148,6 +205,12 @@
   milliseconds wide, not deterministically testable. Recorded, not fixed.
 - Telemetry off or `attempt-start` failing leaves only the envelope: cost
   kept, role `unknown`, label = file name.
+- The `9452a80` fallback re-authorises a full budget when the reader itself
+  breaks (corrupt store, python failure), which is the brief's first rejection
+  condition reached by a different route than a wrong sum. Fixing it properly
+  means failing closed in `assert_within_budget` (`driver.zsh:610-624`), which
+  is outside the five owned functions: a boundary question for the portfolio
+  review, not a T5 task. T5 covers only the healthy-reader case.
 
 ## Blockers
 
@@ -157,6 +220,10 @@
 
 ## Next eligible task
 
-- T5 — end-to-end through the installed command, the last workplan task. Its
-  validation carries the two checks the T2 suite cannot see (mixed
-  `projects.key` sum, `response_path` byte equality from the real driver).
+- None. T1–T5 are done and A1–A5 all carry current evidence, so the section is
+  complete: the store is the cost ledger, no dispatch writes a per-dispatch
+  text file into the host repository, and every cost question — `pm-flow cost`,
+  the budget gate, the dispatch counter, `watch.py` — is answered from
+  `attempts` through the installed command. The remaining `spent_usd`
+  fail-open question lives in `assert_within_budget`, outside this section's
+  five owned driver functions, and belongs to the portfolio review.
