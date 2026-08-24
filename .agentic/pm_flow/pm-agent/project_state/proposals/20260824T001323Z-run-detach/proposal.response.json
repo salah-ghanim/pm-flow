@@ -1,0 +1,111 @@
+{
+  "is_error": false,
+  "duration_api_ms": 386890,
+  "num_turns": 44,
+  "stop_reason": "end_turn",
+  "session_id": "bb6a0bcd-4065-489d-bfd3-9f7bdc5e08b1",
+  "total_cost_usd": 3.7820650000000002,
+  "usage": {
+    "input_tokens": 1523,
+    "cache_creation_input_tokens": 87627,
+    "cache_read_input_tokens": 494361,
+    "output_tokens": 30342,
+    "output_tokens_details": {
+      "thinking_tokens": 20303
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 87627,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 94,
+        "output_tokens": 4362,
+        "cache_read_input_tokens": 91410,
+        "cache_creation_input_tokens": 12251,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 12251
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 2764,
+      "outputTokens": 14,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.002834,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty"
+    },
+    "claude-fable-5": {
+      "inputTokens": 1523,
+      "outputTokens": 30342,
+      "cacheReadInputTokens": 494361,
+      "cacheCreationInputTokens": 87627,
+      "webSearchRequests": 0,
+      "costUSD": 3.7792310000000002,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "canonicalModel": "claude-fable-5",
+      "provider": "firstParty"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "## Assessment\n\nThe request is for a `pm-flow run` that outlives the shell or tool that launched it, with a findable log and a deliberate stop that waits for the in-flight dispatch. It serves no completion criterion directly; it serves the plan's **Order of work** bullet under *Current position*: two portfolio reviews name a project-wide run as the cure for the stalled shortest path, and the 2026-08-23 incident shows such a run dies with its launcher, burns a dispatch, and needs a hand restart. It also serves the *Objective metrics only* principle: a launcher hangup is recorded as an attempt failure (`agent_exec.sh:923-930` writes `unknown`; `sections/codex-usage/escalation-archived-20260823T133240Z/rescue_1/heartbeat.txt:5` reads `attempt 1 of 4 failed (unknown)`), so rescue and abandonment counts charge the team design for a harness kill.\n\nNothing covers it:\n\n- `grep -rn -i -E \"nohup|setsid|detach|daemon|disown|SIGHUP|trap \"` over `src/pm_flow`, `pm_flow.sh`, `driver.zsh`, `heartbeat.sh`, `watch.py`, README: only lock-release traps (`pm_flow.sh:862,897`), \"detached HEAD\" comments (`driver.zsh:2278,2409`), and `README.md:446`, which is this proposal's own example line.\n- `driver.zsh:2769-2852` `cmd_run`: the only flag is `--max-ticks`; foreground loop, no pid file, no stop request, no log (stdout only); exit 0 for both \"no actionable work\" and \"tick budget\", 1 only when deadlocked or all quarantined.\n- `cli.py:81-87` runs the engine as a foreground `subprocess.call`; `pm_flow.sh:1990-1992` fails any unknown command, so a new command needs one `case` arm there.\n- `driver.zsh:2198-2216` and `pm_flow.sh:876-885`: `.driver.lock` via `zsystem flock -t 0`, released with the process; that lock is the only \"is a run live\" signal and names no pid or log.\n- `agent_exec.sh:836` traps `HUP INT TERM` and removes its work dir, so a hangup reaching a dispatch ends the attempt.\n- The only surviving-run record is a hand-made `runs/persona-packs-run-20260823T145247Z.log`; `*/runs/*` is gitignored (`template/.agentic/pm_flow/.gitignore:15`); `PM_FLOW_RUNS_DIR` is exported by `paths.py:252`.\n- `which setsid nohup`: no `setsid` on this host, `/usr/bin/nohup` present.\n- Ownership: `driver.zsh` (store-ledger), `pm_flow.sh` (trace-commands, constrained to `trace` routing), `cli.py` (topology-compare). The cancelled sections (`a2a-binding`, `repo-hooks`) are unrelated. The untracked `resume_claude.sh` at the repo root is a usage-limit re-launcher, not a detach mechanism, and stays out.\n\nPriority is nice-to-have: every completion criterion is reachable with a hand-run `nohup pm-flow run \u2026 &!`, as the restart on 2026-08-23 showed. That means it dispatches after the five live must-haves; the `nohup` idiom stays the workaround until then, and the owner can raise `priority.txt` if a lost run is costing more than that.\n\n## Section: run-detach\n\n### Objective\n- A run started with one command keeps going after its launcher exits or hangs up, tells the operator where its log is, and stops on request only after the dispatch in flight has finished and been recorded.\n\n### Current baseline\n- `pm-flow run` is a foreground child: `src/pm_flow/cli.py:81-87` \u2192 `pm_flow.sh:1923-1926` \u2192 `driver.zsh:2769-2852` (`cmd_run`), flag `--max-ticks` only; no pid file, no stop request, stdout only.\n- The driver is level-triggered (`driver.zsh:3`): the same command resumes, and `pm-flow next` (`driver.zsh:2856`) shows the queue without dispatching; `pm-flow status` at `driver.zsh:2874`.\n- Concurrency is refused by the driver's own locks (`driver.zsh:2198-2216`, `pm_flow.sh:876-885`), released when the process dies.\n- A hangup that reaches `agent_exec.sh:836` ends the attempt as `failed (unknown)` (`agent_exec.sh:923-930`).\n- Runtime records live under `<project>/runs/`, gitignored at `template/.agentic/pm_flow/.gitignore:15`; `PM_FLOW_RUNS_DIR` comes from `paths.py:252`.\n- Test pattern: the `PM_FLOW_*` unset guard at `tests/pm_flow_test.sh:12-19`, agent doubles in `tests/fixtures/stub_*.zsh`.\n- Host tooling: `/usr/bin/nohup` present, no `setsid` on macOS.\n\n### Deliverables\n- `template/.agentic/pm_flow/run_detach.zsh` with `start [--max-ticks N] [--section <key>]`, `stop`, `status`.\n- `start` returns within seconds, prints the pid and the log path under `<project>/runs/`, and passes `--project`/`--section` through unchanged.\n- `stop` records a stop request; the supervisor finishes the dispatch in flight, records it, starts no further tick, writes a final log line, and exits.\n- `status` prints `running`, `stopping` or `idle` with pid, start time, tick count and log path; a pid file whose process is gone reads `idle`.\n- `tests/run_detach_test.sh` and the stub agents it needs.\n- `docs/run-detach.md`: how to start, find the log, stop, and resume.\n- The `pm-flow run-detach` routing arm and `help` line in `pm_flow.sh`, once that file is this section's (see Constraints).\n\n### User-visible scenarios\n1. In a terminal, `pm-flow run-detach start`; it prints `pid=\u2026 log=<project>/runs/run-detach-<UTC>.log` and returns. Close the terminal. Minutes later, from a new terminal, `pm-flow run-detach status` reads `running`, the log has grown, and the dispatch that was in flight at the close ends with the developer's normal status, not `failed (unknown)`.\n2. During a dispatch, `pm-flow run-detach stop` prints that the run will stop after the current dispatch; `status` reads `stopping`; when the dispatch ends, the log's last line says it stopped by request after tick N and `status` reads `idle`.\n3. `pm-flow run-detach start` again: the next tick continues the same section's next action; nothing repeats.\n4. `pm-flow run-detach start` while a run is live is refused, printing the live pid and log path, and starts nothing.\n\n### Interfaces produced\n- The `run-detach start|stop|status` command surface and its printed `pid=`/`log=` lines.\n- The pid, stop-request and log files under `<project>/runs/`, named in `docs/run-detach.md`.\n\n### Interfaces consumed\n- `pm-flow run --max-ticks`, `pm-flow next`, `pm-flow status` and the driver's exit and lock conventions (`driver.zsh:2769-2852`, `2198-2216`), unchanged.\n- `PM_FLOW_RUNS_DIR` and the layout from `src/pm_flow/paths.py`.\n- The fixture pattern of `tests/pm_flow_test.sh` and `tests/fixtures/stub_*.zsh`.\n\n### Scope\n- In: the supervisor script, its three commands, launcher-independence, graceful stop, the log location, the test, the operator doc, and (gated) the routing arm.\n- Out: any change to how the driver loops, locks, dispatches, retries, or classifies attempts.\n\n### Non-goals\n- Classifying a launcher hangup as a harness kill in the attempt record (`agent_exec.sh`, `driver.zsh`; agent-bindings and store-ledger territory).\n- A hard-kill mode; `kill <pid>` exists.\n- Auto-restart on usage-limit reset (`resume_claude.sh` at the repo root stays untracked and out).\n- A service unit (launchd, systemd), a tmux/screen wrapper, a board or TUI, multi-project supervision.\n\n### Priority\n- nice-to-have: every completion criterion is reachable with a hand-run `nohup pm-flow run \u2026 &!`; this section saves one dispatch's spend and the operator's attention per launcher death and keeps harness kills out of the measured attempt record.\n\n### Owned paths\n- `template/.agentic/pm_flow/run_detach.zsh`\n- `tests/run_detach_test.sh`\n- `tests/fixtures/stub_detach*.zsh`\n- `docs/run-detach.md`\n\n### Dependencies\n- `trace-commands` (owns `template/.agentic/pm_flow/pm_flow.sh`, where the routing arm goes).\n\n### Constraints and fixed decisions\n- No edit to `driver.zsh`, `agent_exec.sh`, `cli.py`, or `pm_flow.sh` while another section owns it; the supervisor composes existing commands (`run --max-ticks`, `next`, `status`) around the driver rather than changing the loop.\n- `pm_flow.sh` joins this section's paths for one `case` arm and one `help` line only, at the first portfolio review after `trace-commands` reports done; until then the script is invoked directly and the doc says so.\n- Stock macOS and Linux only: `nohup`, zsh job control or `os.setsid` from python3; no `setsid` binary, tmux, screen, launchd or systemd.\n- `stop` is graceful only: the in-flight dispatch, including its child agent, is never signalled.\n- Runtime files (pid, stop request, log) live under `<project>/runs/` and nowhere tracked.\n- One live detached run per project; `start` reuses the driver's refusal rather than adding a second locking scheme beyond the pid liveness check.\n\n### Acceptance\n- A1: In `tests/run_detach_test.sh`, a launching shell runs `start`, the stub developer writes a marker then sleeps past the launcher's death, the launcher is sent SIGHUP and exits while the marker exists; the dispatch completes and the cycle records the stub's normal status, not `failed (unknown)`.\n- A2: `status` reads `running` with pid, start time and log path while live, `idle` afterwards; with the pid file left behind and the process gone it reads `idle` and exits 0.\n- A3: `stop` issued while a dispatch is in flight: the dispatch's result is recorded, no further tick starts, the log's last line names the tick it stopped after, `status` reads `idle`; checked in the test with a stub whose dispatch outlasts the stop.\n- A4: A second `start` while one is live exits non-zero, prints the live pid and log path, and the tick count is unchanged.\n- A5: After `stop` then `start`, the fixture section's next action is the one `pm-flow next` listed before the stop; the log shows no repeated tick.\n- A6: `git status --porcelain` in the fixture repository is empty after start, stop and start again; every runtime file is under `<project>/runs/`.\n- A7: Once the routing arm is this section's, `pm-flow run-detach status` and `pm-flow help` reach the script and list the command; `zsh tests/packaged_layout_test.sh` still exits 0.\n- A8: `zsh tests/run_detach_test.sh`, `zsh tests/pm_flow_test.sh` and `zsh tests/packaged_layout_test.sh` exit 0; the new test opens with the `PM_FLOW_*` unset guard from `tests/pm_flow_test.sh:12-19`.\n\n### Rejection conditions\n- Survival is shown for the supervisor alone while the dispatched child dies, or the SIGHUP lands before the marker or after the stub has finished.\n- `stop` signals the driver or its agent child, or a hard-kill mode is added.\n- Any file outside Owned paths is modified, including `pm_flow.sh` before its release.\n- The mechanism needs a binary or service absent from stock macOS.\n- A runtime file lands outside `<project>/runs/` or shows in `git status`.\n\n### Open questions\n- None.\n\n## Decision\nCUT \u2014 no live section, cancelled reason, or existing command covers a run that outlives its launcher; it serves the plan's order-of-work bullet (the project-wide run two reviews call for) and the objective-metrics principle, on new paths, nice-to-have behind the five live must-haves.",
+  "ttft_ms": 2551,
+  "ttft_stream_ms": 1714,
+  "time_to_request_ms": 25,
+  "type": "result",
+  "duration_ms": 388325,
+  "uuid": "ead98f51-c83c-40b6-be2e-39da37dfbcce",
+  "failure_reason": "none",
+  "role": "cpo",
+  "pm_backend": "claude",
+  "model": "claude-fable-5",
+  "difficulty": "xhigh",
+  "attempts": 1,
+  "session_resumable": false
+}

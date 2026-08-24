@@ -1,0 +1,2 @@
+nice-to-have
+every completion criterion is reachable with a hand-run `nohup pm-flow run … &!`; this section saves one dispatch's spend and the operator's attention per launcher death and keeps harness kills out of the measured attempt record.

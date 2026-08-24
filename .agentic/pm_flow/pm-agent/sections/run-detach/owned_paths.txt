@@ -1,0 +1,4 @@
+template/.agentic/pm_flow/run_detach.zsh
+tests/run_detach_test.sh
+tests/fixtures/stub_detach*.zsh
+docs/run-detach.md
