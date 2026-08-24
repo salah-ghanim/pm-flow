@@ -280,11 +280,17 @@ No credentials exist.
 
 ## Decision
 
-BLOCKED_EXTERNAL the paper gateway has no credentials on this host; a human must install one' \
+BLOCKED_EXTERNAL — the paper gateway has no credentials on this host; a human must install one' \
   PM_FLOW_SECTION=gamma "$FLOWSH" tick >/dev/null
 eq  "F2 the lifecycle becomes blocked" "$(cat "$FLOW/demo/sections/gamma/status.txt")" "blocked"
 has "F2 the summary names the dependency" \
     "$(cat "$FLOW/demo/sections/gamma/summary.txt")" "paper gateway"
+has "F2 the dash after the token is not part of the reason" \
+    "$(cat "$FLOW/demo/sections/gamma/summary.txt")" "dependency: the paper gateway"
+has "F2 the driver commits the blocked state" \
+    "$(git -C "$W" log -1 --format=%s)" "chore(gamma): blocked cycle 001 (state and handoff)"
+eq  "F2 and leaves the section's record clean" \
+    "$(git -C "$W" status --porcelain -- .agentic/pm_flow/demo/sections/gamma)" ""
 eq  "F2 a blocked section is not actionable" \
     "$("$FLOWSH" status | awk '$1 == "gamma" {print $4}')" "idle"
 

@@ -1278,8 +1278,8 @@ record_blocked_external() {
   handoff="$cycle_dir/blocked_handoff.md"
   {
     printf '## Outcome\n\n- %s\n\n' "$outcome"
-    printf '## Decisions\n\n- The section manager stopped scoping cycles because no assignment\n'
-    printf '  available to it can satisfy the acceptance criteria.\n\n'
+    printf '## Decisions\n\n- The section manager opened no assignment: the next workplan task\n'
+    printf '  cannot be done until the dependency above is resolved.\n\n'
     printf '## Interfaces\n\n- Nothing new. Dependent sections must assume this capability is unavailable.\n\n'
     printf '## Risks\n\n- The dependency may never arrive, in which case the section must be rescoped\n'
     printf '  or abandoned as a product decision.\n\n'
@@ -1289,6 +1289,8 @@ record_blocked_external() {
     printf '  `active` handoff.\n'
   } > "$handoff"
   cmd_section_handoff "$section_key" blocked "$summary" --file "$handoff" >/dev/null
+  with_repo_git_lock commit_section_state "$section_dir" "$section_key" \
+    "$(basename "$cycle_dir")" "blocked cycle"
 }
 
 do_scope() {
@@ -1346,6 +1348,10 @@ $(cycle_history_files "$section_dir" "${cycle_number#0}" "$(scope_history_window
         "ASSIGN,COMPLETE,BLOCKED_EXTERNAL" || true)"
       blocker="$(printf '%s' "$blocker" | \
         sed -E 's/^[[:space:]]*BLOCKED_EXTERNAL[[:space:]]*[-:,.]*[[:space:]]*//; s/[[:space:]]+$//')"
+      # Managers write the token, an em or en dash, then the reason; sed's
+      # bracket expression is not reliable on those under every locale.
+      blocker="${blocker#—}"; blocker="${blocker#–}"
+      blocker="$(printf '%s' "$blocker" | sed -E 's/^[[:space:]]+//')"
       if [[ -z "$blocker" ]]; then
         # The token has to name what is blocking, or the state it produces is
         # unactionable. Treat a bare token as an unreadable verdict.
@@ -1537,6 +1543,7 @@ commit_section_state() {
   local section_dir="$1"
   local section_key="$2"
   local cycle_number="$3"
+  local what="${4:-accepted cycle}"
   worktree_isolation_enabled || return 0
   [[ -d "$section_dir" ]] || return 0
   git -C "$PROJECT_ROOT" add -- "$section_dir" >/dev/null 2>&1 || return 0
@@ -1548,7 +1555,7 @@ commit_section_state() {
     -c user.name="${PM_FLOW_GIT_NAME:-pm-flow}" \
     -c user.email="${PM_FLOW_GIT_EMAIL:-pm-flow@localhost}" \
     commit --quiet --no-verify \
-    -m "chore($section_key): accepted cycle $cycle_number (state and handoff)" \
+    -m "chore($section_key): $what $cycle_number (state and handoff)" \
     -- "$section_dir" >/dev/null 2>&1 || true
   return 0
 }
