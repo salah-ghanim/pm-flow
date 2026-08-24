@@ -17,7 +17,7 @@ PROJECT="fixture"
 PROJECT_DIR="$QA_ROOT/.agentic/pm_flow/$PROJECT"
 STATE_DIR="$PROJECT_DIR/project_state"
 SECTIONS_DIR="$PROJECT_DIR/sections"
-mkdir -p "$STATE_DIR" "$SECTIONS_DIR/alpha" "$SECTIONS_DIR/beta"
+mkdir -p "$STATE_DIR" "$SECTIONS_DIR/alpha" "$SECTIONS_DIR/beta" "$SECTIONS_DIR/gamma"
 printf '%s\n' "$PROJECT" > "$QA_ROOT/.agentic/pm_flow/.project-key"
 
 cat > "$STATE_DIR/plan.md" <<'EOF'
@@ -193,6 +193,94 @@ cat > "$SECTIONS_DIR/beta/handoff.md" <<'EOF'
 - Inspect output.
 EOF
 
+cat > "$SECTIONS_DIR/gamma/brief.md" <<'EOF'
+# gamma brief
+
+### Objective
+- Rank a live-style section precisely.
+### Current baseline
+- The fixture has depth-three headings.
+### Deliverables
+- A clean durable artifact set.
+### User-visible scenarios
+- The rank output has no gamma findings.
+### Interfaces produced
+- Standard output.
+### Interfaces consumed
+- Read `shared/gamma/input.json` without owning it.
+### Scope
+- Exercise non-path token recognition.
+### Non-goals
+- Changing `state.md` during ranking.
+### Priority
+- nice-to-have: this fixture protects finding precision.
+### Owned paths
+- `src/gamma/`
+### Dependencies
+- None.
+### Constraints and fixed decisions
+- Keep the fixture read-only.
+### Acceptance
+- A1: depth-three headings are accepted.
+- A2: grouped coverage cells cover every ID.
+### Rejection conditions
+- A declared consumed path is reported as unowned.
+### Open questions
+- None.
+EOF
+
+cat > "$SECTIONS_DIR/gamma/workplan.md" <<'EOF'
+# gamma workplan
+
+### Design summary
+- Read the live-style fixture and preserve precise findings.
+### Interfaces and data changes
+- Read `src/gamma/` and print standard output.
+### Task T1 — Rank
+- Acceptance IDs: A1, A2.
+### Integration and end-to-end validation
+- Run the fixture rank command.
+### Risks and rollback
+- Revert the fixture mutation.
+### Acceptance coverage
+| Brief ID | Workplan task | Evidence required |
+|---|---|---|
+| A1, A2 | T1 | A3 remains outside the first cell |
+EOF
+
+cat > "$SECTIONS_DIR/gamma/state.md" <<'EOF'
+# gamma state
+
+### Current task
+- T1.
+### Completed tasks and evidence
+- The `shared/gamma/input.json` interface is available.
+### Active decisions
+- Keep the section independent.
+- Treat `0.25`, `os.environ`, `v1.36.0`, and `2>/dev/null` as non-path tokens.
+### Blockers
+- None.
+### Next eligible task
+- T1.
+EOF
+
+cat > "$SECTIONS_DIR/gamma/handoff.md" <<'EOF'
+# gamma handoff
+
+### Outcome
+- Precision fixture ready.
+### Decisions
+- Keep grouped coverage.
+### Interfaces
+- Standard output.
+### Risks
+- None.
+### What is unproven
+- Nothing else.
+### Next action
+- Inspect output.
+EOF
+
 run_rank() {
   PM_FLOW_REPO_ROOT="$QA_ROOT" \
     PYTHONPATH="$REPO_ROOT/src" python3 -m pm_flow.quality rank --project "$PROJECT"
@@ -200,11 +288,19 @@ run_rank() {
 
 run_rank > "$QA_ROOT/initial.out" || fail "rank command failed"
 line_count="$(wc -l < "$QA_ROOT/initial.out" | tr -d ' ')"
-[[ "$line_count" == 9 ]] || fail "rank printed $line_count lines instead of one for each of 9 files"
+[[ "$line_count" == 13 ]] || fail "rank printed $line_count lines instead of one for each of 13 files"
 for file in project_state/plan.md sections/alpha/brief.md sections/alpha/workplan.md \
     sections/alpha/state.md sections/alpha/handoff.md sections/beta/brief.md \
-    sections/beta/workplan.md sections/beta/state.md sections/beta/handoff.md; do
+    sections/beta/workplan.md sections/beta/state.md sections/beta/handoff.md \
+    sections/gamma/brief.md sections/gamma/workplan.md sections/gamma/state.md \
+    sections/gamma/handoff.md; do
   grep -q "$file" "$QA_ROOT/initial.out" || fail "rank omitted $file"
+done
+for file in brief.md workplan.md state.md handoff.md; do
+  gamma_line="$(grep "sections/gamma/$file" "$QA_ROOT/initial.out")"
+  [[ "$gamma_line" == *"findings: none"* ]] || \
+    fail "live-style gamma $file was not finding-free: $gamma_line"
+  printf '%s\n' "$gamma_line"
 done
 first_line="$(head -n 1 "$QA_ROOT/initial.out")"
 [[ "$first_line" == *"sections/alpha/brief.md"* ]] || fail "highest-finding artifact was not ranked first: $first_line"
@@ -243,3 +339,32 @@ alpha_brief_after="$(grep 'sections/alpha/brief.md' "$QA_ROOT/covered.out")"
 alpha_state_line="$(grep 'sections/alpha/state.md' "$QA_ROOT/covered.out")"
 [[ "$alpha_state_line" == *"stale:"* ]] || fail "pasted design summary did not produce stale"
 printf 'PASS: coverage mutation clears shape and pasted design summary produces stale\n'
+
+sed -i.bak 's/^### Open questions$/### Questions/' "$SECTIONS_DIR/gamma/brief.md"
+rm "$SECTIONS_DIR/gamma/brief.md.bak"
+run_rank > "$QA_ROOT/missing-heading.out" || fail "rank failed after heading mutation"
+gamma_missing_heading_line="$(grep 'sections/gamma/brief.md' "$QA_ROOT/missing-heading.out")"
+[[ "$gamma_missing_heading_line" == *"shape:"*"Open questions"* ]] || \
+  fail "genuinely missing gamma heading did not produce shape"
+printf '%s\n' "$gamma_missing_heading_line"
+sed -i.bak 's/^### Questions$/### Open questions/' "$SECTIONS_DIR/gamma/brief.md"
+rm "$SECTIONS_DIR/gamma/brief.md.bak"
+
+sed -i.bak '/^- A2: grouped coverage cells cover every ID\.$/a\
+- A3: an uncovered ID remains visible.' "$SECTIONS_DIR/gamma/brief.md"
+rm "$SECTIONS_DIR/gamma/brief.md.bak"
+run_rank > "$QA_ROOT/uncovered.out" || fail "rank failed after uncovered-ID mutation"
+gamma_brief_line="$(grep 'sections/gamma/brief.md' "$QA_ROOT/uncovered.out")"
+[[ "$gamma_brief_line" == *"shape:"*"A3"* ]] || \
+  fail "genuinely uncovered gamma ID did not produce shape"
+printf '%s\n' "$gamma_brief_line"
+
+sed -i.bak '/^- Keep the section independent\.$/a\
+- Inspect `foreign/undeclared.py`.' "$SECTIONS_DIR/gamma/state.md"
+rm "$SECTIONS_DIR/gamma/state.md.bak"
+run_rank > "$QA_ROOT/undeclared.out" || fail "rank failed after undeclared-path mutation"
+gamma_state_line="$(grep 'sections/gamma/state.md' "$QA_ROOT/undeclared.out")"
+[[ "$gamma_state_line" == *"boundaries:"*"foreign/undeclared.py"* ]] || \
+  fail "state-only gamma path did not produce boundaries"
+printf '%s\n' "$gamma_state_line"
+printf 'PASS: depth-three grouped coverage and declared references stay clean while real defects fire\n'
