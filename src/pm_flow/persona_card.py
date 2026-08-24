@@ -38,11 +38,13 @@ def _reject_forbidden_fields(value: Any, path: str = "") -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
             normalised = str(key).strip().lower().replace("-", "_")
+            child_path = f"{path}.{key}" if path else str(key)
             if normalised in FORBIDDEN_CARD_KEYS:
-                raise PersonaCardError(
+                error = PersonaCardError(
                     f'card field "{normalised}" is not allowed on a persona'
                 )
-            child_path = f"{path}.{key}" if path else str(key)
+                error.path = child_path
+                raise error
             _reject_forbidden_fields(item, child_path)
     elif isinstance(value, list):
         for index, item in enumerate(value):

@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+for name in ${(k)parameters[(I)PM_FLOW_*]}; do
+  unset "$name"
+done
+
 ROOT="${0:A:h:h}"
 CARD="$ROOT/template/.agentic/pm_flow/cards/reviewer.card.json"
 SCHEMA="$ROOT/template/.agentic/pm_flow/cards/a2a-agent-skill.schema.json"
@@ -197,11 +201,17 @@ Plain uncarded prompt.
 MD
 
 run_catalog () {
+  run_catalog_db "$STORE" "$@"
+}
+
+run_catalog_db () {
+  local database="$1"
+  shift
   env -u PM_FLOW_ENGINE_ROOT -u PM_FLOW_FLOW_DIR -u PM_FLOW_PROJECT \
     -u PM_FLOW_PROJECT_DIR -u PM_FLOW_REPO_ROOT -u PM_FLOW_ROOT \
     -u PM_FLOW_RUNS_DIR -u PM_FLOW_SECTIONS_DIR -u PM_FLOW_STATE_DIR \
     -u PM_FLOW_STORE \
-    python3 "$CATALOG" --db "$STORE" "$@"
+    python3 "$CATALOG" --db "$database" "$@"
 }
 
 snapshot_rows () {
@@ -225,7 +235,7 @@ PY
 }
 
 dispatch_counts () {
-  python3 - "$STORE" <<'PY'
+  python3 - "${1:-$STORE}" <<'PY'
 import sqlite3
 import sys
 
@@ -262,20 +272,13 @@ assert pack["license"] == "CC-BY-4.0"
 print("PASS: card installs verbatim while pack provenance remains on its row")
 PY
 
-counts_before="$(dispatch_counts)"
 show_output="$(run_catalog persona show carded-reviewer)"
-counts_after="$(dispatch_counts)"
-[[ "$counts_after" == "$counts_before" ]] || {
-  print -u2 "persona show dispatched: before=$counts_before after=$counts_after"
-  exit 1
-}
 [[ "$show_output" == *"author: unverified claim: pm-flow contributors"* ]]
 [[ "$show_output" == *"purpose: Review a bounded implementation against its stated contract and evidence."* ]]
 [[ "$show_output" == *"version: 1.0.0"* ]]
 [[ "$show_output" == *'"name": "Contract review"'* ]]
 [[ "$show_output" == *'"name": "Failure analysis"'* ]]
 print "PASS: persona show reads every card field with the claim label intact"
-print "PASS: persona show leaves attempts and spans unchanged ($counts_before)"
 
 set +e
 unknown_output="$(run_catalog persona show not-installed 2>&1)"
@@ -296,6 +299,337 @@ uncarded_show="$(run_catalog persona show plain-persona)"
 [[ "$uncarded_show" == *"version: 9.9.9"* ]]
 [[ "$uncarded_show" == *"card: this persona has no card"* ]]
 print 'PASS: an uncarded persona installs, lists, and shows without a card'
+
+ALICE_PACK="$WORK_DIR/alice-pack"
+BOB_PACK="$WORK_DIR/bob-pack"
+python3 - "$CARD" "$ALICE_PACK" "$BOB_PACK" <<'PY'
+import copy
+import json
+import sys
+from pathlib import Path
+
+
+card_source = Path(sys.argv[1])
+source = json.loads(card_source.read_text())
+fixtures = (
+    (Path(sys.argv[2]), "alice-pack", "Alice Example", "1.4.0",
+     "Alice-specific review purpose.", "Alice reviewer wording."),
+    (Path(sys.argv[3]), "bob-pack", "Bob Example", "2.7.0",
+     "Bob-specific review purpose.", "Bob reviewer wording."),
+)
+for root, pack_name, author, version, purpose, wording in fixtures:
+    (root / "personas").mkdir(parents=True)
+    (root / "cards").mkdir()
+    card = copy.deepcopy(source)
+    card.update({
+        "name": f"{author} reviewer",
+        "author": f"unverified claim: {author}",
+        "purpose": purpose,
+        "version": version,
+        "provenance": {
+            "publisher": f"unverified claim: {pack_name}",
+            "source": f"unverified claim: {author.lower().replace(' ', '-')}",
+        },
+    })
+    manifest = {
+        "name": pack_name,
+        "author": f"{author} Publisher",
+        "license": "CC-BY-4.0",
+        "version": f"pack-{version}",
+        "tags": ["identity", author.split()[0].lower()],
+        "personas": [{
+            "key": "reviewer",
+            "file": "personas/reviewer.md",
+            "card": "cards/reviewer.card.json",
+            "layer": "base",
+            "title": f"{author} reviewer",
+            "summary": purpose,
+            "tags": ["same-key"],
+        }],
+    }
+    (root / "persona-pack.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (root / "cards" / "reviewer.card.json").write_text(
+        json.dumps(card, indent=2) + "\n"
+    )
+    (root / "personas" / "reviewer.md").write_text(wording)
+PY
+
+run_catalog persona add "$ALICE_PACK"
+run_catalog persona add "$BOB_PACK"
+identity_list="$(run_catalog persona list)"
+reviewer_list_rows="$(printf '%s\n' "$identity_list" | grep -c '^reviewer ' || true)"
+plain_list_rows="$(printf '%s\n' "$identity_list" | grep -c '^plain-persona ' || true)"
+[[ "$reviewer_list_rows" == 2 ]] || {
+  print -u2 "persona list identity rows: expected 2 reviewer rows, got $reviewer_list_rows"
+  exit 1
+}
+[[ "$plain_list_rows" == 1 ]] || {
+  print -u2 "persona list uncarded identity rows: expected 1, got $plain_list_rows"
+  exit 1
+}
+[[ "$identity_list" == *"unverified claim: Alice Example"* ]]
+[[ "$identity_list" == *"unverified claim: Bob Example"* ]]
+print 'PASS: persona list keeps two card-author identities and one uncarded identity'
+
+set +e
+ambiguous_show="$(run_catalog persona show reviewer 2>&1)"
+ambiguous_show_status=$?
+set -e
+if [[ "$ambiguous_show" == *"Alice-specific review purpose."* || \
+      "$ambiguous_show" == *"Bob-specific review purpose."* ]]; then
+  print -u2 "ambiguous persona show returned the wrong card: $ambiguous_show"
+  exit 1
+fi
+[[ $ambiguous_show_status -ne 0 ]]
+[[ "$ambiguous_show" == *"unverified claim: Alice Example"* ]]
+[[ "$ambiguous_show" == *"unverified claim: Bob Example"* ]]
+[[ "$ambiguous_show" == *"--author"* ]]
+
+alice_show="$(run_catalog persona show reviewer --author 'Alice Example')"
+bob_show="$(run_catalog persona show reviewer --author 'unverified claim: Bob Example')"
+[[ "$alice_show" == *"author: unverified claim: Alice Example"* ]]
+[[ "$alice_show" == *"purpose: Alice-specific review purpose."* ]]
+[[ "$alice_show" != *"Bob-specific review purpose."* ]]
+[[ "$bob_show" == *"author: unverified claim: Bob Example"* ]]
+[[ "$bob_show" == *"purpose: Bob-specific review purpose."* ]]
+[[ "$bob_show" != *"Alice-specific review purpose."* ]]
+print 'PASS: persona show refuses an ambiguous key and selects either claimed author'
+
+EXPORT_DIR="$WORK_DIR/exported-alice"
+ROUNDTRIP_STORE="$WORK_DIR/roundtrip.db"
+set +e
+ambiguous_export="$(run_catalog persona export reviewer \
+  --out "$WORK_DIR/ambiguous-export" 2>&1)"
+ambiguous_export_status=$?
+set -e
+[[ $ambiguous_export_status -ne 0 ]]
+[[ "$ambiguous_export" == *"unverified claim: Alice Example"* ]]
+[[ "$ambiguous_export" == *"unverified claim: Bob Example"* ]]
+[[ "$ambiguous_export" == *"--author"* ]]
+[[ ! -e "$WORK_DIR/ambiguous-export" ]]
+print 'PASS: persona export refuses an ambiguous key before writing files'
+
+run_catalog persona export reviewer --author 'Alice Example' --out "$EXPORT_DIR"
+run_catalog_db "$ROUNDTRIP_STORE" persona add "$EXPORT_DIR"
+python3 - "$STORE" "$ROUNDTRIP_STORE" <<'PY'
+import json
+import sqlite3
+import sys
+
+
+def row(database):
+    connection = sqlite3.connect(database)
+    connection.row_factory = sqlite3.Row
+    return connection.execute(
+        "SELECT * FROM personas WHERE key = 'reviewer' "
+        "AND json_extract(metadata, '$.card.author') = ?",
+        ("unverified claim: Alice Example",),
+    ).fetchone()
+
+
+source = row(sys.argv[1])
+installed = row(sys.argv[2])
+assert source is not None and installed is not None
+left = json.loads(source["metadata"])["card"]
+right = json.loads(installed["metadata"])["card"]
+assert set(left) == set(right), "round-trip top-level card fields changed"
+for field in sorted(set(left) - {"skills"}):
+    assert left[field] == right[field], f"round-trip field {field} changed"
+assert len(left["skills"]) == len(right["skills"])
+for index, left_skill in enumerate(left["skills"]):
+    right_skill = right["skills"][index]
+    assert set(left_skill) == set(right_skill), (
+        f"round-trip skill {index} field set changed"
+    )
+    for field in left_skill:
+        assert left_skill[field] == right_skill[field], (
+            f"round-trip skill {index}.{field} changed"
+        )
+assert [item["id"] for item in left["skills"]] == [
+    item["id"] for item in right["skills"]
+]
+assert source["content_hash"] == installed["content_hash"]
+print("PASS: exported card reinstalls field by field with skill order and hash intact")
+PY
+
+UNCARDED_EXPORT="$WORK_DIR/exported-plain"
+run_catalog persona export plain-persona --out "$UNCARDED_EXPORT"
+python3 - "$UNCARDED_EXPORT/persona-pack.json" <<'PY'
+import json
+import sys
+
+
+manifest = json.load(open(sys.argv[1]))
+assert "tags" in manifest and isinstance(manifest["tags"], list)
+entry = manifest["personas"][0]
+assert "card" not in entry
+assert set(entry) <= {"key", "file", "layer", "title", "summary", "tags", "card"}
+print("PASS: uncarded export has manifest tags and no card entry")
+PY
+
+COMPARE_ROOT="$WORK_DIR/compare"
+COMMAND_WORK="$COMPARE_ROOT/repo"
+mkdir -p "$COMMAND_WORK/.agentic"
+/bin/cp -R "$ROOT/template/.agentic/pm_flow" "$COMMAND_WORK/.agentic/pm_flow"
+/bin/cp "$ROOT/src/pm_flow/persona_card.py" "$COMMAND_WORK/.agentic/persona_card.py"
+FLOW="$COMMAND_WORK/.agentic/pm_flow"
+PROJECT_KEY="persona-card-compare"
+PROJECT_DIR="$FLOW/$PROJECT_KEY"
+COMPARE_STORE="$PROJECT_DIR/runs/pm_flow.db"
+mkdir -p "$PROJECT_DIR/runs"
+printf '%s\n' "$PROJECT_KEY" > "$FLOW/.project-key"
+printf '%s\n' '{"domain":"generic"}' > "$PROJECT_DIR/project.json"
+printf '# Persona card comparison fixture\n' > "$PROJECT_DIR/task_contract.md"
+sed 's/{{DOMAIN}}/generic/' "$FLOW/config.json" > "$COMPARE_ROOT/config.json"
+mv -- "$COMPARE_ROOT/config.json" "$FLOW/config.json"
+
+run_catalog_db "$COMPARE_STORE" sync --flow "$FLOW" \
+  --project "$PROJECT_KEY" --domain generic --topology lean >/dev/null
+run_catalog_db "$COMPARE_STORE" sync --flow "$FLOW" \
+  --project "$PROJECT_KEY" --domain generic --topology heavy >/dev/null
+run_catalog_db "$COMPARE_STORE" persona add "$ALICE_PACK" >/dev/null
+run_catalog_db "$COMPARE_STORE" persona add "$BOB_PACK" >/dev/null
+
+STUB_BIN="$COMPARE_ROOT/bin"
+mkdir -p "$STUB_BIN"
+/bin/cp "$ROOT/tests/fixtures/stub_success.zsh" "$STUB_BIN/claude"
+chmod +x "$STUB_BIN/claude"
+printf 'export PATH="%s:$PATH"\n' "$STUB_BIN" > "$FLOW/local_env.sh"
+
+for section in alice-arm bob-arm; do
+  (cd "$COMMAND_WORK" && env -u PM_FLOW_ENGINE_ROOT -u PM_FLOW_FLOW_DIR \
+    -u PM_FLOW_PROJECT -u PM_FLOW_PROJECT_DIR -u PM_FLOW_REPO_ROOT \
+    -u PM_FLOW_ROOT -u PM_FLOW_RUNS_DIR -u PM_FLOW_SECTIONS_DIR \
+    -u PM_FLOW_STATE_DIR -u PM_FLOW_STORE -u PM_FLOW_TOPOLOGY \
+    PATH="$STUB_BIN:$PATH" zsh "$FLOW/pm_flow.sh" \
+    --project "$PROJECT_KEY" init-section "$section") <<SECTIONBRIEF >/dev/null
+## Objective
+
+- Produce one real comparison attempt.
+
+## Scope
+
+- The fixture only.
+
+## Priority
+
+- must-have: the comparison needs a real attempt.
+
+## Owned paths
+
+- fixture/$section/**
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- The fixture completes.
+
+## Rejection conditions
+
+- A real backend is reached.
+SECTIONBRIEF
+  mkdir -p "$PROJECT_DIR/sections/$section/cycles/001"
+  printf 'COMPLETE\n' > "$PROJECT_DIR/sections/$section/cycles/001/decision.txt"
+done
+
+set +e
+ambiguous_swap="$(run_catalog_db "$COMPARE_STORE" persona swap pm reviewer \
+  --project "$PROJECT_KEY" --topology lean 2>&1)"
+ambiguous_swap_status=$?
+set -e
+[[ $ambiguous_swap_status -ne 0 ]]
+[[ "$ambiguous_swap" == *"unverified claim: Alice Example"* ]]
+[[ "$ambiguous_swap" == *"unverified claim: Bob Example"* ]]
+[[ "$ambiguous_swap" == *"--author"* ]]
+
+alice_swap="$(run_catalog_db "$COMPARE_STORE" persona swap pm reviewer \
+  --author 'Alice Example' --project "$PROJECT_KEY" --topology lean)"
+bob_swap="$(run_catalog_db "$COMPARE_STORE" persona swap pm reviewer \
+  --author 'Bob Example' --project "$PROJECT_KEY" --topology heavy)"
+[[ "$alice_swap" == *"pm seat(s)"* ]]
+[[ "$bob_swap" == *"pm seat(s)"* ]]
+print 'PASS: persona swap refuses an ambiguous key and selects either claimed author'
+
+(cd "$COMMAND_WORK" && env -u PM_FLOW_ENGINE_ROOT -u PM_FLOW_FLOW_DIR \
+  -u PM_FLOW_PROJECT -u PM_FLOW_PROJECT_DIR -u PM_FLOW_REPO_ROOT \
+  -u PM_FLOW_ROOT -u PM_FLOW_RUNS_DIR -u PM_FLOW_SECTIONS_DIR \
+  -u PM_FLOW_STATE_DIR -u PM_FLOW_STORE -u PM_FLOW_TOPOLOGY \
+  PATH="$STUB_BIN:$PATH" PM_FLOW_TOPOLOGY=lean \
+  zsh "$FLOW/pm_flow.sh" --project "$PROJECT_KEY" --section alice-arm tick) \
+  >/dev/null
+(cd "$COMMAND_WORK" && env -u PM_FLOW_ENGINE_ROOT -u PM_FLOW_FLOW_DIR \
+  -u PM_FLOW_PROJECT -u PM_FLOW_PROJECT_DIR -u PM_FLOW_REPO_ROOT \
+  -u PM_FLOW_ROOT -u PM_FLOW_RUNS_DIR -u PM_FLOW_SECTIONS_DIR \
+  -u PM_FLOW_STATE_DIR -u PM_FLOW_STORE -u PM_FLOW_TOPOLOGY \
+  PATH="$STUB_BIN:$PATH" PM_FLOW_TOPOLOGY=heavy \
+  zsh "$FLOW/pm_flow.sh" --project "$PROJECT_KEY" --section bob-arm tick) \
+  >/dev/null
+
+run_keys=("${(@f)$(sqlite3 "$COMPARE_STORE" \
+  'SELECT run_key FROM runs ORDER BY id')}")
+[[ ${#run_keys[@]} == 2 ]]
+compare_report="$(python3 "$FLOW/compare.py" report \
+  "${run_keys[1]}" "${run_keys[2]}" --flow "$FLOW" --project "$PROJECT_KEY")"
+[[ "$(printf '%s\n' "$compare_report" | grep -c $'^personas\t.*pm=reviewer' || true)" == 2 ]]
+
+python3 - "$COMPARE_STORE" "$CATALOG" "${run_keys[1]}" "${run_keys[2]}" <<'PY'
+import json
+import sqlite3
+import subprocess
+import sys
+
+
+database, catalog, *run_keys = sys.argv[1:]
+connection = sqlite3.connect(database)
+connection.row_factory = sqlite3.Row
+resolved = []
+for run_key in run_keys:
+    attempt = connection.execute(
+        "SELECT a.persona_stack FROM attempts a JOIN runs r ON r.id = a.run_id "
+        "WHERE r.run_key = ? AND a.role_key = 'pm' ORDER BY a.id LIMIT 1",
+        (run_key,),
+    ).fetchone()
+    assert attempt is not None, f"run {run_key} has no pm attempt"
+    base = next(item for item in json.loads(attempt["persona_stack"])
+                if item["layer"] == "base")
+    row = connection.execute(
+        "SELECT metadata FROM personas WHERE key = ? AND content_hash = ?",
+        (base["key"], base["content_hash"]),
+    ).fetchone()
+    assert row is not None
+    card = json.loads(row["metadata"])["card"]
+    shown = subprocess.run(
+        [sys.executable, catalog, "--db", database, "persona", "show",
+         base["key"], "--author", card["author"]],
+        check=True, text=True, stdout=subprocess.PIPE,
+    ).stdout
+    assert f"author: {card['author']}" in shown
+    assert f"version: {card['version']}" in shown
+    resolved.append((base["key"], base["content_hash"],
+                     card["author"], card["version"]))
+assert resolved[0][0] == resolved[1][0] == "reviewer"
+assert resolved[0][1] != resolved[1][1]
+assert resolved[0][2] != resolved[1][2]
+assert resolved[0][3] != resolved[1][3]
+for item in resolved:
+    print("resolved=" + "|".join(item))
+print("PASS: real comparison attempts resolve through catalog.py to distinct cards")
+PY
+print 'PASS: compare report records pm=reviewer on both arms while cards differ'
+
+compare_counts_before="$(dispatch_counts "$COMPARE_STORE")"
+[[ "$compare_counts_before" != "0 0" ]]
+run_catalog_db "$COMPARE_STORE" persona show reviewer \
+  --author 'Alice Example' >/dev/null
+compare_counts_after="$(dispatch_counts "$COMPARE_STORE")"
+[[ "$compare_counts_after" == "$compare_counts_before" ]] || {
+  print -u2 "persona show dispatched: before=$compare_counts_before after=$compare_counts_after"
+  exit 1
+}
+print "PASS: persona show leaves non-zero attempts and spans unchanged ($compare_counts_before -> $compare_counts_after)"
 
 ISOLATED_FLOW="$WORK_DIR/isolated/engine"
 ISOLATED_STORE="$WORK_DIR/isolated/catalog.db"
