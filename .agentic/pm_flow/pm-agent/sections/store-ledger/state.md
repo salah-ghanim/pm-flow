@@ -8,6 +8,24 @@
 
 ## Completed tasks and evidence
 
+- Reverified on `main` at `75462bd`, after cycle 006 was merged
+  (`cycles/007/scope_probe.zsh`, read-only against the repository): `zsh
+  tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0; `zsh
+  tests/pm_flow_test.sh` → 10 `PASS:`, exit 0; `zsh
+  template/.agentic/pm_flow/tests/run.zsh` → `all suites passed`
+  (35/41/32/58/74) with every named ledger assertion (`F7 the store has a
+  priced row`, `F7 a failed dispatch still records its cost`, `F7 the run
+  refuses to spend past budget.max_usd`, `F14`, `C2 two recorded dispatches
+  arm the review`, `C2 $1.00 of ledger spend passes a $0.75 threshold`, `D1
+  the store carries the analysis`, `D1 and charges it to the section`, `D2
+  and one further dispatch arms it again`), exit 0; `zsh
+  tests/packaged_layout_test.sh` → 13 `PASS:`, exit 0. `grep -c
+  cost_ledger_file driver.zsh` → `0`; `grep -rl cost_ledger template` →
+  `cost.py` alone (the importer's legacy read, which A1 requires); `grep -c
+  cost_ledger watch.py` → `0`. `git status --porcelain -- tests template
+  src` is empty, so the evidence below is the merged tree's, not a
+  worktree's.
+
 - T5 — end-to-end through the installed command (cycle 006, GO; A1–A5).
   Diff is `tests/store_ledger_test.sh` alone, +155/-0, so no earlier assertion
   was deleted or loosened; `git status --porcelain` in the worktree lists that
