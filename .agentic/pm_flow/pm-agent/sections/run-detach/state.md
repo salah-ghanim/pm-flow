@@ -7,6 +7,14 @@
 - T1a is the only task left and it cannot be assigned: it touches `install.sh`
   alone, which is not an owned path. The section is idle until the boundary
   extension is authorized (see Blockers).
+- Cycle 004 scoped no assignment and reported `BLOCKED_EXTERNAL`. The blocker
+  was re-probed at that scope rather than carried: `install.sh:47-67` still
+  ends `… watch.py upgrade.py requirements-telemetry.txt README.md` and names
+  none of the three stranded entries; `grep -rn "install.sh" brief.md` returns
+  nothing, so the only boundary extension in `brief.md` remains the
+  `pm_flow.sh` one authorized 2026-08-24; and
+  `zsh tests/packaged_layout_test.sh` exits 1 with the same `got` list as
+  cycle 003 (see Blockers).
 
 ## Completed tasks and evidence
 
@@ -173,7 +181,8 @@
 ## Blockers
 
 - `zsh tests/packaged_layout_test.sh` exits 1 on main and no task in this
-  workplan can make it exit 0 any more. Run today on main, 8 PASS then:
+  workplan can make it exit 0 any more. Re-run at the cycle-004 scope,
+  2026-08-25, 8 PASS then:
   `FAIL: the migrated flow directory holds project data only: expected
   '.gitignore .project-key config.json local_env.sh.example projects.md
   salvage-legacy ', got '.gitignore .project-key artifact_quality.md cards
@@ -193,7 +202,8 @@
   the suite exit 0. That was measured against a scratch tree that predates the
   other two entries; the *suite* is now a portfolio-level outcome, and T1a's
   reachable outcome is narrower: `run_detach.zsh` gone from the `got` list.
-- What this section still needs, unchanged and now twice-unanswered: one line in
+- What this section still needs, unchanged and now unanswered in four
+  successive cycles (001, 002, 003, 004): one line in
   `brief.md` naming `install.sh`'s `COPIED_ENGINE_FILES` entry as this
   section's, on the model of the `pm_flow.sh` extension authorized 2026-08-24.
   `install.sh` is not an owned path and "any file outside Owned paths is
@@ -276,3 +286,9 @@
   narrow — `run_detach.zsh` off the migration `got` list — and it does not make
   `packaged_layout_test.sh` exit 0; `artifact_quality.md` and `cards` are other
   sections'.
+- What the section is *not* is complete. A7's third clause and A8's third suite
+  have no current evidence and cannot get any from an owned path, so `COMPLETE`
+  would be a claim the ledger contradicts. Either the portfolio review grants
+  the extension and decides who registers the other two entries, or it narrows
+  those two criteria to "adds no new stranded entry", which T3's evidence
+  already meets. Both are its calls, not this section's.

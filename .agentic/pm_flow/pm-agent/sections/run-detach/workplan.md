@@ -118,13 +118,16 @@
 
 ## Task T1a — the new engine file survives a migration
 
-- Status: pending, waiting on an owned-path authorization. Not on T2's or T3's
-  path: it touches `install.sh` and nothing else, while they touch
-  `run_detach.zsh`, its test, its fixtures and `pm_flow.sh`. So it is held, not
-  blocking, and T2 goes first rather than the section idling behind a
-  permission it cannot grant itself. Cost of the wait: the migration group
-  stays red on main meanwhile, which is why the escalation is repeated in
-  `handoff.md` for every portfolio review until it is answered.
+- Status: pending, waiting on an owned-path authorization, and now the only
+  unfinished task in this workplan. While T2 and T3 were open it was held
+  rather than blocking — it touches `install.sh` and nothing else, so the
+  section worked around it instead of idling behind a permission it cannot
+  grant itself. That room is gone: T1, T2 and T3 are accepted, so from cycle
+  004 the section has no executable task and reports `BLOCKED_EXTERNAL` until
+  the extension is granted or refused. Re-probed at the cycle-004 scope rather
+  than carried: `install.sh:47-67` still names none of the three stranded
+  entries, and `brief.md` still carries only the `pm_flow.sh` extension of
+  2026-08-24.
 - Scope corrected 2026-08-25, from a run of the suite on main rather than from
   cycle 002's carried claim: `run_detach.zsh` is no longer the only unregistered
   engine file. Observed
