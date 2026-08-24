@@ -47,6 +47,7 @@ Usage:
   pm_flow.sh [--project <name>] trace status
   pm_flow.sh [--project <name>] [--section <name>] tick
   pm_flow.sh [--project <name>] [--section <name>] run [--max-ticks <n>]
+  pm_flow.sh [--project <name>] run-detach {start [--max-ticks <n>] [--section <name>]|stop|status}
   pm_flow.sh [--project <name>] role-prompt <role>
   pm_flow.sh [--project <name>] prompt-audit [<prompt-file>|--all] [--strict]
   pm_flow.sh [--project <name>] init-section <section-name> [--file <markdown-file>]
@@ -1927,6 +1928,16 @@ main() {
     run)
       shift || true
       cmd_run "$@"
+      ;;
+    run-detach)
+      shift || true
+      local -a run_detach_args=()
+      [[ -z "$PROJECT_OVERRIDE" ]] || run_detach_args+=(--project "$PROJECT_OVERRIDE")
+      run_detach_args+=("$@")
+      if [[ "${1:-}" == "start" && -n "$SECTION_OVERRIDE" ]]; then
+        run_detach_args+=(--section "$SECTION_OVERRIDE")
+      fi
+      zsh -f "$SCRIPT_DIR/run_detach.zsh" "${run_detach_args[@]}"
       ;;
     status)
       shift || true
