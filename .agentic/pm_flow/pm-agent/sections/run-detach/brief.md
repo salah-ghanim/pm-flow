@@ -83,3 +83,12 @@
 
 ### Open questions
 - None.
+
+## Boundary extended, authorized 2026-08-24
+
+- `template/.agentic/pm_flow/pm_flow.sh` joins Owned paths, per the gate in
+  Constraints: `trace-commands` reported done and this is the first portfolio
+  review after it. No live section owns the file.
+- Edits are limited to one `run-detach` case arm and one `help` line; A7 is
+  now assignable. Anything beyond that arm and line remains a rejection
+  condition.

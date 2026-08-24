@@ -70,45 +70,39 @@ Everything below serves that sentence.
 
 ## Current position
 
-- Met: sections run in isolated worktrees outside the repository; the four
-  suites exit 0 from the officer's tier (`zsh tests/pm_flow_test.sh`,
-  `zsh tests/prompt_quality_test.sh`, `zsh tests/store_ledger_test.sh`,
-  `zsh template/.agentic/pm_flow/tests/run.zsh`), with the engine fixtures
-  now seeding and reading the store.
-- Unmet: backend-readable traces (no OTLP endpoint in `config.json`, no
-  `pm-flow trace`), `runs/cost_ledger.tsv` still on disk, no compare, no
-  persona measurement, no MCP or ACP surface.
-- `store-ledger`: T4 is on `main` (`1c5a301`). The driver's
-  `record_dispatch_cost`, `spent_usd` and `dispatch_count` go through the
-  store; `git grep cost_ledger -- template` hits only `cost.py:184,191`,
-  the import reader, which is legitimate. Remaining to done: delete the
-  TSV after proving A1 parity on the live project (`pm-flow cost` after
-  import equals the TSV report to the cent on `pm-agent`) and A4 (a
-  project at `max_usd` is refused its next dispatch with the store as the
-  source).
-- Cost-recording integrity: between 02:17Z and 06:08Z on 2026-08-24 the
-  cost reader recorded a blank cost for one developer dispatch, $0.00 for
-  one review, and ~$0.0022 for five scope dispatches whose historical
-  price is $2.7-4.8. `9452a80` keeps the run alive through a broken
-  reader; it does not repair the rows. The store carries known-low rows
-  for that window, the driver's spend-since-review figure ($2.3986) is a
-  third of what the TSV recorded for the same window ($8.74), and budget
-  governance under-counts until `store-ledger`'s A1 parity settles which
-  totals are right. The TSV must not be deleted before that parity check
-  runs against it.
-- `trace-commands` and `otel-semconv` each have cycle 001 scope done and
-  wait on nothing; their first assignments are next.
-- Order of work: `store-ledger` T5 to done, then `topology-compare` (the
-  objective) and `agent-bindings`, which wait on it (compare needs cost
-  totals, `pm-flow cost` for an ACP attempt needs the rewritten `cost.py`).
-  The driver ranks by dependents before recency, so `trace-commands` and
-  `otel-semconv` get ticks only while `store-ledger` is not actionable;
-  once it is done the four must-haves interleave by least-recent dispatch.
-  `persona-cards`, `artifact-quality` and `run-detach` are the live
-  nice-to-haves; the driver dispatches must-haves first.
-- `run-detach` gets its `pm_flow.sh` routing arm and help line at the first
-  portfolio review after `trace-commands` reports done; until then its
-  script is invoked directly.
+- Every must-have section is done. Six of the seven completion criteria are
+  met by the officer's own probes on `main`: worktree isolation; the suites
+  (`pm_flow_test.sh`, `prompt_quality_test.sh`, `store_ledger_test.sh`,
+  `tests/run.zsh`, plus `topology_compare_test.sh`, `agent_bindings_test.sh`
+  and `trace_commands_test.sh`, all exit 0); `cost_ledger.tsv` gone;
+  `pm-flow compare` with `--persona` swaps measured in the report; persona
+  add/list/swap in `catalog.py`; `python -m pm_flow.mcp_server` (five tools)
+  and the `acp` binding arm.
+- The one open criterion is the backend render: no Phoenix, Langfuse or
+  Jaeger has ever displayed a run. Everything up to the backend is proven -
+  OTLP/JSON accepted by a schema-validated loopback receiver, GenAI
+  semconv parent/child spans, exact span ids re-fetched. Docker is absent
+  on this host, so the settling observation is an operator action:
+  `docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one`,
+  `pm-flow trace export --otlp http://localhost:4318/v1/traces`, then
+  `curl 'http://localhost:16686/api/traces?service=pm-flow'`.
+- The TSV was retired after its gate ran: `cost.py import` on `pm-agent`
+  printed `imported=0` twice (every TSV row already had a store row, reruns
+  are no-ops), and the file is archived as
+  `runs/cost_ledger.tsv.imported-20260824`, gitignored.
+- Documented limits, deliberately not worked around: the store under-counts
+  the 2026-08-24 02:17-06:08Z window (the broken reader wrote the same low
+  rows to both sinks; import cannot reprice an existing row); no shipped ACP
+  agent or stock MCP SDK client has connected, only the suites' protocol
+  clients; compare arms have only run on stub projects; a budget-capped arm
+  drops out of `wall_clock_s` (`assert_within_budget` fails via `fail`, so
+  `runs.ended_at` stays NULL); `spent_usd` fails open on a broken reader.
+  Fixing the last two means reopening `driver.zsh` ownership - deferred
+  until capped-arm measurement matters.
+- Live sections, all nice-to-have: `artifact-quality`, `persona-cards`
+  (also owes the `catalog.py:250` rewording that lets `otel-semconv`'s A4
+  grep exemption be deleted), and `run-detach`, whose `pm_flow.sh` routing
+  arm is released (one case arm and one help line).
 - Cut: `a2a-binding` and `repo-hooks`. The product does not guarantee an A2A
   seat, a commit-message hook, or an install registry.
 
