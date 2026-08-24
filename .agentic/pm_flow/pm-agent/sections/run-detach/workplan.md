@@ -118,7 +118,13 @@
 
 ## Task T1a — the new engine file survives a migration
 
-- Status: pending (next eligible; blocked on an owned-path authorization)
+- Status: pending, waiting on an owned-path authorization. Not on T2's or T3's
+  path: it touches `install.sh` and nothing else, while they touch
+  `run_detach.zsh`, its test, its fixtures and `pm_flow.sh`. So it is held, not
+  blocking, and T2 goes first rather than the section idling behind a
+  permission it cannot grant itself. Cost of the wait: `packaged_layout_test.sh`
+  stays red on main meanwhile, which is why the escalation is repeated in
+  `handoff.md` for every portfolio review until it is answered.
 - Why it exists: `install.sh` removes a copied engine file from a migrated flow
   directory only if the file is named in `COPIED_ENGINE_FILES`
   (`install.sh:47-67`, `remove_copied_engine` at `install.sh:350-355`).
@@ -147,7 +153,8 @@
 
 ## Task T2 — graceful stop, and a resume that repeats nothing
 
-- Status: pending
+- Status: done — A3, A5 and A6 (`stop` and the second `start`) met, accepted
+  cycle 002. A8's `packaged_layout_test.sh` leg still sits with T1a.
 - Outcome: `stop` issued while a dispatch is in flight prints that the run will
   stop after the current dispatch and exits 0; the in-flight dispatch is never
   signalled, finishes, and is recorded; no further tick starts; the log's last
@@ -168,6 +175,15 @@
   appends `stopped by request after tick <n>`, removes the stop file and the
   pid file, and exits. The stop-outlasting stub is a second fixture whose
   developer dispatch sleeps past the `stop` call.
+- Two details the shipped T1 code makes load-bearing. `cmd_status`
+  (`run_detach.zsh:233-236`) reads `stopping` as "pid file live *and* stop file
+  present", so the loop must drop the pid file *before* the stop file on its way
+  out; the reverse order shows `running` again after the stop was honoured.
+  And a supervisor killed hard leaves `run-detach.stop` behind, which would make
+  the next run stop after one tick for no reason, so `start` clears a stale stop
+  file in the same branch where it already clears a stale pid file
+  (`run_detach.zsh:197-204`) — one line, inside this task because this task is
+  what creates the file.
 - Acceptance IDs: A3, A5; A6 for `stop` and the second `start`.
 - Validation: `zsh tests/run_detach_test.sh` exits 0, asserting the stub's
   post-stop marker (proving the dispatch was not signalled), the recorded
@@ -208,6 +224,12 @@
   `zsh tests/packaged_layout_test.sh` all exit 0; `pm-flow help` output
   contains `run-detach`; the fixture repository's `git status --porcelain` is
   empty after the full scenario.
+- Carried from T2's review: `start`'s stale-stop clearing
+  (`run_detach.zsh:221`) is shipped but unproven — a gracefully stopped loop
+  always removes its own stop file, so no test manufactures a stale one.
+  Deleting `"$STOP_FILE"` from that `rm` leaves the suite green. T3's group
+  writes a stray `run-detach.stop`, runs `start --max-ticks 2`, and asserts the
+  run reaches tick 2.
 - Depends on: T2.
 
 ## Risks and rollback

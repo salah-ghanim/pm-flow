@@ -2,8 +2,10 @@
 
 ## Current task
 
-- None assigned. T1 accepted in cycle 001; T1a is next and needs an owned-path
-  authorization first (see Blockers).
+- None assigned. T2 was accepted in cycle 002; T3 is next eligible.
+- T1a is held, not blocking: it touches `install.sh` alone and is on neither
+  T2's nor T3's path, so the section worked T2 first while the owned-path
+  authorization is outstanding (see Blockers).
 
 ## Completed tasks and evidence
 
@@ -31,6 +33,52 @@
   - A8, new-suite leg — the suite opens with the `PM_FLOW_*` unset guard
     (`tests/run_detach_test.sh:12-19`). `zsh tests/pm_flow_test.sh` exits 0,
     all 10 groups PASS.
+
+- T2 — graceful stop, and a resume that repeats nothing. Accepted cycle 002.
+  Changes exactly the three assigned paths: `git status --porcelain` in the
+  worktree lists ` M template/.agentic/pm_flow/run_detach.zsh`,
+  ` M tests/run_detach_test.sh`, `?? tests/fixtures/stub_detach_stop.zsh` and
+  nothing else. `install.sh` and `pm_flow.sh` untouched.
+  - A3 — `zsh tests/run_detach_test.sh` exits 0 in 32s, four new groups PASS
+    (`graceful stop outlasts and records the dispatch in flight`,
+    `stopping becomes idle with one tick and no stop file`,
+    `restart performs the next action without rewriting the stopped result`,
+    `stop and restart keep runtime under runs and fixture porcelain empty`).
+    Instrumented run of the same suite printed the stopped log verbatim:
+    `[tick 1] stop-work: develop`, `develop 001 -> result (developer status:
+    DELIVERED)`, then `[…] run-detach stopped by request after tick 1`, with
+    `ticks=1` in `run-detach.state`. The group runs at `--max-ticks 4`, so the
+    single tick is the stop's doing, not the budget's.
+  - A5 — `next` before the stop printed `2 stop-work develop`; the stopped run
+    performed `develop` and recorded it; `next` after the stop printed
+    `2 stop-work review`; the restart's log reads `[tick 1] stop-work: review`
+    and the pre-stop `result.md` mtime is unchanged (`st_mtime_ns` compared
+    across the restart). Nothing was re-run, and the supervisor holds no cursor
+    of its own — the resume is the driver's level-triggered `next`.
+  - A6 (`stop`, second `start`) — `git status --porcelain` in the fixture repo
+    is empty after the stopped-run `start` and after `stop`; after the restart
+    it is exactly ` M .agentic/pm_flow/detach-repo/project_state/sections.md`,
+    the driver's own tracked bookkeeping, which the test commits as
+    `tests/run_detach_test.sh:188-192` already does rather than weakening the
+    assertion. `find "$FLOW_DIR" -name 'run-detach*' ! -path "$RUNS_DIR/*"` is
+    empty at all three points, and `run-detach.stop` is gone after the loop
+    exits.
+  - The stop is graceful by construction, not by promise: the only `kill` in
+    `run_detach.zsh` is the `kill -0` liveness probe at `:43`, and the file
+    contains no `trap`. The stub's dispatch writes its woke marker after the
+    stop and the cycle records `DELIVERED`.
+  - The assertions have teeth, checked by mutation against scratch copies of
+    the developer's tree:
+    - `cmd_stop` writing no stop file → `FAIL: status during the stopped
+      dispatch: expected to find 'stopping'`, exit 1.
+    - both between-tick stop checks deleted from `loop_main` → `FAIL: stopped
+      log final line: expected to find 'stopped by request after tick 1'`,
+      exit 1.
+    - the loop's trailing `rm -f -- "$STOP_FILE"` deleted → `FAIL: the honoured
+      stop request was not removed`, exit 1.
+  - A8, regression leg — `zsh tests/pm_flow_test.sh` exits 0, all 10 groups
+    PASS. `zsh tests/packaged_layout_test.sh` exits 1 on the migration group
+    and only that group, as expected while T1a is unauthorized.
 
 ## Superseded
 
@@ -98,11 +146,20 @@
   A8 in full without it.
 - That fix needs an owned-path extension. `install.sh` is not in `brief.md`'s
   Owned paths and "any file outside Owned paths is modified" is a rejection
-  condition, so this section cannot authorize it for itself. Escalated in
-  `handoff.md` for the next portfolio review, on the model of the `pm_flow.sh`
-  extension authorized 2026-08-24. The observation that unblocks it is one line
-  in `brief.md` naming `install.sh`'s `COPIED_ENGINE_FILES` entry as this
-  section's.
+  condition, so this section cannot authorize it for itself. The observation
+  that unblocks it is one line in `brief.md` naming `install.sh`'s
+  `COPIED_ENGINE_FILES` entry as this section's, on the model of the
+  `pm_flow.sh` extension authorized 2026-08-24.
+- Cycle 001's review recorded this as "escalated in `handoff.md`"; it was not.
+  `handoff.md` was still the init scaffold at the start of cycle 002 and carried
+  no request, so no portfolio review could have seen it. Written for real now,
+  and it stays in `handoff.md` until answered.
+- Confirmed still true at the start of cycle 002, read from the tracked tree
+  rather than carried over: `git show --stat 9a2a1e7` lists exactly
+  `template/.agentic/pm_flow/run_detach.zsh`, `tests/fixtures/stub_detach.zsh`
+  and `tests/run_detach_test.sh`, and `COPIED_ENGINE_FILES`
+  (`install.sh:47-67`) still runs `pm_flow.sh … README.md` with no
+  `run_detach.zsh` entry. The red suite on main is unchanged and unattended.
 
 ## Active decisions (added this cycle)
 
@@ -117,11 +174,42 @@
   tree; that is ordinary driver behaviour, not the supervisor's. A6 across
   start/stop/start is T2's.
 
+## Active decisions (added cycle 002)
+
+- Two facts about the shipped T1 code that T2 has to respect. `cmd_status`
+  (`run_detach.zsh:233-236`) derives `stopping` from "pid file live *and* stop
+  file present", so the loop's exit has to remove the pid file before the stop
+  file or `status` reads `running` again after the stop was honoured. And
+  because a hard-killed supervisor leaves `run-detach.stop` behind, `start`
+  clears a stale stop file alongside the stale pid file it already clears
+  (`run_detach.zsh:197-204`), or the next run stops after one tick for no
+  reason.
+- T1's test proves nothing about stop ordering, because it runs with
+  `--max-ticks 1`: the loop exits at its budget after a single tick either way.
+  T2's case has to run with a budget above 1, or a `stop` that does nothing at
+  all still passes.
+- A5 as the cycle-002 assignment worded it — "the action `next` named before the
+  stop is the action taken after the restart" — is unsatisfiable, and the
+  shipped test is right not to assert it. The stopped tick *completes* the
+  action `next` named (`develop`), so `next` necessarily advances to `review`
+  before the restart; asserting the restart repeats `develop` would assert the
+  repetition `brief.md`'s scenario 3 forbids. The test instead pins both halves:
+  the stopped run's log performs the pre-stop action, and the restart's log
+  performs the post-stop one, with the pre-stop artifact's mtime unchanged.
+  Any re-wording of A5 in a future assignment must keep that pairing.
+- `start`'s stale-stop-file clearing is implemented but unproven. Mutating
+  `run_detach.zsh:221` back to `rm -f -- "$PID_FILE"` alone leaves the suite
+  green, because a gracefully stopped loop always removes its own stop file, so
+  the test never manufactures a stale one. The gap is real but narrow: it only
+  bites after a `kill -9`. T3's end-to-end group should write a stray
+  `run-detach.stop`, `start`, and assert the run does more than one tick.
+
 ## Next eligible task
 
-- T1a (register `run_detach.zsh` in `install.sh`; A8's packaged-layout leg) —
-  one line, and it returns the repository to three green suites. Assignable as
-  soon as the boundary extension above is authorized.
-- Then T2 (graceful stop and resume; A3, A5), then T3 (routing arm, operator
-  doc, end-to-end; A7), whose `pm_flow.sh` case arm and `help` line are already
-  this section's under the 2026-08-24 extension.
+- T3 (routing arm, operator doc, end-to-end; A7), whose `pm_flow.sh` case
+  arm and `help` line are already this section's under the 2026-08-24
+  extension.
+- T1a (one line in `install.sh`; A8's packaged-layout leg) lands whenever the
+  boundary extension is authorized — before T3 if the answer arrives in time,
+  since T3 claims A8 in full and cannot be accepted while
+  `packaged_layout_test.sh` is red.
