@@ -2,9 +2,55 @@
 
 ## Current task
 
-- T1b — make shape and boundaries discriminate. Next to assign.
+- T3 — metadata-only record. Next to assign. (T2 was first written as `T1b`;
+  workplan IDs are `T<number>` only, so it became T2 and the record/show tasks
+  renumbered to T3 and T4.)
 
 ## Completed tasks and evidence
+
+- T2 — make shape and boundaries discriminate. Accepted cycle 002. Acceptance
+  ID A1. All four defects fixed in one function each; only the three owned
+  paths changed.
+  - Suite: `zsh tests/artifact_quality_test.sh` against the section worktree
+    exited 0 with four PASS lines. The depth-3 `gamma` section prints
+    `findings: none` for all four of its artifacts, while its three negatives
+    still fire: `shape: missing headings: Open questions`,
+    `shape: acceptance IDs absent from workplan coverage table: A3`, and
+    `boundaries: references outside section ownership: foreign/undeclared.py`.
+  - The suite discriminates, it was not written to the old behaviour: running
+    the new test against the cycle-001 `quality.py` fails with
+    `FAIL: live-style gamma brief.md was not finding-free` — that build reports
+    the depth-3 brief as missing all seven legacy headings, as uncovering
+    A1/A2, and as violating on its declared `shared/gamma/input.json`.
+  - Live `rank` on `pm-agent` with every `PM_FLOW_*` and `PYTHONPATH` unset,
+    old scorer vs new over the same 65 files: `shape` 15 → 5, and the five are
+    exactly the known true positives — `project_state/plan.md` (all seven plan
+    headings) plus `agents-md`, `green-suite`, `installer` and
+    `worktree-isolation` state files (all five state headings). No true
+    positive was lost.
+  - Depth now selects the contract: 12 of 17 live briefs resolve to the
+    expanded 15-heading list, `run-detach` among them, and every live brief
+    reports zero missing headings.
+  - Declared references work: this section's own brief went from 17 flagged
+    tokens — including `prompt_quality.py`, `cli.py` and `pm_flow.sh` — to
+    `findings: none`.
+  - Boundaries improved by token, not by file: 1104 → 683 flagged tokens, 247
+    distinct tokens dropped. The per-file count only fell 59 → 50, because
+    tighter recognition also newly resolves 78 real path forms the old regex
+    missed — line *ranges* (`driver.zsh:610-624`; the old suffix rule accepted
+    only `:<n>`) and long or hyphenated dotfiles (`.gitignore`,
+    `.project-key`). Those additions are correct, so the assignment's
+    "well below 57" per-file target was the wrong yardstick, not a shortfall
+    in the work.
+  - No collateral drift: `length` 16 → 16, `echo` 0 → 0, `stale` 0 → 0 across
+    the same live run, so the widened `markdown_section` did not turn state
+    files stale.
+  - Carried to T3: (a) the depth-scoped terminator is correct in code but
+    unpinned by the suite — restoring the old `^#{1,2}` terminator under the
+    new matcher still passes every assertion, so add a fixture whose depth-3
+    section is followed by a depth-2 heading; (b) decide whether surviving
+    slash-bearing non-paths (`tools/call`, `session/prompt`, `13937in/5out`)
+    warrant another precision pass or are accepted noise.
 
 - T1 — rubric and scorer. Accepted cycle 001. Acceptance IDs A1, A4, A5.
   - `zsh tests/artifact_quality_test.sh` against the section worktree printed
@@ -56,18 +102,23 @@
   `sections/`, so the `quality/` record dir is untracked by construction.
   Evidence still has to be observed, not assumed.
 
-- Two dimensions do not discriminate yet, so a finding in them does not mean
-  the file is wrong. Observed on the first real run against `pm-agent`:
-  `shape` requires `^##` while the engine's brief validator
-  (`pm_flow.sh:1156`) accepts `^#{1,6}`, so six live briefs that write all
-  seven headings at depth 3 are reported as missing all seven; and
-  `looks_like_path` accepts any dotted or slashed inline-code token, so
-  `0.25`, `os.environ` and `2>/dev/null` are scored as unowned paths. The
-  fixture uses `##` headings and real paths only, which is why the suite
-  cannot see either defect. T1b carries both, with the negative cases named.
-- The live `project_state/plan.md` reporting all seven plan headings missing
-  is a true positive, not this defect: its headings genuinely differ from the
-  engine template's.
+- `shape` now discriminates: on the live project every finding names a real
+  defect, and the only five are `project_state/plan.md` plus the `agents-md`,
+  `green-suite`, `installer` and `worktree-isolation` state files. Those five
+  write depth-2 headings whose *names* genuinely differ from the contract, so
+  no depth fix can clear them. Treat any new `shape` finding as true.
+- `boundaries` discriminates for declared surfaces but not yet for every token
+  shape. A path stated in inline code anywhere in the section's own brief is
+  allowed; a path present only in a workplan or state is still a violation.
+  What survives as noise is slash-bearing non-paths — JSON-RPC method names
+  (`tools/call`, `session/prompt`, `resources/list`), and token counts like
+  `13937in/5out`. That is the assignment's deliberate rule: a slash-bearing
+  token free of shell metacharacters counts as a path. Revisit only with a
+  measurement, not a hunch.
+- Ranking two dimensions by *file* count hides precision work. Between cycle
+  001 and 002 the flagged-token count fell 1104 → 683 while the per-file
+  `boundaries` count moved only 59 → 50, because better recognition also finds
+  real paths the old regex missed. Measure this dimension by token.
 
 ## Blockers
 
@@ -75,4 +126,6 @@
 
 ## Next eligible task
 
-- T1b — make shape and boundaries discriminate.
+- T3 — metadata-only record. Fold in T2's two carried follow-ups: pin the
+  depth-scoped section terminator with a fixture, and settle whether the
+  surviving slash-bearing non-paths need another pass.

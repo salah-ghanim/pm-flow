@@ -16,7 +16,7 @@
 
 ## Task T1 — Rubric and scorer
 
-- Status: accepted cycle 001 (A1, A4, A5 met; precision defects carried to T1b).
+- Status: accepted cycle 001 (A1, A4, A5 met; precision defects carried to T2).
 - Outcome: `artifact_quality.md` defines budgets and the five dimensions;
   `quality.py` loads it and scores a fixture tree for `length`, `echo`,
   `shape`, `boundaries`, `stale` with no composite total.
@@ -31,30 +31,50 @@
   flip the named finding and nothing else.
 - Depends on: None.
 
-## Task T1b — Make shape and boundaries discriminate
+## Task T2 — Make shape and boundaries discriminate
 
-- Status: pending.
-- Outcome: a finding in either dimension means something is wrong with the
-  file. Two defects observed in cycle 001's first real run:
-  - `has_heading` matches only `^##`, but the engine's own brief validator
-    (`pm_flow.sh:1156`) accepts `^#{1,6}`. Six live briefs write all seven
-    required headings at depth 3 and are reported as missing all seven.
-    Match the engine's depth range.
-  - `looks_like_path` returns true for any inline-code token with a dot or a
-    slash, so `0.25`, `os.environ`, `2>/dev/null` and `v1.36.0` are scored as
-    out-of-ownership paths. `boundaries` then fires on nearly every artifact
-    with dozens of non-path entries and carries no signal.
-- Paths: `src/pm_flow/quality.py`, `tests/artifact_quality_test.sh`.
-- Reuse: the rubric's existing dimension prose; no new dimension.
+- Status: accepted cycle 002 (A1 met; two follow-ups carried, see state).
+- Outcome: a `shape` or `boundaries` finding means something is actually wrong
+  with that file. Four defects, all observed on the live `pm-agent` project,
+  where 57 of 65 scored artifacts carry `boundaries` and 10 of 15 `shape`
+  findings are false:
+  - Heading depth. `has_heading` and `markdown_section` match only `^##`,
+    while the engine's own brief validator accepts `^#{1,6}`. Five live briefs
+    written at depth 3 are reported as missing all seven required headings,
+    and every heading-scoped read fails with them, so
+    `bullet_values(brief, "Owned paths")` returns nothing and the section is
+    scored as owning no path at all. Depth also picks the contract: a depth-3
+    `Deliverables` is invisible, so an expanded brief is judged against the
+    legacy seven-heading list.
+  - Coverage cell grouping. `table_coverage_ids` matches `^| A<n> |` only, so
+    a row that groups IDs in one cell (`| A1, A5 | T2 | … |`) covers nothing.
+    Five sections are reported as leaving IDs uncovered while their tables
+    cover every one. These five plus the five depth-3 briefs are exactly the
+    10 false `shape` findings; the other 5 are true and must survive.
+  - Path recognition. `looks_like_path` returns true for any inline-code
+    token with a dot or a slash, so numbers, dotted identifiers, version
+    strings, shell fragments and RPC method names are scored as out-of-
+    ownership paths.
+  - Declared references. Only Owned paths and Dependencies are allowed, so a
+    path the brief itself declares as an interface, a deliverable, a non-goal,
+    an acceptance criterion or a rejection condition is still a violation.
+    Every brief flags its own declared surface.
+- Paths: `src/pm_flow/quality.py`,
+  `template/.agentic/pm_flow/artifact_quality.md`,
+  `tests/artifact_quality_test.sh`.
+- Reuse: the engine's `#{1,6}` heading regex; the rubric's existing dimension
+  prose and its runtime-parsed table idiom for any new data. No new dimension,
+  no composite, no record files.
 - Acceptance IDs: A1.
-- Validation: `zsh tests/artifact_quality_test.sh` — a fixture brief whose
-  headings are all `###` produces no heading `shape` finding, while one that
-  genuinely omits a heading still does; a fixture file quoting `0.25` and
-  `os.environ` produces no `boundaries` finding, while one quoting a real
-  unowned path still does.
+- Validation: `zsh tests/artifact_quality_test.sh` — fixture artifacts written
+  at depth 3, with grouped coverage cells, quoting non-path tokens, and
+  declaring a path outside Owned paths each produce no finding, while the
+  matching negatives (a genuinely missing heading, a genuinely uncovered ID, a
+  real undeclared path) still do. Plus a live `rank` showing the named false
+  positives gone and the known true positives still flagged.
 - Depends on: T1.
 
-## Task T2 — Metadata-only record
+## Task T3 — Metadata-only record
 
 - Status: pending.
 - Outcome: `rank` writes `latest.md`, `latest.json` and one timestamped
@@ -67,25 +87,25 @@
   repo, `git status --porcelain` equals the pre-run snapshot; no new file
   under any `sections/*`; `quality/latest.json` matches stdout; `--out`
   inside `sections/` exits non-zero and writes nothing.
-- Depends on: T1.
+- Depends on: T2.
 
-## Task T3 — Show, and prove the suites still pass
+## Task T4 — Show, and prove the suites still pass
 
 - Status: pending.
 - Outcome: `python -m pm_flow.quality show` prints `latest.md` or says none
   exists. The new test and the existing engine suites exit 0.
 - Paths: `src/pm_flow/quality.py`, `tests/artifact_quality_test.sh`.
-- Reuse: T2's record layout.
+- Reuse: T3's record layout.
 - Acceptance IDs: A1, A3, A6.
 - Validation: `zsh tests/artifact_quality_test.sh` — `show` after `rank`
   reprints `latest.md`; `show` on an empty quality dir prints a one-line
   absence. `zsh tests/pm_flow_test.sh` and
   `zsh template/.agentic/pm_flow/tests/run.zsh` exit 0.
-- Depends on: T2.
+- Depends on: T3.
 
 ## Integration and end-to-end validation
 
-- T2 plus T3 are the user-visible scenarios: rank, metadata only, show.
+- T3 plus T4 are the user-visible scenarios: rank, metadata only, show.
   Run them against this repository as well as the fixture.
 
 ## Risks and rollback
@@ -93,14 +113,16 @@
 - A future owner might route this through `tick` or `cli.py`. Rollback is
   delete the three owned paths; records under `quality/` are already
   untracked. Do not add a `pm-flow quality` arm in this section.
+- T3 writes findings into `latest.json`. T2 lands first so the first record
+  is readable as truth rather than as noise.
 
 ## Acceptance coverage
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1 | T1, T1b, T3 | Per-file dimension lines; no composite; a finding names a real defect |
-| A2 | T2 | `git status` unchanged; no write under `sections/` |
-| A3 | T2, T3 | `quality/latest.md` + `latest.json` + snapshot |
+| A1 | T1, T2, T4 | Per-file dimension lines; no composite; a finding names a real defect |
+| A2 | T3 | `git status` unchanged; no write under `sections/` |
+| A3 | T3, T4 | `quality/latest.md` + `latest.json` + snapshot |
 | A4 | T1 | Echo finding flips with the copied paragraph |
 | A5 | T1 | Shape and stale findings flip with the fixture edits |
-| A6 | T3 | This test and both existing suites exit 0 |
+| A6 | T4 | This test and both existing suites exit 0 |
