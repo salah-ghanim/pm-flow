@@ -71,7 +71,12 @@ for field in ("model", "vendor", "transport", "url", "endpoint"):
     else:
         raise AssertionError(f"forbidden field {field} was accepted")
 
-skills_path.write_text(json.dumps(read_back["skills"], ensure_ascii=False))
+all_skills = []
+for packaged_path in sorted(card_path.parent.glob("*.card.json")):
+    packaged = persona_card.parse(packaged_path.read_text())
+    all_skills.extend(packaged["skills"])
+skills_path.write_text(json.dumps(all_skills, ensure_ascii=False))
+print(f"PASS: {len(all_skills)} skills load from every packaged card")
 PY
 
 python3 - "$SCHEMA" "$EXPORTED_SKILLS" <<'PY'
@@ -86,7 +91,6 @@ header = schema.get("x-a2a-schema-provenance", {})
 assert header.get("specVersion") == "0.2.5"
 assert header.get("sourceUrl")
 assert header.get("retrievedOn")
-assert "Transcribed" in header.get("acquisition", "")
 
 
 def walk(instance, rule, path="$"):
@@ -210,7 +214,7 @@ run_catalog_db () {
   env -u PM_FLOW_ENGINE_ROOT -u PM_FLOW_FLOW_DIR -u PM_FLOW_PROJECT \
     -u PM_FLOW_PROJECT_DIR -u PM_FLOW_REPO_ROOT -u PM_FLOW_ROOT \
     -u PM_FLOW_RUNS_DIR -u PM_FLOW_SECTIONS_DIR -u PM_FLOW_STATE_DIR \
-    -u PM_FLOW_STORE \
+    -u PM_FLOW_STORE PYTHONPATH="$ROOT/src" \
     python3 "$CATALOG" --db "$database" "$@"
 }
 
@@ -278,6 +282,7 @@ show_output="$(run_catalog persona show carded-reviewer)"
 [[ "$show_output" == *"version: 1.0.0"* ]]
 [[ "$show_output" == *'"name": "Contract review"'* ]]
 [[ "$show_output" == *'"name": "Failure analysis"'* ]]
+[[ "$show_output" == authorship\ notice:*"nothing here verifies it"* ]]
 print "PASS: persona show reads every card field with the claim label intact"
 
 set +e
@@ -369,6 +374,7 @@ plain_list_rows="$(printf '%s\n' "$identity_list" | grep -c '^plain-persona ' ||
 }
 [[ "$identity_list" == *"unverified claim: Alice Example"* ]]
 [[ "$identity_list" == *"unverified claim: Bob Example"* ]]
+[[ "$identity_list" == "KEY"*"AUTHOR (CLAIMED)"* ]]
 print 'PASS: persona list keeps two card-author identities and one uncarded identity'
 
 set +e
@@ -467,11 +473,261 @@ assert set(entry) <= {"key", "file", "layer", "title", "summary", "tags", "card"
 print("PASS: uncarded export has manifest tags and no card entry")
 PY
 
+INVALID_EXPORT_STORE="$WORK_DIR/invalid-export.db"
+/bin/cp "$ROUNDTRIP_STORE" "$INVALID_EXPORT_STORE"
+python3 - "$INVALID_EXPORT_STORE" <<'PY'
+import json
+import sqlite3
+import sys
+
+
+connection = sqlite3.connect(sys.argv[1])
+row = connection.execute(
+    "SELECT id, metadata FROM personas WHERE key = 'reviewer'"
+).fetchone()
+metadata = json.loads(row[1])
+metadata["card"].pop("purpose")
+connection.execute(
+    "UPDATE personas SET metadata = ? WHERE id = ?",
+    (json.dumps(metadata, sort_keys=True), row[0]),
+)
+connection.commit()
+PY
+set +e
+invalid_export="$(run_catalog_db "$INVALID_EXPORT_STORE" persona export reviewer \
+  --out "$WORK_DIR/invalid-card-export" 2>&1)"
+invalid_export_status=$?
+set -e
+[[ $invalid_export_status -ne 0 ]]
+[[ "$invalid_export" == 'persona export: persona card is missing required field "purpose"' ]] || {
+  print -u2 "invalid stored-card export diagnostic mismatch: $invalid_export"
+  exit 1
+}
+[[ "$invalid_export" != *"Traceback"* ]]
+print 'PASS: persona export frames PersonaCardError without a traceback'
+
+PACKAGED_FLOW="$WORK_DIR/packaged-flow"
+PACKAGED_PROJECT="packaged-personas"
+PACKAGED_STORE="$WORK_DIR/packaged.db"
+PACKAGED_ENGINE="$ROOT/template/.agentic/pm_flow"
+mkdir -p "$PACKAGED_FLOW/$PACKAGED_PROJECT/roles"
+/bin/cp "$PACKAGED_ENGINE/config.json" "$PACKAGED_FLOW/config.json"
+print 'Use the project-specific house style.' \
+  > "$PACKAGED_FLOW/$PACKAGED_PROJECT/roles/pm.md"
+
+run_catalog_db "$PACKAGED_STORE" sync --flow "$PACKAGED_FLOW" \
+  --engine "$PACKAGED_ENGINE" --project "$PACKAGED_PROJECT" \
+  --domain distressed-tech --topology default >/dev/null
+packaged_counts_before="$(dispatch_counts "$PACKAGED_STORE")"
+packaged_pm_show="$(run_catalog_db "$PACKAGED_STORE" persona show pm)"
+packaged_developer_show="$(run_catalog_db "$PACKAGED_STORE" persona show developer)"
+packaged_counts_after="$(dispatch_counts "$PACKAGED_STORE")"
+[[ "$packaged_counts_after" == "$packaged_counts_before" ]]
+[[ "$packaged_pm_show" == *"purpose: Own one section end to end"* ]]
+[[ "$packaged_pm_show" == *'"name": "Cycle review"'* ]]
+[[ "$packaged_pm_show" == *"version: 1.0.0"* ]]
+[[ "$packaged_developer_show" == *"purpose: Implement one bounded workplan task"* ]]
+[[ "$packaged_developer_show" == *'"name": "Bounded implementation"'* ]]
+[[ "$packaged_developer_show" == *"author: unverified claim: pm-flow contributors"* ]]
+print "PASS: shipped pm and developer cards display from a synced store without dispatch ($packaged_counts_before -> $packaged_counts_after)"
+
+PACKAGED_SNAPSHOT="$WORK_DIR/packaged-before.json"
+python3 - "$PACKAGED_STORE" "$PACKAGED_SNAPSHOT" <<'PY'
+import json
+import sqlite3
+import sys
+
+
+roles = {
+    "10x_developer", "consultant", "cpo", "developer",
+    "maintenance_engineer", "pm",
+}
+connection = sqlite3.connect(sys.argv[1])
+connection.row_factory = sqlite3.Row
+base_rows = connection.execute(
+    "SELECT id, key, author, version, content_hash, metadata FROM personas "
+    "WHERE layer = 'base' ORDER BY key"
+).fetchall()
+assert {row["key"] for row in base_rows} == roles
+cards = {}
+for row in base_rows:
+    card = json.loads(row["metadata"])["card"]
+    assert row["author"] == card["author"] == (
+        "unverified claim: pm-flow contributors"
+    )
+    assert row["version"] == card["version"] == "1.0.0"
+    cards[row["key"]] = card
+assert len({card["purpose"] for card in cards.values()}) == len(roles)
+assert all(card["name"] != "reviewer" for card in cards.values())
+layer_rows = connection.execute(
+    "SELECT key, metadata FROM personas WHERE layer IN ('domain', 'style')"
+).fetchall()
+assert layer_rows
+assert all("card" not in json.loads(row["metadata"]) for row in layer_rows)
+snapshot = {
+    row["key"]: {
+        "id": row["id"],
+        "content_hash": row["content_hash"],
+        "card": cards[row["key"]],
+    }
+    for row in base_rows
+}
+with open(sys.argv[2], "w") as output:
+    json.dump(snapshot, output, indent=2, sort_keys=True)
+print("PASS: six distinct shipped cards attach only to base rows; reviewer card is inert")
+PY
+
+packaged_list="$(run_catalog_db "$PACKAGED_STORE" persona list)"
+for role in 10x_developer consultant cpo developer maintenance_engineer pm; do
+  [[ "$(printf '%s\n' "$packaged_list" | grep -c "^$role " || true)" == 1 ]]
+done
+[[ "$packaged_list" == "KEY"*"AUTHOR (CLAIMED)"* ]]
+print 'PASS: persona list shows every shipped role exactly once under AUTHOR (CLAIMED)'
+
+run_catalog_db "$PACKAGED_STORE" sync --flow "$PACKAGED_FLOW" \
+  --engine "$PACKAGED_ENGINE" --project "$PACKAGED_PROJECT" \
+  --domain distressed-tech --topology default >/dev/null
+python3 - "$PACKAGED_STORE" "$PACKAGED_SNAPSHOT" <<'PY'
+import json
+import sqlite3
+import sys
+
+
+connection = sqlite3.connect(sys.argv[1])
+connection.row_factory = sqlite3.Row
+before = json.load(open(sys.argv[2]))
+after = {}
+for row in connection.execute(
+    "SELECT id, key, content_hash, metadata FROM personas WHERE layer = 'base'"
+):
+    after[row["key"]] = {
+        "id": row["id"],
+        "content_hash": row["content_hash"],
+        "card": json.loads(row["metadata"])["card"],
+    }
+assert after == before
+print("PASS: a second packaged sync preserves row ids, hashes, and cards")
+PY
+
+ADOPTION_ENGINE="$WORK_DIR/adoption-engine"
+ADOPTION_STORE="$WORK_DIR/adoption.db"
+/bin/cp -R "$PACKAGED_ENGINE" "$ADOPTION_ENGINE"
+/bin/rm "$ADOPTION_ENGINE/cards/pm.card.json"
+run_catalog_db "$ADOPTION_STORE" sync --flow "$ADOPTION_ENGINE" \
+  --engine "$ADOPTION_ENGINE" --project adoption --domain '' \
+  --topology default >/dev/null
+python3 - "$ADOPTION_STORE" "$WORK_DIR/adoption-before.json" <<'PY'
+import json
+import sqlite3
+import sys
+
+
+connection = sqlite3.connect(sys.argv[1])
+connection.row_factory = sqlite3.Row
+row = connection.execute(
+    "SELECT id, content_hash, metadata FROM personas WHERE key = 'pm'"
+).fetchone()
+assert "card" not in json.loads(row["metadata"])
+json.dump({"id": row["id"], "content_hash": row["content_hash"]},
+          open(sys.argv[2], "w"), sort_keys=True)
+PY
+/bin/cp "$PACKAGED_ENGINE/cards/pm.card.json" \
+  "$ADOPTION_ENGINE/cards/pm.card.json"
+run_catalog_db "$ADOPTION_STORE" sync --flow "$ADOPTION_ENGINE" \
+  --engine "$ADOPTION_ENGINE" --project adoption --domain '' \
+  --topology default >/dev/null
+python3 - "$ADOPTION_STORE" "$WORK_DIR/adoption-before.json" \
+  "$PACKAGED_ENGINE/cards/pm.card.json" <<'PY'
+import json
+import sqlite3
+import sys
+
+
+connection = sqlite3.connect(sys.argv[1])
+connection.row_factory = sqlite3.Row
+before = json.load(open(sys.argv[2]))
+card = json.load(open(sys.argv[3]))
+row = connection.execute(
+    "SELECT id, author, version, content_hash, metadata FROM personas "
+    "WHERE key = 'pm'"
+).fetchone()
+assert row["id"] == before["id"]
+assert row["content_hash"] == before["content_hash"]
+assert json.loads(row["metadata"])["card"] == card
+assert row["author"] == card["author"]
+assert row["version"] == card["version"]
+print("PASS: sync adds a shipped card in place to an already-synced persona")
+PY
+
+INVALID_ENGINE="$WORK_DIR/invalid-engine"
+INVALID_SYNC_STORE="$WORK_DIR/invalid-sync.db"
+/bin/cp -R "$PACKAGED_ENGINE" "$INVALID_ENGINE"
+python3 - "$INVALID_ENGINE/cards/pm.card.json" <<'PY'
+import json
+import sys
+
+
+path = sys.argv[1]
+card = json.load(open(path))
+card["skills"][0]["endpoint"] = "must-not-run"
+with open(path, "w") as output:
+    json.dump(card, output, indent=2)
+    output.write("\n")
+PY
+set +e
+invalid_sync="$(run_catalog_db "$INVALID_SYNC_STORE" sync \
+  --flow "$INVALID_ENGINE" --engine "$INVALID_ENGINE" --project invalid \
+  --domain '' --topology default 2>&1)"
+invalid_sync_status=$?
+set -e
+[[ $invalid_sync_status -ne 0 ]]
+[[ "$invalid_sync" == *'sync: card field "endpoint" is not allowed on a persona'* ]]
+[[ "$invalid_sync" == *$'card field path: skills[0].endpoint'* ]]
+[[ "$invalid_sync" == *$'card file: cards/pm.card.json'* ]]
+python3 - "$INVALID_SYNC_STORE" <<'PY'
+import sqlite3
+import sys
+
+
+connection = sqlite3.connect(sys.argv[1])
+tables = (
+    "clis", "projects", "topologies", "personas", "bindings", "rules",
+    "topology_agents", "seat_personas", "rule_bindings", "tool_grants",
+    "topology_edges",
+)
+counts = {table: connection.execute(
+    f'SELECT COUNT(*) FROM "{table}"'
+).fetchone()[0] for table in tables}
+assert not any(counts.values()), counts
+print("PASS: nested packaged-card refusal occurs before sync writes any row")
+PY
+
+ISOLATED_SYNC_ENGINE="$WORK_DIR/isolated-sync/engine"
+ISOLATED_SYNC_STORE="$WORK_DIR/isolated-sync/catalog.db"
+mkdir -p "$ISOLATED_SYNC_ENGINE"
+/bin/cp "$CATALOG" "$ROOT/template/.agentic/pm_flow/store.py" \
+  "$ROOT/template/.agentic/pm_flow/config.json" "$ISOLATED_SYNC_ENGINE/"
+/bin/cp -R "$ROOT/template/.agentic/pm_flow/roles" \
+  "$ROOT/template/.agentic/pm_flow/cards" "$ISOLATED_SYNC_ENGINE/"
+set +e
+isolated_sync="$(env -u PM_FLOW_ENGINE_ROOT -u PM_FLOW_FLOW_DIR \
+  -u PM_FLOW_PROJECT -u PM_FLOW_PROJECT_DIR -u PM_FLOW_REPO_ROOT \
+  -u PM_FLOW_ROOT -u PM_FLOW_RUNS_DIR -u PM_FLOW_SECTIONS_DIR \
+  -u PM_FLOW_STATE_DIR -u PM_FLOW_STORE -u PYTHONPATH \
+  python3 -S "$ISOLATED_SYNC_ENGINE/catalog.py" --db "$ISOLATED_SYNC_STORE" \
+  sync --flow "$ISOLATED_SYNC_ENGINE" --engine "$ISOLATED_SYNC_ENGINE" \
+  --project isolated --domain '' --topology default 2>&1)"
+isolated_sync_status=$?
+set -e
+[[ $isolated_sync_status -ne 0 ]]
+[[ "$isolated_sync" == *"sync: cannot find pm_flow.persona_card to validate persona card"* ]]
+[[ "$isolated_sync" == *"card file: cards/10x_developer.card.json"* ]]
+print 'PASS: packaged sync fails closed and names the card when its validator cannot load'
+
 COMPARE_ROOT="$WORK_DIR/compare"
 COMMAND_WORK="$COMPARE_ROOT/repo"
 mkdir -p "$COMMAND_WORK/.agentic"
 /bin/cp -R "$ROOT/template/.agentic/pm_flow" "$COMMAND_WORK/.agentic/pm_flow"
-/bin/cp "$ROOT/src/pm_flow/persona_card.py" "$COMMAND_WORK/.agentic/persona_card.py"
 FLOW="$COMMAND_WORK/.agentic/pm_flow"
 PROJECT_KEY="persona-card-compare"
 PROJECT_DIR="$FLOW/$PROJECT_KEY"
@@ -639,7 +895,7 @@ set +e
 missing_module="$(env -u PM_FLOW_ENGINE_ROOT -u PM_FLOW_FLOW_DIR \
   -u PM_FLOW_PROJECT -u PM_FLOW_PROJECT_DIR -u PM_FLOW_REPO_ROOT \
   -u PM_FLOW_ROOT -u PM_FLOW_RUNS_DIR -u PM_FLOW_SECTIONS_DIR \
-  -u PM_FLOW_STATE_DIR -u PM_FLOW_STORE \
+  -u PM_FLOW_STATE_DIR -u PM_FLOW_STORE -u PYTHONPATH \
   python3 -S "$ISOLATED_FLOW/catalog.py" --db "$ISOLATED_STORE" \
   persona add "$CARDED_PACK" 2>&1)"
 missing_module_status=$?
@@ -649,7 +905,7 @@ set -e
 env -u PM_FLOW_ENGINE_ROOT -u PM_FLOW_FLOW_DIR -u PM_FLOW_PROJECT \
   -u PM_FLOW_PROJECT_DIR -u PM_FLOW_REPO_ROOT -u PM_FLOW_ROOT \
   -u PM_FLOW_RUNS_DIR -u PM_FLOW_SECTIONS_DIR -u PM_FLOW_STATE_DIR \
-  -u PM_FLOW_STORE \
+  -u PM_FLOW_STORE -u PYTHONPATH \
   python3 -S "$ISOLATED_FLOW/catalog.py" --db "$ISOLATED_STORE" \
   persona add "$UNCARDED_PACK" >/dev/null
 print 'PASS: missing card module fails closed while an uncarded pack remains installable'

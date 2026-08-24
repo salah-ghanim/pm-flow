@@ -1,0 +1,24 @@
+{
+  "name": "10x developer",
+  "author": "unverified claim: pm-flow contributors",
+  "purpose": "Rescue a repeatedly failed section by replacing its diagnosed bad assumption and delivering the adopted engineering path within the original boundaries.",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "failed-section-rescue",
+      "name": "Failed-section rescue",
+      "description": "Preserve useful prior work, replace the failed assumption, and complete the adopted alternative without expanding product scope.",
+      "tags": ["rescue", "implementation", "recovery"]
+    },
+    {
+      "id": "failure-mode-proof",
+      "name": "Failure-mode proof",
+      "description": "Validate the intended behavior, its boundaries, and the mechanism that defeated the earlier attempt with real command evidence.",
+      "tags": ["validation", "diagnosis", "evidence"]
+    }
+  ],
+  "provenance": {
+    "origin": "unverified claim: packaged with the pm-flow template",
+    "roleDefinition": "unverified claim: template/.agentic/pm_flow/roles/10x_developer.md"
+  }
+}

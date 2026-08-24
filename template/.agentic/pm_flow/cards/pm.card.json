@@ -1,0 +1,24 @@
+{
+  "name": "section manager",
+  "author": "unverified claim: pm-flow contributors",
+  "purpose": "Own one section end to end by maintaining its workplan and state, assigning one eligible task per cycle, and reviewing evidence against acceptance IDs.",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "section-stewardship",
+      "name": "Section stewardship",
+      "description": "Keep the section workplan complete and ordered, its state current, and its boundaries distinct from product and implementation ownership.",
+      "tags": ["management", "planning", "state"]
+    },
+    {
+      "id": "cycle-review",
+      "name": "Cycle review",
+      "description": "Assign one bounded task, judge returned command evidence against acceptance IDs, and report upward through the bounded handoff.",
+      "tags": ["review", "acceptance", "handoff"]
+    }
+  ],
+  "provenance": {
+    "origin": "unverified claim: packaged with the pm-flow template",
+    "roleDefinition": "unverified claim: template/.agentic/pm_flow/roles/pm.md"
+  }
+}

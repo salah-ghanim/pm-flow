@@ -704,7 +704,6 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
     persona overlays - and `engine_dir` is the packaged defaults. They default
     to the same path, which is the copied layout.
     """
-    register_clis(connection)
     engine_dir = Path(engine_dir) if engine_dir else flow_dir
 
     config_path = flow_dir / "config.json"
@@ -714,6 +713,30 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
             config = json.loads(config_path.read_text())
         except ValueError:
             config = {}
+
+    roles = config.get("roles") or {}
+    packaged_cards = {}
+    for role_key in sorted(roles):
+        card_path = engine_dir / "cards" / f"{role_key}.card.json"
+        if not card_path.is_file():
+            continue
+        try:
+            persona_card = load_persona_card_module()
+            packaged_cards[role_key] = persona_card.parse(
+                card_path.read_text(errors="replace")
+            )
+        except Exception as error:
+            details = []
+            rejected_path = getattr(error, "path", None)
+            if rejected_path:
+                details.append(f"card field path: {rejected_path}")
+            details.append(f"card file: {card_path.relative_to(engine_dir)}")
+            raise PackError(f"{error}\n" + "\n".join(details)) from error
+
+    # Packaged definitions are validated as a complete set before sync makes
+    # its first write. A broken card is a shipping defect, not an optional row
+    # to skip while the rest of the engine is indexed.
+    register_clis(connection)
 
     access = config.get("access") or {}
     write_roles = set(access.get("write_roles") or ["developer", "10x_developer"])
@@ -748,7 +771,6 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
 
     # -- agents, one row per seat
     counts = {"personas": 0, "bindings": 0, "rules": 0, "seats": 0, "edges": 0}
-    roles = config.get("roles") or {}
     project_dir = flow_dir / project_key
     for role_key, binding in sorted(roles.items()):
         seats = binding if isinstance(binding, list) else [binding]
@@ -773,6 +795,24 @@ def sync(connection, flow_dir: Path, project_key: str, domain: str,
             persona_ids.append(persona_id)
             extends = persona_id
             counts["personas"] += 1
+            card = packaged_cards.get(role_key) if layer == "base" else None
+            if card is not None:
+                row = connection.execute(
+                    "SELECT * FROM personas WHERE id = ?", (persona_id,)
+                ).fetchone()
+                metadata = persona_pack_metadata(
+                    {}, card, store.loads(row["metadata"])
+                )
+                wanted = (
+                    card["author"], card["version"], store.dumps(metadata)
+                )
+                if wanted != (row["author"], row["version"], row["metadata"]):
+                    with connection:
+                        connection.execute(
+                            "UPDATE personas SET author = ?, version = ?,"
+                            " metadata = ? WHERE id = ?",
+                            (*wanted, persona_id),
+                        )
 
         for index, seat_binding in enumerate(seats, start=1):
             if not isinstance(seat_binding, dict):
@@ -1607,8 +1647,11 @@ def export_markdown(connection, out_dir: Path) -> int:
 
 def cmd_sync(args):
     connection = store.connect(args.db)
-    counts = sync(connection, Path(args.flow), args.project, args.domain,
-                  args.topology, Path(args.engine) if args.engine else None)
+    try:
+        counts = sync(connection, Path(args.flow), args.project, args.domain,
+                      args.topology, Path(args.engine) if args.engine else None)
+    except PackError as error:
+        raise SystemExit(f"sync: {error}")
     print("synced " + ", ".join(f"{value} {key}" for key, value in counts.items()))
     return 0
 
@@ -1740,45 +1783,31 @@ def cmd_persona_update(args):
     return 1 if failed else 0
 
 
-def cardless_persona_list_rows(connection):
-    """Newest row per key when every identity in the store is uncarded."""
-    return connection.execute(
-        "SELECT p.key, p.layer, p.author, p.version, p.content_hash, p.source_url,"
+def cmd_persona_list(args):
+    connection = store.connect(args.db)
+    rows = connection.execute(
+        "WITH personas AS ("
+        " SELECT base.id, base.key AS original_key,"
+        " json_array(base.key, COALESCE("
+        " json_extract(base.metadata,'$.card.author'), '')) AS key,"
+        " base.layer, base.author, base.version, base.content_hash,"
+        " base.source_url, base.source_path, base.metadata, base.body, base.pack_id"
+        " FROM main.personas base"
+        ")"
+        " SELECT p.original_key AS key, p.layer, p.author, p.version,"
+        " p.content_hash, p.source_url,"
         " p.source_path, p.metadata, p.body, k.name AS pack FROM personas p"
         " LEFT JOIN persona_packs k ON k.id = p.pack_id"
         " WHERE p.id = (SELECT MAX(id) FROM personas b WHERE b.key = p.key)"
         " ORDER BY p.layer, p.key"
     ).fetchall()
-
-
-def cmd_persona_list(args):
-    connection = store.connect(args.db)
-    has_cards = connection.execute(
-        "SELECT 1 FROM personas WHERE"
-        " COALESCE(json_extract(metadata,'$.card.author'), '') <> '' LIMIT 1"
-    ).fetchone()
-    if has_cards:
-        rows = connection.execute(
-            "SELECT p.key, p.layer, p.author, p.version, p.content_hash, p.source_url,"
-            " p.source_path, p.metadata, p.body, k.name AS pack FROM personas p"
-            " LEFT JOIN persona_packs k ON k.id = p.pack_id"
-            " WHERE p.id = (SELECT MAX(id) FROM personas b WHERE b.key = p.key"
-            " AND COALESCE(json_extract(b.metadata,'$.card.author'), '') ="
-            " COALESCE(json_extract(p.metadata,'$.card.author'), ''))"
-            " ORDER BY p.layer, p.key,"
-            " COALESCE(json_extract(p.metadata,'$.card.author'), '')"
-        ).fetchall()
-    else:
-        # A cardless store has only the (key, no-card) identity, so the legacy
-        # key grouping remains both sufficient and exactly the existing path.
-        rows = cardless_persona_list_rows(connection)
     if not rows:
         print("no personas installed")
         return 0
     # The commit is per version rather than per pack, so it belongs next to the
     # content hash: together they say which words these are and where they came
     # from, for the version being shown rather than for the pack's newest.
-    print(f"{'KEY':<28} {'LAYER':<8} {'PACK':<18} {'AUTHOR':<46} "
+    print(f"{'KEY':<28} {'LAYER':<8} {'PACK':<18} {'AUTHOR (CLAIMED)':<46} "
           f"{'VERSION':<10} {'HASH':<14} {'COMMIT':<14} SOURCE")
     for row in rows:
         commit = persona_commit(row["metadata"]) or "-"
@@ -1807,6 +1836,8 @@ def cmd_persona_show(args):
     except PackError as error:
         raise SystemExit(f"persona show: {error}")
 
+    print("authorship notice: authorship is a claim from the persona's own "
+          "source; nothing here verifies it")
     print(f"key: {row['key']}")
     print(f"layer: {row['layer']}")
     print(f"title: {row['title'] or '-'}")
@@ -1907,7 +1938,10 @@ def cmd_persona_export(args):
             (out_dir / entry["card"]).parent.mkdir(parents=True, exist_ok=True)
             card_module = load_persona_card_module()
             (out_dir / entry["card"]).write_text(card_module.export(card))
-        assert set(entry).issubset(PERSONA_ENTRY_KEYS)
+        unknown = set(entry) - PERSONA_ENTRY_KEYS
+        if unknown:
+            raise PackError("exported persona entry has unsupported field(s): "
+                            + ", ".join(sorted(str(key) for key in unknown)))
 
         manifest = {
             "name": manifest_name,
@@ -1922,8 +1956,14 @@ def cmd_persona_export(args):
         )
         (out_dir / entry["file"]).parent.mkdir(parents=True, exist_ok=True)
         (out_dir / entry["file"]).write_text(row["body"] or "")
-    except (OSError, PackError) as error:
-        raise SystemExit(f"persona export: {error}")
+    except Exception as error:
+        card_error = (
+            "card_module" in locals()
+            and isinstance(error, card_module.PersonaCardError)
+        )
+        if isinstance(error, (OSError, PackError)) or card_error:
+            raise SystemExit(f"persona export: {error}")
+        raise
     print(f"exported persona {row['key']} to {out_dir}")
     return 0
 

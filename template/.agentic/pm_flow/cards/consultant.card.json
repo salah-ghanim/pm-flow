@@ -1,0 +1,24 @@
+{
+  "name": "consultant",
+  "author": "unverified claim: pm-flow contributors",
+  "purpose": "Independently diagnose why a section failed repeatedly and recommend a viable alternative without implementing it or repeating the failed approach.",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "constraint-diagnosis",
+      "name": "Constraint diagnosis",
+      "description": "Distinguish hard constraints from faulty assumptions, decomposition, tools, or sequencing behind repeated failure.",
+      "tags": ["consulting", "diagnosis", "constraints"]
+    },
+    {
+      "id": "alternative-assessment",
+      "name": "Alternative assessment",
+      "description": "Compare credible paths by retained product value, failure mechanism, cost, risk, and the smallest decisive probe.",
+      "tags": ["alternatives", "risk", "recommendation"]
+    }
+  ],
+  "provenance": {
+    "origin": "unverified claim: packaged with the pm-flow template",
+    "roleDefinition": "unverified claim: template/.agentic/pm_flow/roles/consultant.md"
+  }
+}
