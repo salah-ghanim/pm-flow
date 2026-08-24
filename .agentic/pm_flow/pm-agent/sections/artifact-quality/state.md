@@ -2,11 +2,56 @@
 
 ## Current task
 
-- T3 — metadata-only record. Next to assign. (T2 was first written as `T1b`;
-  workplan IDs are `T<number>` only, so it became T2 and the record/show tasks
-  renumbered to T3 and T4.)
+- T4 — `show`, plus proving both existing suites still pass. Next to assign.
+  (T2 was first written as `T1b`; workplan IDs are `T<number>` only, so it
+  became T2 and the record/show tasks renumbered to T3 and T4.)
 
 ## Completed tasks and evidence
+
+- T3 — metadata-only record. Accepted cycle 003. Acceptance IDs A2, A3, plus
+  the A1 terminator regression guard. Only `src/pm_flow/quality.py` and
+  `tests/artifact_quality_test.sh` changed; the rubric, `paths.py`, `cli.py`,
+  `pm_flow.sh` and `driver.zsh` are untouched.
+  - Suite: `zsh tests/artifact_quality_test.sh` against the section worktree
+    exited 0 with nine PASS lines, including refusals for `--out` inside
+    `sections/`, a linked worktree, a git-visible path, and a zero-artifact
+    project — each asserting the destination was *not* created.
+  - A2 on this repository, cwd `/Users/salah/code/personal/pm-flow` (a real
+    checkout, `.git` a directory), `PYTHONPATH` pointed at the worktree src:
+    `git status --porcelain` before and after `rank --project pm-agent` are
+    byte-identical (`cmp` → IDENTICAL, 24 lines each), and
+    `find .agentic/pm_flow/pm-agent/sections \( -name 'quality*' -o -name
+    '*.score' \)` prints nothing.
+  - A3 on this repository: the run wrote `quality/latest.md`, `latest.json`
+    and `20260824T220350Z.json` beside the earlier `20260824T220256Z.json`,
+    so a second run replaces `latest.*` and keeps both snapshots.
+    `git check-ignore -v .agentic/pm_flow/pm-agent/quality/latest.json` →
+    `.gitignore:24:.agentic/pm_flow/pm-agent/*`.
+  - `latest.md` is byte-identical to stdout (`cmp` → IDENTICAL) because both
+    consume the same `rendered` list. `latest.json` was parsed and compared
+    against stdout field by field over all 65 artifacts: order equal True,
+    findings equal True, entry keys uniformly
+    `{file, words, budget, over, findings}`, top-level keys
+    `{project, generated_at, artifacts}`. No composite: a
+    `composite|quality:[0-9]|score[=:][0-9]` grep over stdout, `latest.md` and
+    `latest.json` returns 0 hits in each.
+  - The guard runs before anything is created — `resolve_record_dir` is the
+    first statement of `rank()`, ahead of `collect_artifacts` and `mkdir`.
+  - A1 terminator now pinned. Reverting the depth-scoped terminator to
+    `end = re.search(r"(?m)^#{1,2}\s+", tail)` in a scratch copy fails the
+    suite (exit 1) at
+    `FAIL: depth terminator fixture incorrectly produced stale:
+    .agentic/pm_flow/fixture/sections/delta/state.md | echo: 1 normalized
+    paragraph(s) repeat in another durable file | stale: state repeats the
+    workplan design summary`. The unmutated scratch copy runs past that
+    assertion, so the failure is the mutation, not the copy.
+  - No collateral drift, proven differentially rather than by target numbers:
+    the pre-change `quality.py` from the main checkout and the worktree build
+    produce byte-identical stdout over the same 65 live artifacts. Live counts
+    `shape` 5, `echo` 0, `stale` 0, `boundaries` 50 as expected. `length` is
+    18, not the assignment's 17, in **both** builds — a durable artifact grew
+    past budget since the assignment was written. Live counts are a moving
+    baseline; compare builds, not remembered numbers.
 
 - T2 — make shape and boundaries discriminate. Accepted cycle 002. Acceptance
   ID A1. All four defects fixed in one function each; only the three owned
@@ -45,12 +90,11 @@
   - No collateral drift: `length` 16 → 16, `echo` 0 → 0, `stale` 0 → 0 across
     the same live run, so the widened `markdown_section` did not turn state
     files stale.
-  - Carried to T3: (a) the depth-scoped terminator is correct in code but
+  - Carried to T3: the depth-scoped terminator is correct in code but
     unpinned by the suite — restoring the old `^#{1,2}` terminator under the
-    new matcher still passes every assertion, so add a fixture whose depth-3
-    section is followed by a depth-2 heading; (b) decide whether surviving
-    slash-bearing non-paths (`tools/call`, `session/prompt`, `13937in/5out`)
-    warrant another precision pass or are accepted noise.
+    new matcher still passes every assertion, so T3 adds a fixture that fails
+    under that mutation. The second follow-up, whether slash-bearing
+    non-paths need another precision pass, is measured and settled below.
 
 - T1 — rubric and scorer. Accepted cycle 001. Acceptance IDs A1, A4, A5.
   - `zsh tests/artifact_quality_test.sh` against the section worktree printed
@@ -110,11 +154,45 @@
 - `boundaries` discriminates for declared surfaces but not yet for every token
   shape. A path stated in inline code anywhere in the section's own brief is
   allowed; a path present only in a workplan or state is still a violation.
-  What survives as noise is slash-bearing non-paths — JSON-RPC method names
-  (`tools/call`, `session/prompt`, `resources/list`), and token counts like
-  `13937in/5out`. That is the assignment's deliberate rule: a slash-bearing
-  token free of shell metacharacters counts as a path. Revisit only with a
-  measurement, not a hunch.
+  What survives as noise is slash-bearing non-paths — JSON-RPC method names,
+  a URL path and a token count. That is the assignment's deliberate rule: a
+  slash-bearing token free of shell metacharacters counts as a path.
+- Settled at scope 003, by measurement, not hunch: the surviving non-paths do
+  not warrant another precision pass. Live `rank` on `pm-agent` over 65 files
+  flags 673 boundary tokens, 398 distinct. Of the 21 distinct slash-bearing
+  tokens carrying no dot, 11 are genuinely paths (`src/pm_flow`,
+  `pm_flow/engine/topologies`, `cycles/003`, `driver-bin/claude`, `/tmp`, …).
+  The noise set is 10 distinct tokens — `/`, `/v1/traces`, `13937in/5out`,
+  and seven JSON-RPC method names (`tools/call`, `session/prompt`,
+  `session/new`, `session/cancel`, `session/request_permission`,
+  `resources/list`, `notifications/initialized`) — 20 of 673 occurrences
+  (3.0%), spread over 6 of 65 files, and not one of those 6 is flagged
+  *only* by noise. Any rule that rejects them (a method-name denylist, or
+  requiring an extension on a slashed token) would also reject real
+  extensionless directories, which are 11 of the same 21. Accept the noise.
+  Reopen only if a future census puts it above roughly 10% of tokens.
+- Writing the record has a hazard the ranker does not have today: run from a
+  section worktree with `--project pm-agent`, `find_repo_root` resolves to the
+  worktree, so the default record dir lands *inside* a worktree — which the
+  brief forbids. The T3 guard must therefore cover the default destination,
+  not just `--out`. With no `--project` and no `.project-key` the worktree
+  scores zero files and exits 0 silently; T3 makes that a loud failure so an
+  empty ranking is never recorded as truth.
+- The ignore check is skipped whenever `git check-ignore` cannot judge the
+  target: `--out` at any path outside the flow repository exits 128 with
+  `is outside repository`, and `resolve_record_dir` treats that as permission.
+  Observed: `--out /tmp/<other-git-repo>/quality` from this checkout exits 0
+  and writes `latest.md` / `latest.json` into that other repository's tracked
+  working tree. This is the T3 assignment's own escape hatch, needed so the
+  fixture temp dir can be written, and it costs nothing for A2 — the *default*
+  destination is always inside the flow repo, where the check does apply. Do
+  not tighten it by failing closed on 128; that would break the fixture. If it
+  ever needs closing, run `git check-ignore` with `cwd` at the *target's* own
+  repository root instead of `layout.repo_root`.
+- Live dimension counts are not a fixed baseline. Between cycles 002 and 003
+  `length` moved 16 → 18 with no code change, because the sections keep
+  writing. Assert drift by diffing two builds over the same tree in one
+  sitting, never against a count recorded in an earlier assignment.
 - Ranking two dimensions by *file* count hides precision work. Between cycle
   001 and 002 the flagged-token count fell 1104 → 683 while the per-file
   `boundaries` count moved only 59 → 50, because better recognition also finds
@@ -122,10 +200,23 @@
 
 ## Blockers
 
-- None observed.
+- None observed. `.gitignore:20-28` ignores `.agentic/pm_flow/pm-agent/*` and
+  re-includes only `project_state/` and `sections/`, so the record dir is
+  untracked by construction: `git check-ignore -v
+  .agentic/pm_flow/pm-agent/quality/latest.md` returns
+  `.gitignore:24 .agentic/pm_flow/pm-agent/quality/latest.md`.
+- Six `review_002*.sh`, seven `scope_probe*.sh` and now four `review_003*`
+  read-only probe scripts sit in this section directory from earlier cycles.
+  Removing them needs an approval the roles have not had; they affect nothing.
+- The developer's sandbox denied `mkdir` on
+  `/Users/salah/code/personal/pm-flow/.agentic/pm_flow/pm-agent/quality`
+  (`PermissionError: [Errno 1] Operation not permitted`), so cycle 003 came
+  back PARTIAL with the host-repo A3 evidence missing. The review re-ran the
+  same command from the same directory without that denial, so it is a
+  developer-workspace permission limit, not a code defect. If it recurs,
+  expect the developer to be able to prove A3 only on the fixture.
 
 ## Next eligible task
 
-- T3 — metadata-only record. Fold in T2's two carried follow-ups: pin the
-  depth-scoped section terminator with a fixture, and settle whether the
-  surviving slash-bearing non-paths need another pass.
+- T4 — `show` on top of T3's record layout, plus `zsh tests/pm_flow_test.sh`
+  and `zsh template/.agentic/pm_flow/tests/run.zsh` exiting 0 (A6).

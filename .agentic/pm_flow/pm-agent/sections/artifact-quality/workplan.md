@@ -76,17 +76,26 @@
 
 ## Task T3 — Metadata-only record
 
-- Status: pending.
+- Status: accepted cycle 003 (A2, A3 and the A1 terminator guard met).
 - Outcome: `rank` writes `latest.md`, `latest.json` and one timestamped
-  snapshot under `<flow_dir>/<project>/quality/`. An `--out` aimed at
-  `sections/` or a worktree is refused. The host `git status` is unchanged.
+  snapshot under `<flow_dir>/<project>/quality/`, and refuses to write
+  anywhere else. One guard covers the default destination and `--out` alike:
+  a `sections/` directory, a linked git worktree, and a path git does not
+  ignore are all refused before any file is created. A run that scores zero
+  artifacts fails loudly instead of recording an empty ranking. The suite
+  also pins T2's depth-scoped section terminator, which is currently correct
+  in code but unpinned by any assertion.
 - Paths: `src/pm_flow/quality.py`, `tests/artifact_quality_test.sh`.
-- Reuse: `src/pm_flow/paths.py` for engine / flow / repo roots.
-- Acceptance IDs: A2, A3.
+- Reuse: `src/pm_flow/paths.py` (`Paths.project_dir`, `repo_root`,
+  `relative`) for the layout — read it, do not add a property to it; it is
+  not an owned path. Reuse `render()` so stdout and `latest.md` cannot
+  diverge.
+- Acceptance IDs: A2, A3 (plus the A1 terminator regression guard).
 - Validation: `zsh tests/artifact_quality_test.sh` — after `rank` on this
   repo, `git status --porcelain` equals the pre-run snapshot; no new file
   under any `sections/*`; `quality/latest.json` matches stdout; `--out`
-  inside `sections/` exits non-zero and writes nothing.
+  inside `sections/` exits non-zero and writes nothing; reverting
+  `markdown_section`'s terminator to `^#{1,2}` fails an assertion.
 - Depends on: T2.
 
 ## Task T4 — Show, and prove the suites still pass
@@ -120,7 +129,7 @@
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1 | T1, T2, T4 | Per-file dimension lines; no composite; a finding names a real defect |
+| A1 | T1, T2, T3, T4 | Per-file dimension lines; no composite; a finding names a real defect |
 | A2 | T3 | `git status` unchanged; no write under `sections/` |
 | A3 | T3, T4 | `quality/latest.md` + `latest.json` + snapshot |
 | A4 | T1 | Echo finding flips with the copied paragraph |
