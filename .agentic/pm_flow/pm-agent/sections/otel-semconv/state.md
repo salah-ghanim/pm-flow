@@ -2,9 +2,86 @@
 
 ## Current task
 
-- None assigned. T2 was accepted in cycle 003; T3 is the next eligible task.
+- None. T3 was accepted in cycle 004 and was the last workplan task.
 
 ## Completed tasks and evidence
+
+- T3 — accepted cycle 004 (GO). Acceptance IDs A1, A2, A3, A7.
+  - Reviewed at
+    `/Users/salah/code/personal/.pm-flow-worktrees/pm-flow/pm-agent/otel-semconv`.
+    `git status --short` there shows exactly
+    ` M template/.agentic/pm_flow/telemetry.py` and
+    ` M tests/otel_semconv_test.sh`; `git diff --stat HEAD` is
+    `2 files changed, 54 insertions(+), 15 deletions(-)`. `src/pm_flow/semconv.py`,
+    `driver.zsh` and `trace_export.py` are untouched.
+  - The fix: one keyword-only `include_non_convention_attributes=True` on
+    `semconv_attributes` (telemetry.py:247) gating the three `llm.token_count.*`
+    puts (263) and the `pm_flow.` cost/cache/reasoning block plus the
+    `input.value` / `output.value` bodies (304); passed as `False` at the two
+    child call sites only (633 `attempt-start`, 742 `attempt-end`). The
+    `SEMCONV` branch still receives the real `usage`, so the child's convention
+    usage is untouched.
+  - A1, A3: `zsh tests/otel_semconv_test.sh` exits 0 and prints
+    `ROUTE: stdlib OTLP/JSON fallback via trace_export.py --file --replay`,
+    `TREE primary: c3e689945daa9ad5 invoke_agent -> bfb8e2385742aaf4 chat
+    parent=c3e689945daa9ad5 input_tokens=31 output_tokens=13`, the same tree for
+    the secondary pin, and six PASS lines including the new
+    `PASS: non-convention usage and bodies stay only on the invoke_agent parent`.
+    The revision loop (otel_semconv_test.sh:447-453) still asserts
+    `pm_flow.semconv.revision` on every received span, parent and child.
+  - A1, A3 (T3's own split): both pins print
+    `SPLIT …: parent_only=llm.token_count.prompt,llm.token_count.completion,
+    llm.token_count.total,pm_flow.cost_usd,input.value,input.mime_type,
+    output.value,output.mime_type
+    child_kept=gen_ai.usage.input_tokens,gen_ai.usage.output_tokens,
+    openinference.span.kind,llm.model_name`. The assertion
+    (otel_semconv_test.sh:495-517) reads `parent["attributes"]` and
+    `child["attributes"]` off the receiver payload, not the `spans` table:
+    absence from the child is checked for all eleven keys unconditionally,
+    presence on the parent only for keys the run produced.
+  - A2: the same run. The child's `gen_ai.usage.*` is still compared against
+    `SELECT a.input_tokens, a.output_tokens FROM spans child JOIN attempts a ON
+    child.parent_span_id = a.span_id WHERE child.span_id = ?`
+    (otel_semconv_test.sh:470-489) and the parent is still asserted to carry
+    neither key (465-466). The join passing also re-proves `attempts.span_id`
+    still points at the `invoke_agent` parent.
+  - The parent's attribute set is byte-identical to HEAD, proven not argued.
+    `cycles/004/probe_attrs.py` loads `telemetry.py` by path and dumps
+    `semconv_attributes(span_kind="AGENT", …)` for a usage dict carrying all
+    seven counters; `cycles/004/review_parent_identical.sh` runs it against the
+    working tree, swaps in `git show HEAD:…/telemetry.py`, runs it again and
+    diffs. `parent diff exit=0`. The HEAD build rejects the new keyword
+    (`semconv_attributes() got an unexpected keyword argument
+    'include_non_convention_attributes'`), so the two builds really are
+    different code. The same probe shows the gate removes exactly eleven keys
+    from the child — the three `llm.token_count.*`, `pm_flow.cost_usd`,
+    `pm_flow.cache_read_tokens`, `pm_flow.cache_write_tokens`,
+    `pm_flow.reasoning_tokens` and both body pairs — and nothing else, leaving
+    24 keys including all `gen_ai.*`, `openinference.span.kind`,
+    `llm.model_name` / `llm.provider` / `llm.system`,
+    `llm.invocation_parameters`, `session.id` and the `pm_flow.` identity block.
+  - Both negatives reproduced review-side (`cycles/004/review_negatives.sh`,
+    each mutation restored from a copy of the file):
+    - gate dropped at the `attempt-end` child call (line 742) →
+      `primary: non-convention attribute duplicated on chat child:
+      llm.token_count.prompt`, exit 1.
+    - gate dropped at the `attempt-start` child call (line 633) →
+      `primary: non-convention attribute duplicated on chat child: input.value`,
+      exit 1, so the body duplication is caught independently of the counts.
+  - A7 (`cycles/004/review_suites.sh`): `zsh tests/otel_semconv_test.sh` = 0,
+    `zsh tests/pm_flow_test.sh` = 0 (10 PASS lines),
+    `zsh tests/store_ledger_test.sh` = 0 (`store ledger tests passed`), and
+    `zsh tests/otel_semconv_test.sh` = 0 again with an untracked
+    `PM_REVIEW_UNTRACKED_PROBE.txt` in the tree.
+  - A4 still holds: the grep over `template/` and `src/` matches only
+    `src/pm_flow/semconv.py` and the exempted comment at
+    `template/.agentic/pm_flow/catalog.py:250`.
+  - Not covered by the suite, covered by the probe: the stub emits no cache or
+    reasoning tokens, so `pm_flow.cache_read_tokens`,
+    `pm_flow.cache_write_tokens` and `pm_flow.reasoning_tokens` never enter
+    `produced_parent_only` and their presence-on-parent side is unasserted in
+    the run. Their absence from the child *is* asserted unconditionally, and
+    the probe shows all three on the parent and off the child.
 
 - T2 — accepted cycle 003 (GO_WITH_CHANGES). Acceptance IDs A1, A2, A6, A7,
   with A3 and A5 re-asserted on the receiver.
@@ -181,6 +258,19 @@
   is a published interface (brief, Interfaces produced) and still emits
   `gen_ai.usage.*` for whatever `span_kind` it is handed, so a future second
   caller must gate it too. `telemetry.py` is the only caller today.
+- The duplicated attributes are removed from the `chat` child, not moved to it.
+  Both sides were considered: OpenInference puts the bodies and token counts on
+  the LLM span, but `llm.token_count.*` staying on the `invoke_agent` parent is
+  already T2's accepted contract and a rejection condition of cycle 003, and
+  splitting the set — counts on the parent, bodies on the child — would leave a
+  reader guessing which span to open. So all eight keys stay on the parent and
+  the parent's attribute set is byte-identical to today; the child is what
+  changes.
+- Dropping `usage` from the child's `semconv_attributes` call is not a valid
+  fix on its own. The child's `gen_ai.usage.*` is derived from that same
+  `usage` argument (telemetry.py:272-283), so an empty usage would satisfy T3
+  by breaking A2. The call must keep receiving `usage` and suppress only the
+  non-convention consumers of it.
 - A name the pinned revision does not define is not emitted under `gen_ai.`.
   This retires `gen_ai.usage.cost` (telemetry.py:260), which no revision
   defines; the same number is already recorded as `pm_flow.cost_usd`.
@@ -203,20 +293,11 @@
 
 ## Blockers
 
-- None. One defect outlives cycle 003 and is carried into T3, not a blocker:
-  the `chat` child is built by the same `semconv_attributes(...)` call as its
-  parent (telemetry.py:624-630 at `attempt-start`, 733-738 at `attempt-end`),
-  so every non-convention attribute that call produces is written to both rows.
-  Observed on the accepted tree: both spans get `llm.token_count.prompt`,
-  `llm.token_count.completion`, `llm.token_count.total`, `pm_flow.cost_usd`
-  (the stub's `total_cost_usd` reaches `usage` at telemetry.py:177-179),
-  `pm_flow.cache_read_tokens`, `pm_flow.reasoning_tokens`, and the
-  `input.value` / `output.value` bodies. A stock backend that sums token counts
-  or cost over a trace therefore reports double, and each dispatch stores and
-  exports its prompt and result twice. The cycle-003 test does not catch this:
-  it asserts only that `gen_ai.usage.*` is off the parent and that
-  `llm.token_count.*` is still on it, never that anything is absent from the
-  child.
+- None. The cycle-003 duplication defect is closed by T3, accepted cycle 004:
+  the receiver now shows each of the eleven non-convention keys on the
+  `invoke_agent` parent only, and reverting either child call site fails the
+  test. No stock backend double-counts token totals or cost over a trace, and
+  no dispatch stores its prompt and result twice.
 - The T1 `git status --porcelain` gate is gone, confirmed this cycle: the grep
   for it is empty and the suite exits 0 with an untracked probe file present.
 - Docker availability for A6 is still unsettled, now on both seats: the
@@ -249,5 +330,10 @@
 
 ## Next eligible task
 
-- T3 — stop the non-convention attributes being written twice per dispatch. T2
-  has landed, so its only dependency is satisfied.
+- None. T3 was the last task and is accepted, so every workplan task is done.
+  Every brief acceptance ID has current evidence except A6, which the brief
+  allows to be recorded unproven and which the handoff carries as such. The
+  section is a candidate for COMPLETE at cycle 005; the only work that would
+  reopen it is `persona-cards` rewording
+  `template/.agentic/pm_flow/catalog.py:250`, at which point the test's
+  one-file A4 exemption is deleted.
