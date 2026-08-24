@@ -34,21 +34,37 @@
 
 ## Task T2 — The `acp` arm in agent_exec.sh
 
-- Status: pending.
+- Status: done (cycle 002, accepted with one change carried into T4).
 - Outcome: a binding with `cli: acp` dispatches through `acp.py`, writes the
   standard response envelope, records `access: enforced|prompt-level` before
   the agent runs, and a full section cycle completes with an ACP developer.
 - Paths: `template/.agentic/pm_flow/agent_exec.sh`, `tests/agent_bindings_test.sh`.
-- Reuse: `write_access_settings`, `write_response`, `classify_failure`
-  (`:677`), T1's test agent. Three edits the cycle-001 probes make
-  unavoidable, all inside this task: the resolver block ending at `:365`
-  prints 12 fields and no `cli_params`, so add a 13th single-line JSON field
-  (tolerating its absence, per `pm_flow_test.sh:616`) and correct the "always
-  last" comment at `:358`; the `command -v "$AGENT_CLI"` guard at `~:869`
-  must probe `cli_params.command[0]` for an `acp` binding; the arm must reach
-  `telemetry.py attempt-start|attempt-end` as the others do, or `cost` never
-  shows `cli=acp` (store-ledger handoff). `enforced`/`prompt-level` appear
-  nowhere in `template/`, `src/` or `tests/` today — this is new surface.
+- Reuse: `write_response` (`:737`), `run_attempt` (`:408`), the
+  `tests/fixtures/stub_success.zsh` role script, T1's test agent. Three edits
+  the cycle-001 probes make unavoidable, all inside this task: the resolver
+  block ending at `:365` prints 12 fields and no `cli_params`, so add a 13th
+  single-line JSON field (tolerating its absence, per `pm_flow_test.sh:616`)
+  and correct the "always last" comment at `:358`; the `command -v
+  "$AGENT_CLI"` guard at `:867` must probe `cli_params.command[0]` for an
+  `acp` binding; `run_attempt` sends the child's stdout to `$RAW_OUTPUT`, so
+  the arm must replace that JSON line with the agent's `text` before
+  `write_response` runs, or the envelope's `result` is the outcome line rather
+  than the role's answer. `enforced`/`prompt-level` appear nowhere in
+  `template/`, `src/` or `tests/` today — this is new surface.
+- A5 needs no telemetry call in the arm, contrary to the earlier note here.
+  `telemetry.py attempt-end` (`:623`) resolves the attempt's `cli` as
+  `args.cli or envelope["pm_backend"] or row["cli"]`, the driver already
+  brackets every dispatch with `telemetry_start_attempt`/`telemetry_end_attempt`
+  (`driver.zsh:767`, `:785`), and `write_response` writes `pm_backend` from
+  `$AGENT_CLI`. Setting `AGENT_CLI=acp` and writing the standard envelope is
+  what makes `cost` print `cli=acp`; `cost.py:233` selects `a.cli` straight
+  from the row.
+- `classify_failure` is not consulted for an `acp` attempt. The arm maps
+  `acp.py`'s reason itself: `acp_child_exited` → `network`,
+  `acp_attempt_timeout`/`acp_silent_stall`/`acp_cancelled` → `stall`,
+  `acp_malformed_frame`/`acp_invalid_params` → `permanent`, `acp_rpc_error`
+  and anything unenumerated → `unknown`, so a reason nobody has named yet
+  still buys the one retry the `unknown` arm grants.
 - Carried change from T1's cycle-001 review: `acp.py` prints
   `failure_reason="acp_capability_missing"` on a **successful** exchange
   (exit 0, real `text`, `usage` populated) whenever `enforceable` is false.
@@ -58,14 +74,20 @@
   dispatch, per the brief's constraint — not a `permanent` classification.
   Either enforce that ordering in the arm or change the success line to
   `failure_reason="none"` and let the arm read `enforceable`.
-- Also from that review: `acp.py` answers every
+- Also from that review: `acp.py` (`:130`) answers every
   `session/request_permission` with `outcome: cancelled`. That is a policy
   the tier should drive; decide it here and cover it in the test, or the
   `write` tier silently denies an agent that asks.
+- Enforceability is only known after `initialize`, which happens inside
+  `acp.py`, so the arm cannot write A3's record before spawning. The record
+  must instead land in `$PM_FLOW_ACCESS_LOG` after `initialize` and before
+  `session/prompt` — before the agent is handed any work — and the test must
+  prove that ordering rather than the record's mere presence.
 - Acceptance IDs: A1, A2, A3, A5.
-- Validation: `zsh tests/agent_bindings_test.sh` — cycle reaches `GO`; access
-  log shows the record before the attempt start; `pm-flow cost` lists
-  `cli=acp`; `zsh tests/pm_flow_test.sh` and the stub suites exit 0.
+- Validation: `zsh tests/agent_bindings_test.sh` — cycle reaches `GO`; the
+  agent reads its own `access` record out of the log at `session/prompt`
+  time; `pm-flow cost` lists `cli=acp`; `zsh tests/pm_flow_test.sh` and
+  `zsh template/.agentic/pm_flow/tests/run.zsh` exit 0.
 - Depends on: T1.
 
 ## Task T3 — MCP server
@@ -89,6 +111,23 @@
   client to a terminal section, and `cost` distinguishes the two transports.
 - Paths: `tests/agent_bindings_test.sh`.
 - Reuse: the harness in `tests/packaged_layout_test.sh`.
+- Carried from T2's cycle-002 review, both in `src/pm_flow/acp.py`:
+  1. `_record_access` (`:232`) does not guard its write. An `OSError` on the
+     access log escapes into `main`'s `except` (`:424`), which names every
+     non-`ACPFailure` fault `acp_invalid_params` — so a log-write problem is
+     reported as bad parameters and the arm's mapping condemns it `permanent`
+     with no retry. Failing closed is right (no record, no dispatch), but the
+     reason has to name the cause; add an `acp_access_log_unwritable` reason,
+     or the nearest existing one, rather than borrowing the params name.
+     Observed: `--access-log <a directory>` against a healthy agent gives
+     `{"failure_reason":"acp_invalid_params","error":"[Errno 21] Is a
+     directory: …"}`, exit 1, and the agent never reaches `session/prompt`.
+     `access_hook.sh:132` swallows the same class of fault (`except OSError:
+     pass`), so the two writers disagree about how loud a log fault is.
+  2. The arm discards `usage`: the outcome line is replaced wholesale by
+     `text` before `write_response`, so an ACP attempt reaches the store with
+     no token counts. A5 only ever needed `cli=acp` and is met, but T4's
+     packaged run is where token accounting for the transport should land.
 - Acceptance IDs: A1–A6.
 - Validation: `zsh tests/agent_bindings_test.sh`, `zsh tests/pm_flow_test.sh`,
   `zsh tests/packaged_layout_test.sh` exit 0.
