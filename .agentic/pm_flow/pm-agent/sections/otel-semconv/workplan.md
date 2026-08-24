@@ -123,7 +123,9 @@ the SDK is there.
 
 ## Task T3 — Stop the non-convention attributes being written twice per dispatch
 
-- Status: not started.
+- Status: done — accepted cycle 004 (GO). A1, A2, A3, A7 met on the receiver,
+  both negatives reproduced review-side, and the parent's attribute set proven
+  byte-identical to HEAD by a differential probe of `semconv_attributes`.
 - Outcome: only the attributes the pair genuinely needs on both spans are on
   both. The `chat` child keeps `gen_ai.*`, `openinference.span.kind=LLM`,
   `llm.model_name` / `llm.provider` / `llm.system` and its own identity; the
@@ -131,8 +133,10 @@ the SDK is there.
   `llm.token_count.prompt|completion|total`, `pm_flow.cost_usd`,
   `pm_flow.cache_read_tokens`, `pm_flow.cache_write_tokens`,
   `pm_flow.reasoning_tokens`, `input.value` / `input.mime_type` and
-  `output.value` / `output.mime_type`. `llm.token_count.*` stays on the
-  `invoke_agent` parent, as T2's contract already requires.
+  `output.value` / `output.mime_type`. All eight stay on the `invoke_agent`
+  parent and are dropped from the child, so the parent's attribute set is
+  byte-identical to today; `llm.token_count.*` staying on the parent is T2's
+  contract, and the same side is chosen for the rest so no key moves.
 - Why: T2 builds the child from the same `semconv_attributes(...)` call as the
   parent (telemetry.py:624-630, 733-738), so every one of those is emitted on
   both rows. A stock backend that sums `llm.token_count.*` or
@@ -140,24 +144,30 @@ the SDK is there.
   the brief's objective, and the prompt and result bodies are stored and
   exported twice per dispatch.
 - Paths: `template/.agentic/pm_flow/telemetry.py`, `tests/otel_semconv_test.sh`.
-- Reuse: `semconv_attributes`' existing keyword surface — the child call can
-  simply stop passing `usage` and `input_text` / `output_text`, or the function
-  can take one flag for the pm-flow-only block; whichever keeps the parent's
-  attributes byte-identical to today.
+- Reuse: `semconv_attributes`' existing keyword surface. Dropping `usage` from
+  the child call is not enough on its own — the child's `gen_ai.usage.*` is
+  derived from that same `usage` (telemetry.py:272-283), so A2 would break.
+  The function takes one new keyword-only flag that suppresses the
+  OpenInference token counts, the `pm_flow.` cost/cache/reasoning block and the
+  body attributes while still handing the real `usage` to `attributes_for`; the
+  two child calls (telemetry.py:624-630, 733-738) pass it and nothing else
+  changes, so the parent's attributes stay byte-identical.
 - Acceptance IDs: A1, A2, A3, A7 (regression — the pair, the usage split and
   the revision must all still hold).
 - Validation: `zsh tests/otel_semconv_test.sh` asserts on the receiver that
   each of the named keys appears on exactly one span of the pair, that the
   parent still carries `llm.token_count.prompt|completion` equal to the
   `attempts` row, and that the child still carries `gen_ai.usage.*`;
+  reverting either child call to the shared attribute set fails it;
   `zsh tests/pm_flow_test.sh` and `zsh tests/store_ledger_test.sh` exit 0.
 - Depends on: T2.
 
 ## Integration and end-to-end validation
 
-- T2 is the end-to-end gate and carries the viewer confirmation the brief names;
-  it is the last task because it proves scenario 1 through the real
-  record-then-export path.
+- T2 is the end-to-end gate and carries the viewer confirmation the brief names:
+  it proves scenario 1 through the real record-then-export path. T3 is the last
+  task and re-runs that same gate, so the end-to-end proof is the one that
+  stands at section end.
 
 ## Known conflict outside owned paths
 
@@ -188,7 +198,7 @@ the SDK is there.
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1, A2 | T2 | Receiver shows the tree; usage equals the store |
+| A1, A2 | T2, T3 | Receiver shows the tree; usage equals the store, and each aggregatable key is on exactly one span of the pair |
 | A3 | T1, T2 | Revision attribute on every span |
 | A4 | T1 | Grep matches only `semconv.py` |
 | A5 | T1, T2 | Revision switch changes names in a copy, then in the receiver |

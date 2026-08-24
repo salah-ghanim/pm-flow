@@ -487,6 +487,35 @@ if child["attributes"].get(output_key) != expected_output:
         f"{label}: child output usage is {child['attributes'].get(output_key)!r}, "
         f"attempt has {expected_output!r}"
     )
+if child["attributes"].get("openinference.span.kind") != "LLM":
+    raise SystemExit(f"{label}: child lost openinference.span.kind=LLM")
+if not child["attributes"].get("llm.model_name"):
+    raise SystemExit(f"{label}: child lost llm.model_name")
+
+parent_only_candidates = (
+    "llm.token_count.prompt",
+    "llm.token_count.completion",
+    "llm.token_count.total",
+    "pm_flow.cost_usd",
+    "pm_flow.cache_read_tokens",
+    "pm_flow.cache_write_tokens",
+    "pm_flow.reasoning_tokens",
+    "input.value",
+    "input.mime_type",
+    "output.value",
+    "output.mime_type",
+)
+produced_parent_only = [
+    key for key in parent_only_candidates
+    if key in parent["attributes"] or key in child["attributes"]
+]
+for key in produced_parent_only:
+    if key not in parent["attributes"]:
+        raise SystemExit(f"{label}: {key} moved off the invoke_agent parent")
+for key in parent_only_candidates:
+    if key in child["attributes"]:
+        raise SystemExit(f"{label}: non-convention attribute duplicated on chat child: {key}")
+
 if parent["attributes"].get("llm.token_count.prompt") != expected_input:
     raise SystemExit(f"{label}: parent llm prompt token count changed")
 if parent["attributes"].get("llm.token_count.completion") != expected_output:
@@ -496,6 +525,10 @@ print(
     f"TREE {label}: {parent['spanId']} invoke_agent -> "
     f"{child['spanId']} chat parent={child['parentSpanId']} "
     f"input_tokens={expected_input} output_tokens={expected_output}"
+)
+print(
+    f"SPLIT {label}: parent_only={','.join(produced_parent_only)} "
+    f"child_kept={input_key},{output_key},openinference.span.kind,llm.model_name"
 )
 PY
 }
@@ -552,6 +585,7 @@ done <<< "$a4_matches"
 
 printf 'PASS: receiver decoded invoke_agent with exactly one chat child\n'
 printf 'PASS: receiver usage equals the attempts row and stays off the parent\n'
+printf 'PASS: non-convention usage and bodies stay only on the invoke_agent parent\n'
 printf 'PASS: every received span carries its loaded revision\n'
 printf 'PASS: changing only the pin changes the receiver provider attribute\n'
 printf 'PASS: standard GenAI literals are centralised in semconv.py\n'

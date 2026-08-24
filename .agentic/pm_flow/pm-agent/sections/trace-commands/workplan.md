@@ -109,6 +109,8 @@
 
 ## Integration and end-to-end validation
 
+- Done as of cycle 004: T1, T2 and T3 are accepted and merged, and all three
+  suites exit 0 on `main` at e8d846b. No task remains.
 - T3 proves scenarios 1–3 through a `pm-flow` entry point installed from a
   built wheel, not through `template/.agentic/pm_flow/pm_flow.sh`. That venv
   installs the wheel with `--no-deps` and pm-flow declares no runtime

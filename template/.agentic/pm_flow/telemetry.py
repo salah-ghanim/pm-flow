@@ -243,7 +243,8 @@ def semconv_attributes(*, role=None, cli=None, model=None, thinking=None,
                        seat=None, attempt_no=None, label=None, step=None,
                        access=None, run_key=None, failure_reason=None,
                        usage=None, span_kind="AGENT",
-                       input_text=None, output_text=None) -> dict:
+                       input_text=None, output_text=None,
+                       include_non_convention_attributes=True) -> dict:
     """One logical description of a call, in every vocabulary that matters."""
     attributes = {}
     usage = usage or {}
@@ -259,9 +260,10 @@ def semconv_attributes(*, role=None, cli=None, model=None, thinking=None,
     put("llm.model_name", model)
     put("llm.provider", provider)
     put("llm.system", provider)
-    put("llm.token_count.prompt", usage.get("input_tokens"))
-    put("llm.token_count.completion", usage.get("output_tokens"))
-    put("llm.token_count.total", usage.get("total_tokens"))
+    if include_non_convention_attributes:
+        put("llm.token_count.prompt", usage.get("input_tokens"))
+        put("llm.token_count.completion", usage.get("output_tokens"))
+        put("llm.token_count.total", usage.get("total_tokens"))
     if thinking or model or cli:
         put("llm.invocation_parameters", store.dumps(
             {k: v for k, v in
@@ -299,17 +301,18 @@ def semconv_attributes(*, role=None, cli=None, model=None, thinking=None,
     put("pm_flow.cli", cli)
     put("pm_flow.access_tier", access)
     put("pm_flow.failure_reason", failure_reason)
-    put("pm_flow.cost_usd", usage.get("cost_usd"))
-    put("pm_flow.cache_read_tokens", usage.get("cache_read_tokens"))
-    put("pm_flow.cache_write_tokens", usage.get("cache_write_tokens"))
-    put("pm_flow.reasoning_tokens", usage.get("reasoning_tokens"))
+    if include_non_convention_attributes:
+        put("pm_flow.cost_usd", usage.get("cost_usd"))
+        put("pm_flow.cache_read_tokens", usage.get("cache_read_tokens"))
+        put("pm_flow.cache_write_tokens", usage.get("cache_write_tokens"))
+        put("pm_flow.reasoning_tokens", usage.get("reasoning_tokens"))
 
-    if input_text is not None:
-        put("input.value", input_text)
-        put("input.mime_type", "text/markdown")
-    if output_text is not None:
-        put("output.value", output_text)
-        put("output.mime_type", "text/markdown")
+        if input_text is not None:
+            put("input.value", input_text)
+            put("input.mime_type", "text/markdown")
+        if output_text is not None:
+            put("output.value", output_text)
+            put("output.mime_type", "text/markdown")
 
     return attributes
 
@@ -627,6 +630,7 @@ def cmd_attempt_start(args):
             cycle=args.cycle, seat=args.seat, attempt_no=args.attempt_no,
             label=args.label, step=args.step, access=args.access, run_key=run_key,
             span_kind="LLM", input_text=input_text,
+            include_non_convention_attributes=False,
         )
         insert_span(
             connection, span_id=child_span_id, trace_id=trace_id,
@@ -735,6 +739,7 @@ def cmd_attempt_end(args):
                     thinking=thinking, usage=usage, attempt_no=attempt_no,
                     failure_reason=failure_reason, span_kind="LLM",
                     output_text=output_text,
+                    include_non_convention_attributes=False,
                 )
                 finish_span(
                     connection, span_id=child_row["span_id"],

@@ -2,8 +2,9 @@
 
 ## Current task
 
-- None. T1, T2 and T3 are done and A1–A5 are all closed. The workplan holds no
-  unfinished task; the section needs a new one or none.
+- None. T1, T2 and T3 are done and A1–A5 are all closed, and the evidence is
+  current against merged `main`, not only against the cycle-003 worktree. The
+  workplan holds no unfinished task and the brief needs none.
 
 ## Completed tasks and evidence
 
@@ -52,6 +53,19 @@
 - Regressions and A5: `zsh tests/trace_commands_test.sh`, `zsh
   tests/pm_flow_test.sh` and `zsh tests/packaged_layout_test.sh` each exit 0
   in the cycle-003 worktree.
+- Post-merge verification (cycle 004, on `main` at e8d846b, 2026-08-24): the
+  accepted work survived the merge and the evidence is current, not
+  worktree-only. `zsh tests/trace_commands_test.sh` prints `trace command tests
+  passed` and exits 0 — the full-mode message, so the receiver-backed A1/A3 and
+  the packaged block ran, not `--offline`. `zsh tests/packaged_layout_test.sh`
+  exits 0 with 13 PASS lines; `zsh tests/pm_flow_test.sh` exits 0 through `PASS:
+  independent consultant panel and CPO adjudication`. The delivered surface is
+  in the tracked tree: `trace_export.py:444` carries `exported_at IS NULL AND
+  ended_at IS NOT NULL` and `:456` prints `in-flight spans:`; `config.json:59-63`
+  ships `telemetry: {enabled, otlp_endpoint, headers}`; `pm_flow.sh` holds the
+  `trace` routing only — usage lines 44-45 and the `trace)` case at 1941-1943,
+  which execs `trace_export.py` and nothing else, so the brief's boundary on
+  that file is intact.
 - Mutation: dropping `AND ended_at IS NOT NULL` from `print_status` and
   rerunning the suite fails at `FAIL: packaged status did not match the next
   export count` (exit 1), then the file restores to sha256
@@ -126,5 +140,8 @@
 
 ## Next eligible task
 
-- None. The workplan is complete and A1–A5 are closed. Any further cycle needs
-  a new task, not a continuation.
+- None. The workplan is complete and A1–A5 are closed on `main`. The section
+  is COMPLETE as of cycle 004; any further work here needs a new brief
+  criterion, not a continuation. The two known gaps are recorded above: the
+  never-closed span belongs to `otel-semconv`, and multi-span packaged batching
+  is a coverage note, not an unmet acceptance ID.
