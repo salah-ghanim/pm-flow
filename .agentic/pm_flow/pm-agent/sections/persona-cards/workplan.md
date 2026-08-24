@@ -338,6 +338,9 @@
   repository ships carry cards, a real `sync` attaches them, and
   `persona show pm` prints author, purpose, skills and version with no dispatch
   recorded.
+- Both suites were re-run on merged `main` at cycle 005 scope, so the section's
+  A7 evidence is against the tree that ships and not only against the developer
+  worktree each cycle was reviewed in.
 
 ## Risks and rollback
 

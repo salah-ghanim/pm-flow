@@ -2,10 +2,29 @@
 
 ## Current task
 
-- None. T1–T4 are complete; T4 was accepted in cycle 004 (GO). Every brief
-  acceptance ID has evidence below and every carried item is closed.
+- None. T1–T4 are complete; T4 was accepted in cycle 004 (GO), and cycle 005
+  re-verified A7 against the merged `main` rather than a developer worktree.
+  Every brief acceptance ID has evidence below and every carried item is
+  closed.
 
 ## Completed tasks and evidence
+
+- Section-level re-verification on merged `main` (cycle 005 scope, PM's own
+  runs, not a worktree). `git status --short` in the main checkout lists only
+  `.agentic/` section state and two untracked `resume_claude.*` files, so every
+  owned path is committed and merged: all six `<role>.card.json` plus
+  `a2a-agent-skill.schema.json` and `reviewer.card.json` are on disk under
+  `template/.agentic/pm_flow/cards/`.
+  - A7 on the merged tree. `zsh tests/persona_cards_test.sh` — every assertion
+    passing through `PASS: persona card install and display integration`,
+    including the shipped-card block (`0 0 -> 0 0`), the non-zero no-dispatch
+    counts (`2 4 -> 2 4`), the two-arm resolution
+    (`resolved=reviewer|fbd35c7e…|unverified claim: Alice Example|1.4.0` and
+    `…|57069211…|unverified claim: Bob Example|2.7.0`), and all five
+    forbidden-field installs with the nested `skills[0].endpoint` case.
+    `zsh tests/pm_flow_test.sh` — ten `PASS:` lines, ending `independent
+    consultant panel and CPO adjudication`. So cycle 004's evidence survived
+    the merge.
 
 - T4 — closeout. Acceptance IDs A7, plus the brief deliverable "cards for the
   packaged personas" and A1/A5 re-observed against shipped cards rather than
@@ -345,6 +364,26 @@
   exercised by the suite: cycle 004 deleted the `/bin/cp` that staged that
   layout, which the assignment permitted. The checkout branch and the
   fail-closed branch are both still covered.
+  - It works today, probed at cycle 005 scope rather than assumed. A staged
+    wheel layout (`<tmp>/site/pm_flow/engine/` from `template/.agentic/pm_flow`,
+    `<tmp>/site/pm_flow/persona_card.py` from `src/`) run under `python3 -S`
+    with `PYTHONPATH` unset — so the `import pm_flow.persona_card` branch cannot
+    win — printed `synced 6 personas, 7 bindings, 14 rules, 7 seats, 8 edges`
+    (`wheel_sync_exit=0`), and `persona show pm` printed the authorship notice,
+    the packaged card's `purpose`, both skills and `version: 1.0.0`
+    (`wheel_show_exit=0`).
+  - The exposure this leaves is regression-only, and it is why it matters:
+    `sync` now fails closed on a packaged card it cannot validate and
+    `driver.zsh:735` runs `sync` at every run start, so if a future packaging
+    change breaks that branch, every tick of an installed (non-editable)
+    pm-flow stops, and no suite would notice. Whoever next edits
+    `pyproject.toml`'s force-include, `load_persona_card_module`, or the
+    `cards/` location must re-run this probe or restore a staged-layout case.
+- `cmd_persona_export` (`catalog.py:1959-1966`) catches bare `Exception` and
+  decides whether it was a card error with `"card_module" in locals()`.
+  Behaviour matches the narrow `except` that was asked for, but the `locals()`
+  probe is fragile to any future restructuring of that function — noted at
+  cycle 004 review, and it changes no acceptance ID.
 
 ## Blockers
 
@@ -368,6 +407,8 @@
   `review_pmflow_both.zsh`, `review_pp011.zsh`, `review_mutations.zsh`,
   `review_mutations2.zsh`, `review_show.zsh`. Scaffolding, not section state;
   drop rather than commit.
+- From cycle 005, `sections/persona-cards/cycles/005/scope_probe.sh` — the PM's
+  wheel-layout probe. Scaffolding, not section state; drop rather than commit.
 - Running `sections/persona-packs/cycles/011/acceptance.sh` rewrites that
   cycle's own `transcripts/`, `prompt-v1.txt` and `prompt-v2.txt` in the main
   checkout (`acceptance.sh:348-352`). Cycle 004's reviewer avoided that
@@ -378,6 +419,21 @@
 - `.last_error.txt` holds three `claude hit a usage limit; pausing 1800s`
   lines from the dispatch after cycle 001. A quarantine, not a section failure;
   no evidence in this file depends on it.
+
+## Probes run scoping cycle 005
+
+- `ls template/.agentic/pm_flow/cards/` on merged `main` — the six
+  `<role>.card.json` files, `a2a-agent-skill.schema.json` and
+  `reviewer.card.json`. The deliverable is on `main`, not only in a worktree.
+- Both suites re-run on `main` by the PM; results under *Completed tasks*
+  above.
+- `grep -n "wheel\|parent.parent\|python3 -S" tests/persona_cards_test.sh` —
+  three hits, all the isolated fail-closed invocations. Nothing stages the
+  wheel layout, confirming the coverage gap cycle 004's review recorded; the
+  staged-layout probe that shows the branch still works is under *Facts worth
+  keeping*.
+- `catalog.py:724-739` re-read — the packaged-card pre-pass sits above
+  `register_clis`, which is the ordering mutation 1 inverted.
 
 ## Probes run scoping cycle 004
 
@@ -524,11 +580,18 @@
 ## Next eligible task
 
 - None. The workplan is exhausted: T1 (cycle 001), T2 (002), T3 (003) and T4
-  (004) are all complete, and A1–A7 plus the packaged-cards deliverable have
-  evidence above. The one thing the brief names that this section did not
-  deliver is the comparison report's printed persona column — `compare.py`'s
-  `arm_personas` renders `role=key` and both it and `telemetry.py` are outside
-  owned paths. The resolution from the recorded `(key, content_hash)` to the
-  card is delivered and proved; the one-line render change belongs to whichever
-  section owns `compare.py`. Same for the `pm-flow persona` wrapper the brief's
-  scenarios spell, which lives in `pm_flow.sh` / `src/pm_flow/cli.py`.
+  (004) are all complete, A1–A7 plus the packaged-cards deliverable have
+  evidence above, and cycle 005 re-observed A7 on the merged `main`. The one
+  thing the brief names that this section did not deliver is the comparison
+  report's printed persona column — `compare.py`'s `arm_personas` renders
+  `role=key` and both it and `telemetry.py` are outside owned paths. The
+  resolution from the recorded `(key, content_hash)` to the card is delivered
+  and proved; the one-line render change belongs to whichever section owns
+  `compare.py`. Same for the `pm-flow persona` wrapper the brief's scenarios
+  spell, which lives in `pm_flow.sh` / `src/pm_flow/cli.py`.
+- Nothing left is a cycle wide. The two residual items — a staged wheel-layout
+  regression case and `cmd_persona_export`'s `locals()` probe — are both
+  recorded under *Facts worth keeping*; each is a change too small to carry its
+  own scope-develop-review pass, and neither moves an acceptance ID. They
+  belong inside the next task that touches those lines, not after this section
+  as a task of their own.
