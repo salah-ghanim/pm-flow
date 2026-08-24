@@ -2,12 +2,60 @@
 
 ## Current task
 
-- T2, eligible now that T1 is accepted (cycle 002, GO_WITH_CHANGES): emit the
-  `invoke_agent` → `chat` pair, prove it through an independent OTLP receiver,
-  and cover A1, A2, A6, A7. T2 also deletes the working-tree ownership
-  assertion T1 left at the tail of `tests/otel_semconv_test.sh`.
+- None assigned. T2 was accepted in cycle 003; T3 is the next eligible task.
 
 ## Completed tasks and evidence
+
+- T2 — accepted cycle 003 (GO_WITH_CHANGES). Acceptance IDs A1, A2, A6, A7,
+  with A3 and A5 re-asserted on the receiver.
+  - Reviewed at
+    `/Users/salah/code/personal/.pm-flow-worktrees/pm-flow/pm-agent/otel-semconv`.
+    `git status --porcelain` there shows exactly
+    ` M template/.agentic/pm_flow/telemetry.py` and
+    ` M tests/otel_semconv_test.sh` — no path outside the two writable ones,
+    and `src/pm_flow/semconv.py` is untouched (the usage gate went into
+    `semconv_attributes`' caller instead, telemetry.py:272-275).
+  - A1, A3, A5: `zsh tests/otel_semconv_test.sh` exits 0 and prints
+    `ROUTE: stdlib OTLP/JSON fallback via trace_export.py --file --replay`,
+    `TREE primary: d495f0b3b5695521 invoke_agent -> 64d16a501343b8dc chat
+    parent=d495f0b3b5695521 input_tokens=31 output_tokens=13`, then the same
+    tree for the secondary pin and five PASS lines. On this seat the receiver
+    bound TCP (the route string has no `bind prohibited` suffix), so the
+    payload crossed a real HTTP socket; the SDK is still absent, so the payload
+    itself is `trace_export.py --file --replay` output, not anything the test
+    assembled.
+  - A2: the same run. The receiver's `chat` child usage is compared against
+    `SELECT a.input_tokens, a.output_tokens FROM spans child JOIN attempts a ON
+    child.parent_span_id = a.span_id WHERE child.span_id = ?`, and the parent is
+    asserted to carry neither `gen_ai.usage.*` key.
+  - Three review-side mutations, each on an rsync copy of the worktree, each
+    deleted afterwards (`cycles/003/review_mutation.zsh`,
+    `cycles/003/review_negatives.zsh`):
+    - child usage dropped (`usage=usage` → `usage={}` at the `attempt-end`
+      child call) → `primary: child input usage is None, attempt has 31`,
+      `MUTATION_EXIT=1`.
+    - child `insert_span` replaced by `pass` → `primary: expected exactly one
+      chat child, got 0`, exit 1.
+    - usage gate removed (`convention_usage = usage`) → `primary: convention
+      usage remained on invoke_agent parent`, exit 1.
+  - A7: `zsh tests/pm_flow_test.sh` exits 0 with 10 PASS lines;
+    `zsh tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0;
+    `zsh tests/otel_semconv_test.sh` exits 0 with an untracked
+    `REVIEW-DIRTY-PROBE.txt` in the worktree (`DIRTY_EXIT=0`), so the T1
+    ownership gate is genuinely gone —
+    `grep -rn 'git status --porcelain' tests/otel_semconv_test.sh` is empty.
+  - A4 still holds: the grep over `template/` and `src/` matches only
+    `src/pm_flow/semconv.py` and the exempted comment at
+    `template/.agentic/pm_flow/catalog.py:250`.
+  - A6 unproven, as the brief allows. Not settled from this seat either: this
+    session's shell refused `docker info` (`This command requires approval`)
+    and refused to stat `/Users/salah/.docker/run/docker.sock`. The developer's
+    own run of `docker run -d -p 4318:4318 -p 16686:16686
+    jaegertracing/all-in-one` returned exit 1 with `dial unix
+    /Users/salah/.docker/run/docker.sock: connect: no such file or directory`.
+    That command plus `curl -s
+    'http://localhost:16686/api/traces?service=pm-flow'` remains what settles
+    it.
 
 - T1 — accepted cycle 002. Acceptance IDs A3, A4, A5.
   - A3, A5: `zsh tests/otel_semconv_test.sh` exits 0 and prints
@@ -55,6 +103,47 @@
   parent), because the `attempts` row keeps pointing at the `invoke_agent` span.
   Repointing `attempts.span_id` at the child would change the traceparent handed
   to the child CLI for no gain.
+- Token counts are only known at `attempt-end`: `cmd_attempt_end`
+  (telemetry.py:653-706) assembles `usage` from the response envelope and the
+  codex event stream, then merges it onto the parent span through `finish_span`.
+  So the `chat` child is inserted at `attempt-start` (the parent exists, the
+  start time is right) and finished at `attempt-end`, and `attributes_for` gates
+  `gen_ai.usage.*` on the `chat` operation so the counts stop landing on the
+  parent. `llm.token_count.*` is OpenInference and stays where it is.
+- No `chat` child is written when `SEMCONV` is `None`. The pair is a
+  convention-defined structure, and the copied-engine layout has no convention
+  module; inventing a child there would put a bare span in the tree the degrade
+  path is meant to keep out.
+- The export route was settled by probe, not assumption. `trace_export.py
+  --otlp` imports the OpenTelemetry SDK (`trace_export.py:183-194`);
+  `ls .venv/lib/python3*/site-packages` shows only `pm_flow` and its dist-info,
+  and `ls tests/packaging-build-wheelhouse` shows hatchling, packaging,
+  pathspec, pluggy, tomlkit, trove_classifiers - no OTel. `pm_flow_test.sh`
+  installs `--no-index` from that wheelhouse, so the wire route cannot be
+  assumed and a network install must not be added to the suite. T2 therefore
+  feeds one receiver by two routes with identical assertions: the driver's own
+  `telemetry_autoexport` when the SDK is importable, and
+  `trace_export.py --file --replay` POSTed by the test when it is not.
+- The receiver is fed without editing anything outside owned paths.
+  `telemetry_autoexport` (driver.zsh:728-735) reads
+  `config_setting telemetry otlp_endpoint` and fires at run end, and the stock
+  `config.json` has no `telemetry` block, so the disposable project's config
+  gets one pointing at the receiver.
+- `pm-flow trace export` does not exist as a subcommand yet: `grep -rln 'trace
+  export' template/ src/ tests/` matches only `driver.zsh`,
+  `requirements-telemetry.txt` and an on-demand fixture, and that command
+  belongs to `trace-commands`. The brief's scenario 1 names it, but this section
+  proves the scenario by calling `trace_export.py` by path, as driver.zsh:732
+  does.
+- Adding the child row is safe for the other suites: `grep -rn 'FROM spans\|
+  spans\b' tests/pm_flow_test.sh tests/store_ledger_test.sh` returns nothing, so
+  neither reads or counts the `spans` table.
+- `tests/fixtures/stub_success.zsh` emits `{"is_error":false,"result":…,
+  "session_id":""}` with no `usage` block, so a dispatch driven by it records
+  null tokens and A2 would compare nothing to nothing. T2's stub must emit a
+  usage block `usage_from_response` (telemetry.py:166-176) reads:
+  `input_tokens`, `output_tokens`, optionally `cache_read_input_tokens` and
+  `cache_creation_input_tokens`.
 - Both pins are verified against the registry, not assumed. `fetch.sh --url
   https://raw.githubusercontent.com/open-telemetry/semantic-conventions/v1.37.0/model/gen-ai/registry.yaml`
   reports `gen_ai.provider.name`, `gen_ai.operation.name`, `gen_ai.agent.name`,
@@ -83,6 +172,15 @@
   attributes and no GenAI names - a stated limit, not a duplicated mapping, and
   not a dispatch failure. `v1.37.0` is confirmed to exist as a
   semantic-conventions release tag.
+- The usage gate ended up in the caller, not in `attributes_for`. The workplan
+  said `attributes_for` would gate `gen_ai.usage.*` on the operation; cycle 003
+  instead computes `convention_usage` in `semconv_attributes`
+  (telemetry.py:272-275) and hands `attributes_for` an empty usage dict unless
+  the span kind maps to `chat`. `semconv.py` is therefore unmodified, which the
+  assignment allowed. Accepted, with one consequence recorded: `attributes_for`
+  is a published interface (brief, Interfaces produced) and still emits
+  `gen_ai.usage.*` for whatever `span_kind` it is handed, so a future second
+  caller must gate it too. `telemetry.py` is the only caller today.
 - A name the pinned revision does not define is not emitted under `gen_ai.`.
   This retires `gen_ai.usage.cost` (telemetry.py:260), which no revision
   defines; the same number is already recorded as `pm_flow.cost_usd`.
@@ -105,14 +203,29 @@
 
 ## Blockers
 
-- None. One defect outlives cycle 002 and is carried into T2, not a blocker:
-  `tests/otel_semconv_test.sh` ends with a `git status --porcelain` assertion
-  that fails on any path outside the three owned ones. Observed on a copy with
-  one unrelated edit: `FAIL: modified path is outside this assignment:
-   M README.md`, exit 1. That is a cycle-scoped ownership check, and as a
-  permanent regression test it breaks A7 in any dirty checkout - including the
-  main checkout today, whose `.agentic/` state files are modified. T2 deletes
-  it; the ownership check stays where it belongs, in review.
+- None. One defect outlives cycle 003 and is carried into T3, not a blocker:
+  the `chat` child is built by the same `semconv_attributes(...)` call as its
+  parent (telemetry.py:624-630 at `attempt-start`, 733-738 at `attempt-end`),
+  so every non-convention attribute that call produces is written to both rows.
+  Observed on the accepted tree: both spans get `llm.token_count.prompt`,
+  `llm.token_count.completion`, `llm.token_count.total`, `pm_flow.cost_usd`
+  (the stub's `total_cost_usd` reaches `usage` at telemetry.py:177-179),
+  `pm_flow.cache_read_tokens`, `pm_flow.reasoning_tokens`, and the
+  `input.value` / `output.value` bodies. A stock backend that sums token counts
+  or cost over a trace therefore reports double, and each dispatch stores and
+  exports its prompt and result twice. The cycle-003 test does not catch this:
+  it asserts only that `gen_ai.usage.*` is off the parent and that
+  `llm.token_count.*` is still on it, never that anything is absent from the
+  child.
+- The T1 `git status --porcelain` gate is gone, confirmed this cycle: the grep
+  for it is empty and the suite exits 0 with an untracked probe file present.
+- Docker availability for A6 is still unsettled, now on both seats: the
+  developer's `docker run …` returned `connect: no such file or directory` for
+  `/Users/salah/.docker/run/docker.sock`, and this review seat's shell refused
+  both `docker info` and a stat of that socket. A6's own escape hatch covers
+  it; the Jaeger command plus `curl -s
+  'http://localhost:16686/api/traces?service=pm-flow'` is what settles it, and
+  the handoff carries it as unproven.
 - One cross-section request is open, not a blocker: A4's grep matches a
   prose comment at `template/.agentic/pm_flow/catalog.py:250`, a file owned by
   `persona-cards`. The test exempts that one file for comment lines only; the
@@ -136,4 +249,5 @@
 
 ## Next eligible task
 
-- T2. T1 has landed, so its only dependency is satisfied.
+- T3 — stop the non-convention attributes being written twice per dispatch. T2
+  has landed, so its only dependency is satisfied.

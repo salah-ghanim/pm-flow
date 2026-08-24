@@ -21,7 +21,7 @@ URL, because all three speak OTLP:
 The `--file` path deliberately needs no dependency at all: OTLP/JSON is a
 documented wire format and writing it is a dozen lines, so a store can always be
 turned into something a collector will read even where nothing is installed.
-Only `--otlp` imports the SDK.
+Only `--protocol grpc` imports the SDK.
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -146,7 +148,7 @@ def to_otlp_json(rows, events_by_span, resource_attributes):
             ]
         spans.append(span)
 
-    return {
+    payload = {
         "resourceSpans": [{
             "resource": {"attributes": _attributes(resource_attributes)},
             "scopeSpans": [{
@@ -155,6 +157,44 @@ def to_otlp_json(rows, events_by_span, resource_attributes):
             }],
         }]
     }
+    return validate_otlp_json(payload)
+
+
+def validate_otlp_json(payload):
+    """Check the OTLP/JSON shape produced here without importing the SDK."""
+    try:
+        resource_spans = payload["resourceSpans"]
+        if not isinstance(resource_spans, list) or not resource_spans:
+            raise ValueError("resourceSpans must be a non-empty list")
+        for resource_span in resource_spans:
+            if not isinstance(resource_span["resource"]["attributes"], list):
+                raise ValueError("resource attributes must be a list")
+            scope_spans = resource_span["scopeSpans"]
+            if not isinstance(scope_spans, list) or not scope_spans:
+                raise ValueError("scopeSpans must be a non-empty list")
+            for scope_span in scope_spans:
+                if not isinstance(scope_span["scope"]["name"], str):
+                    raise ValueError("scope name must be a string")
+                spans = scope_span["spans"]
+                if not isinstance(spans, list):
+                    raise ValueError("spans must be a list")
+                for span in spans:
+                    if (len(span["traceId"]) != 32 or len(span["spanId"]) != 16
+                            or not all(char in "0123456789abcdef"
+                                       for char in span["traceId"] + span["spanId"])):
+                        raise ValueError("traceId/spanId must be lowercase hex")
+                    for key in ("name", "startTimeUnixNano", "endTimeUnixNano"):
+                        if not isinstance(span[key], str):
+                            raise ValueError(f"{key} must be a string")
+                    if not isinstance(span["kind"], int):
+                        raise ValueError("kind must be an integer")
+                    if not isinstance(span["attributes"], list):
+                        raise ValueError("attributes must be a list")
+                    if not isinstance(span["status"]["code"], int):
+                        raise ValueError("status code must be an integer")
+    except (KeyError, TypeError) as error:
+        raise ValueError(f"invalid OTLP/JSON payload: {error}") from error
+    return payload
 
 
 def export_to_file(rows, events_by_span, resource_attributes, path):
@@ -168,59 +208,75 @@ def export_to_file(rows, events_by_span, resource_attributes, path):
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    return True
+    return len(rows)
 
 
 # -------------------------------------------------------------- OTLP / net
 
 def export_to_otlp(rows, events_by_span, resource_attributes, args):
-    """Hand the spans to the OpenTelemetry SDK's exporter.
-
-    The SDK is used rather than a hand-rolled POST because the parts that are
-    tedious to get right - retry and backoff, gzip, protobuf framing, partial
-    success handling - are exactly the parts it already has.
-    """
-    try:
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.sdk.trace import Event, ReadableSpan
-        from opentelemetry.sdk.util.instrumentation import InstrumentationScope
-        from opentelemetry.trace import SpanContext, SpanKind, TraceFlags
-        from opentelemetry.trace.status import Status, StatusCode
-    except ImportError:
-        raise SystemExit(
-            "sending to an endpoint needs the OpenTelemetry SDK:\n"
-            "    pip install -r .agentic/pm_flow/requirements-telemetry.txt\n"
-            "Writing a file with --file needs nothing installed."
-        )
-
-    if args.protocol == "grpc":
-        try:
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-                OTLPSpanExporter,
-            )
-        except ImportError:
-            raise SystemExit(
-                "the gRPC exporter is not installed; use --protocol http "
-                "or install opentelemetry-exporter-otlp-proto-grpc"
-            )
-        exporter = OTLPSpanExporter(endpoint=args.otlp, headers=parse_headers(args.header))
-    else:
-        try:
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-                OTLPSpanExporter,
-            )
-        except ImportError:
-            raise SystemExit(
-                "the HTTP exporter is not installed:\n"
-                "    pip install -r .agentic/pm_flow/requirements-telemetry.txt"
-            )
+    """Send spans and return the number the receiver acknowledged."""
+    if args.protocol == "http":
         endpoint = args.otlp
         # Every backend listens on /v1/traces; accepting a bare origin and
         # completing it is the difference between this working first try and
         # silently posting to a UI route that returns 200 and drops the body.
         if not endpoint.rstrip("/").endswith("/v1/traces"):
             endpoint = endpoint.rstrip("/") + "/v1/traces"
-        exporter = OTLPSpanExporter(endpoint=endpoint, headers=parse_headers(args.header))
+        headers = parse_headers(args.header)
+        headers["Content-Type"] = "application/json"
+        payload = json.dumps(
+            to_otlp_json(rows, events_by_span, resource_attributes)
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            endpoint, data=payload, headers=headers, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=args.timeout) as response:
+                body = response.read()
+        except urllib.error.HTTPError as error:
+            print(
+                f"OTLP export failed with HTTP {error.code}; "
+                f"{len(rows)} span(s) kept for retry",
+                file=sys.stderr,
+            )
+            return 0
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            print(
+                f"OTLP export failed: {error}; "
+                f"{len(rows)} span(s) kept for retry",
+                file=sys.stderr,
+            )
+            return 0
+
+        try:
+            rejected = int(
+                json.loads(body.decode("utf-8"))
+                .get("partialSuccess", {})
+                .get("rejectedSpans", 0)
+            )
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError, UnicodeError):
+            rejected = 0
+        rejected = min(max(rejected, 0), len(rows))
+        return len(rows) - rejected
+
+    try:
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import Event, ReadableSpan
+        from opentelemetry.sdk.util.instrumentation import InstrumentationScope
+        from opentelemetry.trace import SpanContext, SpanKind, TraceFlags
+        from opentelemetry.trace.status import Status, StatusCode
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
+    except ImportError:
+        raise SystemExit(
+            "the gRPC exporter is not installed; use --protocol http "
+            "or install opentelemetry-exporter-otlp-proto-grpc"
+        )
+
+    exporter = OTLPSpanExporter(
+        endpoint=args.otlp, headers=parse_headers(args.header)
+    )
 
     kind_by_name = {
         "INTERNAL": SpanKind.INTERNAL, "SERVER": SpanKind.SERVER,
@@ -277,7 +333,9 @@ def export_to_otlp(rows, events_by_span, resource_attributes, args):
 
     result = exporter.export(readable)
     exporter.shutdown()
-    return getattr(result, "name", str(result)) in ("SUCCESS", "0")
+    if getattr(result, "name", str(result)) in ("SUCCESS", "0"):
+        return len(rows)
+    return 0
 
 
 def parse_headers(pairs):
@@ -298,6 +356,31 @@ def parse_headers(pairs):
         token = base64.b64encode(f"{public}:{secret}".encode()).decode()
         headers["Authorization"] = f"Basic {token}"
     return headers
+
+
+def telemetry_config():
+    """Read the project flow's telemetry defaults, falling back to this layout."""
+    flow_dir = os.environ.get("PM_FLOW_FLOW_DIR")
+    config_path = ((Path(flow_dir) if flow_dir else Path(__file__).resolve().parent)
+                   / "config.json")
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    telemetry = config.get("telemetry", {}) if isinstance(config, dict) else {}
+    return telemetry if isinstance(telemetry, dict) else {}
+
+
+def configured_headers(value):
+    if isinstance(value, dict):
+        return [f"{key}={item}" for key, item in value.items()]
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []
+
+
+def recording_enabled(config):
+    return config.get("enabled", 1) not in (False, 0, "0")
 
 
 def resource_attributes(args, connection):
@@ -321,6 +404,7 @@ def resource_attributes(args, connection):
 
 
 def export_once(connection, args) -> int:
+    args.export_incomplete = False
     rows = fetch_spans(connection, replay=args.replay, trace=args.trace,
                        limit=args.limit)
     if not rows:
@@ -329,25 +413,63 @@ def export_once(connection, args) -> int:
     attributes = resource_attributes(args, connection)
 
     if args.file:
-        ok = export_to_file(rows, events_by_span, attributes, args.file)
+        acknowledged = export_to_file(rows, events_by_span, attributes, args.file)
     else:
-        ok = export_to_otlp(rows, events_by_span, attributes, args)
+        acknowledged = export_to_otlp(rows, events_by_span, attributes, args)
 
-    if ok:
+    exported = 0
+    if acknowledged == len(rows):
         # A replay deliberately does not re-mark: it exists to send spans that
         # were already sent somewhere else, and clobbering the stamp would lose
         # the record of what the live exporter had already shipped.
         if not args.replay:
             mark_exported(connection, [row["span_id"] for row in rows])
-        return len(rows)
-    raise SystemExit("export failed; spans left unmarked and will be retried")
+        exported = len(rows)
+    else:
+        args.export_incomplete = True
+        print(
+            f"receiver acknowledged {acknowledged} of {len(rows)} span(s); "
+            "all spans left unmarked and will be retried",
+            file=sys.stderr,
+        )
+    return exported
+
+
+def print_status(connection, config):
+    if connection is None:
+        unexported = in_flight = exported = 0
+    else:
+        unexported = connection.execute(
+            "SELECT COUNT(*) FROM spans "
+            "WHERE exported_at IS NULL AND ended_at IS NOT NULL"
+        ).fetchone()[0]
+        in_flight = connection.execute(
+            "SELECT COUNT(*) FROM spans WHERE ended_at IS NULL"
+        ).fetchone()[0]
+        exported = connection.execute(
+            "SELECT COUNT(*) FROM spans WHERE exported_at IS NOT NULL"
+        ).fetchone()[0]
+    endpoint = str(config.get("otlp_endpoint", "") or "")
+    print(f"recording: {'enabled' if recording_enabled(config) else 'disabled'}")
+    print(f"endpoint: {endpoint or 'none'}")
+    print(f"unexported spans: {unexported}")
+    print(f"in-flight spans: {in_flight}")
+    print(f"exported spans: {exported}")
 
 
 def main(argv):
+    raw_args = list(argv[1:])
+    command = "export"
+    for index, token in enumerate(raw_args):
+        if token in ("export", "status"):
+            command = token
+            del raw_args[index]
+            break
+
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--db", help="path to the store (or $PM_FLOW_STORE)")
-    destination = parser.add_mutually_exclusive_group(required=True)
+    destination = parser.add_mutually_exclusive_group()
     destination.add_argument("--otlp", help="OTLP endpoint, e.g. http://localhost:6006")
     destination.add_argument("--file", help="append OTLP/JSON lines to this path")
     parser.add_argument("--protocol", choices=("http", "grpc"), default="http")
@@ -362,20 +484,39 @@ def main(argv):
     parser.add_argument("--follow", action="store_true",
                         help="keep exporting as new spans are recorded")
     parser.add_argument("--interval", type=float, default=5.0)
-    args = parser.parse_args(argv[1:])
+    parser.add_argument("--timeout", type=float, default=10.0,
+                        help="HTTP request timeout in seconds")
+    args = parser.parse_args(raw_args)
+
+    config = telemetry_config()
+    explicit_headers = args.header or []
+    args.header = configured_headers(config.get("headers")) + explicit_headers
+    if not args.otlp and not args.file:
+        args.otlp = str(config.get("otlp_endpoint", "") or "")
 
     args.db = args.db or os.environ.get("PM_FLOW_STORE", "")
     if not args.db:
         raise SystemExit("no store: pass --db or set PM_FLOW_STORE")
+    if not Path(args.db).exists() and command == "status":
+        print_status(None, config)
+        return 0
     if not Path(args.db).exists():
         raise SystemExit(f"no store at {args.db}")
 
     connection = store.connect(args.db)
 
+    if command == "status":
+        print_status(connection, config)
+        return 0
+    if not args.otlp and not args.file:
+        parser.error(
+            "trace export needs --otlp, --file, or telemetry.otlp_endpoint"
+        )
+
     if not args.follow:
         count = export_once(connection, args)
         print(f"exported {count} span(s)")
-        return 0
+        return 1 if args.export_incomplete else 0
 
     print(f"following {args.db}; ctrl-c to stop")
     total = 0

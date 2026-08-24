@@ -269,12 +269,16 @@ def semconv_attributes(*, role=None, cli=None, model=None, thinking=None,
              if v}))
 
     if SEMCONV is not None:
+        convention_usage = usage if (
+            SEMCONV.SPAN_OPERATIONS.get(span_kind)
+            == SEMCONV.SPAN_OPERATIONS.get("LLM")
+        ) else {}
         attributes.update(SEMCONV.attributes_for({
             "role": role,
             "provider": provider,
             "model": model,
             "thinking": thinking,
-            "usage": usage,
+            "usage": convention_usage,
             "span_kind": span_kind,
         }))
 
@@ -615,6 +619,21 @@ def cmd_attempt_start(args):
                 parent_span_id=args.parent_span, name=args.name or f"{args.role}",
                 kind="CLIENT", started_at=started, attributes=attributes,
                 run_id=run_id, attempt_id=attempt_id)
+    if SEMCONV is not None:
+        child_span_id = new_span_id()
+        child_attributes = semconv_attributes(
+            role=args.role, cli=args.cli, model=args.model, thinking=args.thinking,
+            project=project_key, topology=topology_key, task=args.task,
+            cycle=args.cycle, seat=args.seat, attempt_no=args.attempt_no,
+            label=args.label, step=args.step, access=args.access, run_key=run_key,
+            span_kind="LLM", input_text=input_text,
+        )
+        insert_span(
+            connection, span_id=child_span_id, trace_id=trace_id,
+            parent_span_id=span_id, name=f"{args.role}: model", kind="CLIENT",
+            started_at=started, attributes=child_attributes,
+            run_id=run_id, attempt_id=attempt_id,
+        )
 
     print(f"attempt_id={attempt_id}")
     print(f"span_id={span_id}")
@@ -704,6 +723,25 @@ def cmd_attempt_end(args):
                     status="OK" if args.status == "ok" else "ERROR",
                     message=failure_reason, attributes=attributes,
                     ended_at=ended)
+        if SEMCONV is not None:
+            child_row = connection.execute(
+                "SELECT span_id FROM spans WHERE parent_span_id = ?"
+                " AND attempt_id = ? ORDER BY rowid LIMIT 1",
+                (row["span_id"], row["id"]),
+            ).fetchone()
+            if child_row is not None:
+                child_attributes = semconv_attributes(
+                    role=row["role_key"], cli=cli, model=model,
+                    thinking=thinking, usage=usage, attempt_no=attempt_no,
+                    failure_reason=failure_reason, span_kind="LLM",
+                    output_text=output_text,
+                )
+                finish_span(
+                    connection, span_id=child_row["span_id"],
+                    status="OK" if args.status == "ok" else "ERROR",
+                    message=failure_reason, attributes=child_attributes,
+                    ended_at=ended,
+                )
     return 0
 
 

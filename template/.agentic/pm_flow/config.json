@@ -56,6 +56,11 @@
   "isolation": {
     "worktrees": true
   },
+  "telemetry": {
+    "enabled": 1,
+    "otlp_endpoint": "",
+    "headers": {}
+  },
   "budget": {
     "max_usd": 0,
     "max_usd_per_section": 0

@@ -41,6 +41,8 @@ Usage:
   pm_flow.sh [--project <name>] next
   pm_flow.sh [--project <name>] cost
   pm_flow.sh [--project <name>] access [--all]
+  pm_flow.sh [--project <name>] trace export [--otlp <url>|--file <path>] [--header k=v]
+  pm_flow.sh [--project <name>] trace status
   pm_flow.sh [--project <name>] [--section <name>] tick
   pm_flow.sh [--project <name>] [--section <name>] run [--max-ticks <n>]
   pm_flow.sh [--project <name>] role-prompt <role>
@@ -1935,6 +1937,10 @@ main() {
     cost)
       shift || true
       cmd_cost "$@"
+      ;;
+    trace)
+      shift || true
+      python3 "$SCRIPT_DIR/trace_export.py" --db "$(telemetry_store_file)" "$@"
       ;;
     access)
       shift || true
