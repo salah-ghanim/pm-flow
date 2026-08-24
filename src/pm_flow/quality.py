@@ -136,18 +136,19 @@ def load_budgets() -> dict[str, int]:
 
 def markdown_section(text: str, heading: str) -> str:
     match = re.search(
-        rf"(?im)^##\s+{re.escape(heading)}\s*$",
+        rf"(?im)^(#{{1,6}})\s+{re.escape(heading)}\s*$",
         text,
     )
     if not match:
         return ""
     tail = text[match.end():]
-    end = re.search(r"(?m)^#{1,2}\s+", tail)
+    depth = len(match.group(1))
+    end = re.search(rf"(?m)^#{{1,{depth}}}\s+", tail)
     return tail[:end.start()] if end else tail
 
 
 def has_heading(text: str, heading: str) -> bool:
-    return bool(re.search(rf"(?im)^##\s+{re.escape(heading)}\s*$", text))
+    return bool(re.search(rf"(?im)^#{{1,6}}\s+{re.escape(heading)}\s*$", text))
 
 
 def required_headings(kind: str, text: str) -> tuple[str, ...]:
@@ -166,9 +167,12 @@ def table_coverage_ids(workplan: str) -> set[str]:
     coverage = markdown_section(workplan, "Acceptance coverage")
     found: set[str] = set()
     for line in coverage.splitlines():
-        match = re.match(r"^\s*\|\s*(A\d+)\s*\|", line, flags=re.IGNORECASE)
+        match = re.match(r"^\s*\|([^|]*)\|", line)
         if match:
-            found.add(match.group(1).upper())
+            found.update(
+                value.upper()
+                for value in re.findall(r"\bA\d+\b", match.group(1), flags=re.IGNORECASE)
+            )
     return found
 
 
@@ -201,7 +205,26 @@ def looks_like_path(value: str) -> bool:
         return False
     if value in SECTION_ARTIFACT_NAMES:
         return True
-    return "/" in value or bool(re.search(r"\.[A-Za-z0-9]{1,8}(?::\d+)?$", value))
+    if re.fullmatch(r"(?:\d+(?:\.\d+)+|\.\d+)", value):
+        return False
+    if re.fullmatch(r"v\d+(?:\.\d+){1,}", value, flags=re.IGNORECASE):
+        return False
+    if re.search(r"[$<>|;&*?{}\[\]()'\"`\\~]", value) or value.startswith("@"):
+        return False
+    if "://" in value:
+        return False
+    if "/" in value:
+        return True
+    if re.fullmatch(r"\.[A-Za-z][A-Za-z0-9._-]*", value):
+        return True
+    return bool(re.search(
+        r"\.(?:bash|c|cc|cfg|conf|cpp|cs|css|csv|cxx|go|h|hh|hpp|htm|html|"
+        r"ini|java|js|json|jsonl|jsx|kt|kts|lock|md|mdx|mjs|php|proto|py|pyw|"
+        r"rb|rs|rst|sass|scala|scss|sh|sql|swift|toml|ts|tsv|tsx|txt|vue|xml|"
+        r"yaml|yml|zsh)(?::\d+(?:-\d+)?)?$",
+        value,
+        flags=re.IGNORECASE,
+    ))
 
 
 def path_is_allowed(candidate: str, allowed: list[str]) -> bool:
@@ -234,11 +257,16 @@ def boundary_violations(
         for value in dependencies
         if looks_like_path(value)
     ]
+    declared_paths = [
+        normalized_path(value.strip(), repo_root)
+        for value in re.findall(r"`([^`\n]+)`", brief)
+        if looks_like_path(value.strip())
+    ]
     own_section_root = normalized_path(
         str(Paths(repo_root, project_key).section_dir(artifact.section_key)),
         repo_root,
     )
-    allowed = owned + dependency_paths + [
+    allowed = owned + dependency_paths + declared_paths + [
         f"{own_section_root}/{name}" for name in SECTION_ARTIFACT_NAMES
     ]
 
