@@ -6,13 +6,13 @@ it is written to be unable to break a run: a telemetry failure prints an id and
 exits zero, because losing an observation is a nuisance and losing a dispatch is
 not.
 
-It is also the only place that knows semantic conventions, and that is
-deliberate. Neither agent CLI can be trusted to describe itself usefully:
+It also supplies the logical values consumed by the pinned semantic-convention
+module. Neither agent CLI can be trusted to describe itself usefully:
 
-  claude   emits OTLP spans with gen_ai.* attributes and accepts an inbound
+  claude   emits standard GenAI OTLP attributes and accepts an inbound
            traceparent, so its own spans can nest under ours.
   codex    emits OTLP too, but under a private codex.* event schema with no
-           gen_ai.* attributes at all, and much of it is marked log-only, which
+           standard GenAI attributes at all, and much of it is marked log-only, which
            a span-oriented backend simply drops.
 
 Neither knows what a project, a topology, a task or a role is - those exist only
@@ -24,7 +24,7 @@ same attributes.
 Those attributes are written twice, in two vocabularies, because the backends
 disagree and both are cheap:
 
-  gen_ai.*        OpenTelemetry GenAI semantic conventions - generic tooling
+  OpenTelemetry GenAI semantic conventions - generic tooling
   llm.* input.value output.value openinference.span.kind
                   OpenInference - what Phoenix renders natively, and what
                   Langfuse maps onto its own model
@@ -36,6 +36,7 @@ Jaeger shows all of it as plain attributes and needs neither.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import socket
@@ -45,6 +46,31 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import store  # noqa: E402
+
+
+def _load_semconv():
+    """Load the package or checkout mapping without assuming package imports."""
+    script_dir = Path(__file__).resolve().parent
+    candidates = (
+        (script_dir / "../semconv.py").resolve(),
+        (script_dir / "../../../src/pm_flow/semconv.py").resolve(),
+    )
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("_pm_flow_semconv", candidate)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        except Exception:  # noqa: BLE001 - telemetry must never break dispatch
+            continue
+        return module, str(candidate)
+    return None, None
+
+
+SEMCONV, SEMCONV_PATH = _load_semconv()
 
 # How much prompt and response text to keep. Enough to see what was asked and
 # what came back; not so much that the store becomes a copy of the repository.
@@ -159,7 +185,7 @@ def usage_from_codex_events(path) -> dict:
     """Token counts out of codex's JSONL event stream.
 
     codex reports usage nowhere else that pm-flow can reach: its response file
-    holds only the last message, and its OTLP output carries no gen_ai.*
+    holds only the last message, and its OTLP output carries no standard GenAI
     attributes. `codex exec --json` does emit a token_count event, so that is
     where the numbers come from. The last such event in the stream is the
     cumulative one.
@@ -242,22 +268,15 @@ def semconv_attributes(*, role=None, cli=None, model=None, thinking=None,
              {"model": model, "reasoning_effort": thinking, "cli": cli}.items()
              if v}))
 
-    # OpenTelemetry GenAI - generic tooling and anything reading the spec.
-    # Only a span that really is a model call gets an operation name; tagging a
-    # CHAIN as `chat` would make every run and tick look like a generation.
-    if span_kind == "AGENT":
-        put("gen_ai.operation.name", "invoke_agent")
-    elif span_kind == "LLM":
-        put("gen_ai.operation.name", "chat")
-    put("gen_ai.system", provider)
-    put("gen_ai.provider.name", provider)
-    put("gen_ai.agent.name", role)
-    put("gen_ai.request.model", model)
-    put("gen_ai.request.reasoning_effort", thinking)
-    put("gen_ai.usage.input_tokens", usage.get("input_tokens"))
-    put("gen_ai.usage.output_tokens", usage.get("output_tokens"))
-    # Langfuse maps this onto its cost model; nothing else reads it.
-    put("gen_ai.usage.cost", usage.get("cost_usd"))
+    if SEMCONV is not None:
+        attributes.update(SEMCONV.attributes_for({
+            "role": role,
+            "provider": provider,
+            "model": model,
+            "thinking": thinking,
+            "usage": usage,
+            "span_kind": span_kind,
+        }))
 
     # Grouping. Both Phoenix and Langfuse use session.id to collect a
     # conversation, which for this flow is one run.
@@ -351,6 +370,9 @@ def max_content_bytes() -> int:
 
 def insert_span(connection, *, span_id, trace_id, parent_span_id, name, kind,
                 started_at, attributes, run_id=None, attempt_id=None):
+    attributes = dict(attributes or {})
+    if SEMCONV is not None:
+        attributes["pm_flow.semconv.revision"] = SEMCONV.REVISION
     with connection:
         connection.execute(
             "INSERT OR REPLACE INTO spans"
