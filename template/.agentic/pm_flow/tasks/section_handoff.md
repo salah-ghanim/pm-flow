@@ -10,8 +10,9 @@ Read:
 
 {{CONTEXT_FILES}}
 
-Stay under 500 words and 8192 bytes. State what a reader needs in order to act;
-do not summarise the transcript or restate the brief.
+Aim for 400 words; 500 words or 8192 bytes is a hard cap that rejects the
+response. State what a reader needs in order to act; do not summarise the
+transcript or restate the brief.
 
 Your response text IS the handoff document: the driver validates and records
 it as `handoff.md`. Write no file; a reply that merely describes a document
