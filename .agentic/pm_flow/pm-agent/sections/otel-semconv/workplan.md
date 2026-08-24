@@ -27,6 +27,11 @@
   child uses the existing `spans.parent_span_id` and `spans.attempt_id`
   columns, so the `attempts` row is reached by
   `spans.parent_span_id = attempts.span_id` (equivalently `spans.attempt_id`).
+- `attributes_for` gates the usage names on the operation: `gen_ai.usage.*` is
+  emitted only when the operation resolves to `chat`. Today it emits them for
+  whatever kind it is handed (`semconv.py:55-56`), which is `AGENT` at
+  `attempt-end`, so the usage currently lands on the parent. The OpenInference
+  `llm.token_count.*` names stay exactly where they are - out of scope.
 
 ## Task T1 — Pin the revision and centralise the names
 
@@ -59,26 +64,94 @@
 
 ## Task T2 — Emit the invoke_agent → chat pair and prove it through a receiver
 
-- Status: pending.
+- Status: done — accepted cycle 003 (GO_WITH_CHANGES). A1, A2, A6, A7 met; A3
+  and A5 re-asserted on the receiver. Three negatives proven by review-side
+  mutation. Carried into T3: the child is built by the same
+  `semconv_attributes` call as the parent, so `llm.token_count.*`,
+  `pm_flow.cost_usd`, `pm_flow.cache_*`, `pm_flow.reasoning_tokens` and the
+  `input.value` / `output.value` bodies are now written twice per dispatch.
 - Outcome: `telemetry.py` records a `chat` child under each dispatch's
   `invoke_agent` span and puts the usage attributes on the child; the test
   starts a standard-library OTLP/HTTP receiver, drives one stub dispatch
-  through the public driver, exports with `trace_export.py --otlp`, and asserts
-  the tree, the usage equal to the `attempts` row, and the revision on every
+  through the public driver, and asserts on what the receiver decoded - the
+  tree, the usage equal to the `attempts` row, and the revision on every
   span. A5's revision switch is re-asserted on what the receiver sees rather
-  than on the stored attributes. With Docker present the A6 Jaeger command is
-  run and its response recorded; absent, the result says so.
+  than on the stored attributes. The cycle-scoped `git status --porcelain`
+  ownership assertion T1 left at the tail of the test is deleted. With Docker
+  present the A6 Jaeger command is run and its response recorded; absent, the
+  result says so.
 - Paths: `template/.agentic/pm_flow/telemetry.py`, `tests/otel_semconv_test.sh`.
-- Reuse: T1's mapping; the disposable-project setup from `tests/pm_flow_test.sh`;
-  `trace_export.py` unchanged.
+- Reuse: T1's mapping; `driver.zsh`'s own export path - `telemetry_autoexport`
+  (driver.zsh:728-735) posts to `config_setting telemetry otlp_endpoint` at run
+  end, so setting `{"telemetry":{"otlp_endpoint":…}}` in the disposable
+  project's `config.json` feeds the receiver with no test-side transport and no
+  edit outside owned paths; `install.sh` + `init-section` + a stub `claude` on
+  `PATH`, as `tests/pm_flow_test.sh:937-1010` sets up; `trace_export.py`
+  unchanged and called by path, since no `pm-flow trace` subcommand exists yet
+  (it belongs to `trace-commands`).
 - Acceptance IDs: A1, A2, A6, A7.
-- Validation: `zsh tests/otel_semconv_test.sh` exits 0; a mutation that drops
-  the `chat` child's usage attributes fails it; `zsh tests/pm_flow_test.sh` and
-  `zsh tests/store_ledger_test.sh` exit 0;
+- Validation: `zsh tests/otel_semconv_test.sh` exits 0 in a dirty checkout; a
+  mutation that drops the `chat` child's usage attributes fails it;
+  `zsh tests/pm_flow_test.sh` and `zsh tests/store_ledger_test.sh` exit 0;
   `curl -s 'http://localhost:16686/api/traces?service=pm-flow'` shows
   `invoke_agent` and `chat` for the exported trace, or Docker is recorded
   absent.
 - Depends on: T1.
+
+### Export route, decided by probe
+
+`trace_export.py --otlp` imports the OpenTelemetry SDK and exits with
+instructions when it is missing (`trace_export.py:183-194`). The SDK is not
+installed: `.venv/lib/python3*/site-packages` holds only `pm_flow`, and
+`tests/packaging-build-wheelhouse` - the pinned, hashed, `--no-index`
+wheelhouse `pm_flow_test.sh:167-182` builds from - carries hatchling and its
+build deps and nothing else. So the test cannot assume the wire route works and
+must not add a network install to a suite that is deliberately offline.
+
+Two routes into one receiver, the assertions identical:
+
+- SDK importable: the driver's own `telemetry_autoexport` POSTs protobuf to the
+  receiver; the test decodes it with `opentelemetry.proto`, which is present
+  whenever the exporter is.
+- SDK absent: after the same driver run, `trace_export.py --file … --replay`
+  writes OTLP/JSON from the real serialiser and the test POSTs those lines to
+  the same receiver at `/v1/traces`.
+
+The test prints which route ran. The fallback is a stated limit - the HTTP hop
+is the test's, the payload is pm-flow's - and it is not to be preferred when
+the SDK is there.
+
+## Task T3 — Stop the non-convention attributes being written twice per dispatch
+
+- Status: not started.
+- Outcome: only the attributes the pair genuinely needs on both spans are on
+  both. The `chat` child keeps `gen_ai.*`, `openinference.span.kind=LLM`,
+  `llm.model_name` / `llm.provider` / `llm.system` and its own identity; the
+  aggregatable and bulky ones stay on exactly one span —
+  `llm.token_count.prompt|completion|total`, `pm_flow.cost_usd`,
+  `pm_flow.cache_read_tokens`, `pm_flow.cache_write_tokens`,
+  `pm_flow.reasoning_tokens`, `input.value` / `input.mime_type` and
+  `output.value` / `output.mime_type`. `llm.token_count.*` stays on the
+  `invoke_agent` parent, as T2's contract already requires.
+- Why: T2 builds the child from the same `semconv_attributes(...)` call as the
+  parent (telemetry.py:624-630, 733-738), so every one of those is emitted on
+  both rows. A stock backend that sums `llm.token_count.*` or
+  `pm_flow.cost_usd` over a trace now reports double, which is the opposite of
+  the brief's objective, and the prompt and result bodies are stored and
+  exported twice per dispatch.
+- Paths: `template/.agentic/pm_flow/telemetry.py`, `tests/otel_semconv_test.sh`.
+- Reuse: `semconv_attributes`' existing keyword surface — the child call can
+  simply stop passing `usage` and `input_text` / `output_text`, or the function
+  can take one flag for the pm-flow-only block; whichever keeps the parent's
+  attributes byte-identical to today.
+- Acceptance IDs: A1, A2, A3, A7 (regression — the pair, the usage split and
+  the revision must all still hold).
+- Validation: `zsh tests/otel_semconv_test.sh` asserts on the receiver that
+  each of the named keys appears on exactly one span of the pair, that the
+  parent still carries `llm.token_count.prompt|completion` equal to the
+  `attempts` row, and that the child still carries `gen_ai.usage.*`;
+  `zsh tests/pm_flow_test.sh` and `zsh tests/store_ledger_test.sh` exit 0.
+- Depends on: T2.
 
 ## Integration and end-to-end validation
 
@@ -99,6 +172,13 @@
 - The conventions move between revisions; the pin confines the churn to one
   edit. Rollback: revert `telemetry.py` to its literal block; stored spans are
   unaffected.
+- The wire route depends on a package the repository does not ship, so on a
+  host without the SDK the strongest evidence available is the OTLP/JSON
+  fallback. Rollback: none needed; the fallback is the same payload.
+- A `chat` child is a new row every dispatch writes. No other suite reads the
+  `spans` table (`grep -rn 'FROM spans\|spans\b' tests/pm_flow_test.sh
+  tests/store_ledger_test.sh` returns nothing), so nothing counts rows and
+  breaks. Rollback: stop writing the child; the parent is unchanged.
 - A path-resolved module is one more way for an engine copy to be incomplete.
   The loader must be proven in all three layouts a run really uses: the source
   checkout, the installed package (`pm_flow/engine` beside `pm_flow/`), and an
