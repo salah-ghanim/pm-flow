@@ -3,8 +3,36 @@
 ## Current task
 
 - None. T1, T2, T3 and T4 are all accepted; T4 landed in cycle 005 and nothing
-  follows it. Every brief acceptance ID A1–A6 has evidence below. The section's
+  follows it. Every brief acceptance ID A1–A6 has evidence below, re-verified
+  independently in cycle 006 at the committed branch tip. The section's
   remaining work is its handoff.
+
+## Cycle 006 verification (PM, at the committed tip)
+
+The delivery is no longer uncommitted. `git worktree list` shows the section
+worktree at branch `pm-flow/pm-agent/agent-bindings`, tip `9a683f4`
+(`chore(agent-bindings): accepted cycle 005`), and `git status --porcelain`
+inside it is **empty** — cycles 003, 004 and 005 are all committed on the
+branch. Every acceptance command below was re-run by the PM against that tip,
+not against a developer's dirty tree:
+
+- **A1, A3, A4, A5, A6.** `zsh tests/agent_bindings_test.sh` → exit 0, the same
+  33 `PASS` lines the reviewer saw, `MCP targets one named section and leaves
+  the other unchanged` included.
+- **A2.** `zsh tests/pm_flow_test.sh` → exit 0, 10 `PASS`.
+  `zsh template/.agentic/pm_flow/tests/run.zsh` → exit 0, `all suites passed`,
+  totals 35/41/32/58/74, fail=0.
+  `zsh tests/packaged_layout_test.sh` → exit 0, 13 `PASS`.
+
+**Not merged into `main`, and that is the driver's call, not a section gap.**
+`git diff --stat main pm-flow/pm-agent/agent-bindings` still lists
+`src/pm_flow/mcp_server.py` (+188, absent from `main` entirely),
+`src/pm_flow/acp.py` (+41/-…), `template/.agentic/pm_flow/agent_exec.sh` and
+`tests/agent_bindings_test.sh` (+625). `git log main -- <owned paths>` stops at
+`2f74a23` (cycle 002); `dd6d60b` carried only this section's state and handoff.
+So the section's own acceptance is met on its branch, and nothing in `main`
+exercises the MCP server until the driver merges. No section task remains that
+could change this.
 
 ## Completed tasks and evidence
 
@@ -526,9 +554,10 @@
 - **`list_sections` rows carry `updated_at`.** `refresh_sections_index`
   (`pm_flow.sh:653-655`) emits `name | priority | status | summary | handoff |
   run_path | updated`, so whole-row equality is a real "did not move" test.
-- Cycle 004's delivery is intact and uncommitted in the section worktree at
-  `.pm-flow-worktrees/pm-flow/pm-agent/agent-bindings` (branch tip `67367b6`,
-  three modified files). `main` and the branch tip carry only through cycle 003.
+- (Superseded by the cycle-006 verification above: the delivery was uncommitted
+  at `67367b6` when cycle 005 was scoped; it is now committed at `9a683f4` with
+  a clean worktree. `main` still carries only through cycle 002 for the owned
+  paths, pending the driver's merge.)
 
 ## Blockers
 
@@ -538,7 +567,8 @@
 ## Next eligible task
 
 - None. Every workplan task is done and every brief acceptance ID A1–A6 has
-  evidence. The section's next action is its handoff.
+  evidence, re-verified in cycle 006 at the committed branch tip `9a683f4`.
+  The section's next action is its handoff.
 
 ## Residual notes for whoever reads this next
 
