@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -45,57 +46,44 @@ def ago(seconds: float) -> str:
     return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
 
 
-def ledger_rows(project: Path) -> list[dict]:
-    rows = []
-    for line in read(project / "runs" / "cost_ledger.tsv").splitlines():
-        parts = line.split("\t")
-        if len(parts) < 5:
-            continue
+def format_time(stamp: float) -> str:
+    if not stamp:
+        return "-"
+    return datetime.fromtimestamp(stamp, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def store_rows(project: Path) -> list[dict]:
+    """Read attempts without creating or migrating a missing store."""
+    db = project / "runs" / "pm_flow.db"
+    if not db.is_file():
+        return []
+    try:
+        connection = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
         try:
-            cost = float(parts[4]) if parts[4] else 0.0
-        except ValueError:
-            cost = 0.0
-        rows.append({"at": parts[0], "section": parts[1], "role": parts[2],
-                     "label": parts[3], "cost": cost,
-                     "path": parts[5] if len(parts) > 5 else ""})
-    return rows
-
-
-def cost_of(path: Path) -> float:
-    """Top level for a completed dispatch; nested in `result` for a failed one."""
-    try:
-        payload = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return 0.0
-    value = payload.get("total_cost_usd")
-    if isinstance(value, (int, float)):
-        return float(value)
-    inner = payload.get("result")
-    if isinstance(inner, str) and "total_cost_usd" in inner:
-        import re
-        match = re.search(r'"total_cost_usd":\s*([0-9.]+)', inner)
-        if match:
-            return float(match.group(1))
-    return 0.0
-
-
-def unledgered(project: Path, rows: list[dict]) -> float:
-    """The driver counts envelopes the ledger never saw. Match it, or the
-    headline disagrees with `pm_flow.sh status` and neither looks trustworthy."""
-    seen = {r["path"] for r in rows if r["path"]}
-    total = 0.0
-    for envelope in project.glob("**/*.response.json"):
-        if str(envelope) not in seen:
-            total += cost_of(envelope)
-    return total
-
-
-def parse_iso(stamp: str) -> float:
-    try:
-        return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=timezone.utc).timestamp()
-    except ValueError:
-        return 0.0
+            return [
+                {
+                    "at": format_time(row["started_at"]),
+                    "started": row["started_at"] or 0.0,
+                    "section": row["section"],
+                    "role": row["role_key"],
+                    "label": row["label"] or "-",
+                    "cost": float(row["cost"]),
+                    "input_tokens": row["input_tokens"],
+                    "output_tokens": row["output_tokens"],
+                }
+                for row in connection.execute(
+                    "SELECT a.started_at, COALESCE(t.key, '(project)') AS section,"
+                    " a.role_key, a.label, COALESCE(a.cost_usd, 0) AS cost,"
+                    " a.input_tokens, a.output_tokens FROM attempts a"
+                    " LEFT JOIN tasks t ON t.id = a.task_id"
+                    " ORDER BY a.started_at, a.id"
+                )
+            ]
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return []
 
 
 def in_flight(project: Path, last_ledger_ts: float):
@@ -206,9 +194,9 @@ def driver_alive() -> bool:
 
 
 def render(project: Path) -> str:
-    rows = ledger_rows(project)
-    spent = sum(r["cost"] for r in rows) + unledgered(project, rows)
-    last_ts = max((parse_iso(r["at"]) for r in rows), default=0.0)
+    rows = store_rows(project)
+    spent = sum(r["cost"] for r in rows)
+    last_ts = max((r["started"] for r in rows), default=0.0)
     budget = {}
     try:
         budget = json.loads((FLOW / "config.json").read_text()).get("budget", {})
@@ -245,7 +233,7 @@ def render(project: Path) -> str:
     latest: dict[str, float] = {}
     for r in rows:
         per_section[r["section"]] = per_section.get(r["section"], 0.0) + r["cost"]
-        latest[r["section"]] = max(latest.get(r["section"], 0.0), parse_iso(r["at"]))
+        latest[r["section"]] = max(latest.get(r["section"], 0.0), r["started"])
 
     out.append(f"{BOLD}SECTIONS{RESET}")
     sections = sorted(project.glob("sections/*/"), key=lambda p: p.name)
@@ -289,8 +277,10 @@ def render(project: Path) -> str:
 
     out.append(f"{BOLD}RECENT{RESET}")
     for r in rows[-8:][::-1]:
+        tokens = (f"{r['input_tokens'] if r['input_tokens'] is not None else '-'}in/"
+                  f"{r['output_tokens'] if r['output_tokens'] is not None else '-'}out")
         out.append(f"{DIM}{r['at'][11:16]}{RESET}  {r['section']:<26}"
-                   f"{r['role']:<11}{r['label'][:38]:<38}${r['cost']:.2f}")
+                   f"{r['role']:<11}{r['label'][:30]:<30}${r['cost']:.2f}  {tokens}")
     return "\n".join(out)
 
 

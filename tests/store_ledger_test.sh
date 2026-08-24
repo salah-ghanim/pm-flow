@@ -12,6 +12,9 @@ done
 
 REPO_ROOT="$(cd -P -- "$(dirname -- "$0")/.." && pwd -P)"
 COST="$REPO_ROOT/template/.agentic/pm_flow/cost.py"
+TELEMETRY="$REPO_ROOT/template/.agentic/pm_flow/telemetry.py"
+WATCH="$REPO_ROOT/template/.agentic/pm_flow/watch.py"
+CODEX_EVENTS="$REPO_ROOT/tests/fixtures/codex_events_real.jsonl"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/store-ledger-test.XXXXXX")"
 TEST_ROOT="$(cd -P "$TEST_ROOT" && pwd -P)"
 case "$TEST_ROOT" in
@@ -68,6 +71,8 @@ printf '%s\n' '{"total_cost_usd": 0.625}' > "$BETA_EXTRA"
 } > "$LEDGER"
 
 before="$(python3 "$COST" total "$PROJECT_DIR" "$LEDGER")"
+legacy_alpha="$(python3 "$COST" total "$PROJECT_DIR" "$LEDGER" alpha)"
+legacy_beta="$(python3 "$COST" total "$PROJECT_DIR" "$LEDGER" beta)"
 first_import="$(python3 "$COST" import "$PROJECT_DIR")"
 assert_eq "$first_import" "imported=6" "first import count"
 
@@ -100,5 +105,76 @@ dispatch_counts="$(python3 -c \
   'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(",".join(str(row[0]) for row in c.execute("SELECT COUNT(*) FROM attempts GROUP BY response_path ORDER BY response_path")))' \
   "$DB")"
 assert_eq "$dispatch_counts" "1,1,1,1,1,1" "one attempt per response path"
+
+# Exercise the new arity from a store-free legacy project: it must silently
+# import, print only the number, and agree with the legacy arity on this fixture.
+rm -f -- "$DB" "$DB-shm" "$DB-wal"
+new_total="$(python3 "$COST" total "$PROJECT_DIR")"
+new_alpha="$(python3 "$COST" total "$PROJECT_DIR" alpha)"
+new_beta="$(python3 "$COST" total "$PROJECT_DIR" beta)"
+assert_eq "$new_total" "$before" "new total matches legacy total"
+assert_eq "$new_total" "12.1250" "fixture total"
+assert_eq "$new_alpha" "$legacy_alpha" "new alpha matches legacy alpha"
+assert_eq "$new_alpha" "3.7500" "fixture alpha total"
+assert_eq "$new_beta" "$legacy_beta" "new beta matches legacy beta"
+assert_eq "$new_beta" "8.3750" "fixture beta total"
+
+rm -- "$LEDGER"
+assert_eq "$(python3 "$COST" total "$PROJECT_DIR")" "$new_total" \
+  "deleting imported TSV does not change total"
+printf '2026-01-02T03:04:05Z\talpha\tdeveloper\tfirst\t999.000000\t%s\n' \
+  "$ALPHA_ONE" > "$LEDGER"
+assert_eq "$(python3 "$COST" total "$PROJECT_DIR")" "$new_total" \
+  "inflating imported TSV does not change total"
+
+# Add a live attempt through the real telemetry commands and real Codex event
+# fixture. Its response path is already in attempts, so import must not absorb
+# the same envelope a second time.
+CODEX_RESPONSE="$PROJECT_DIR/sections/alpha/cycles/002/codex.response.json"
+mkdir -p "${CODEX_RESPONSE:h}"
+printf '%s\n' '{"pm_backend":"codex","total_cost_usd":0.04}' > "$CODEX_RESPONSE"
+run_output="$(python3 "$TELEMETRY" --db "$DB" run-start \
+  --project legacy-project --run-key store-ledger-test)"
+run_id="$(printf '%s\n' "$run_output" | sed -n 's/^run_id=//p')"
+attempt_output="$(python3 "$TELEMETRY" --db "$DB" attempt-start \
+  --run "$run_id" --role developer --task alpha --label codex-one --cli codex)"
+attempt_id="$(printf '%s\n' "$attempt_output" | sed -n 's/^attempt_id=//p')"
+python3 "$TELEMETRY" --db "$DB" attempt-end --attempt "$attempt_id" \
+  --response "$CODEX_RESPONSE" --events "$CODEX_EVENTS" --cost-usd 0.04
+
+report="$(python3 "$COST" report "$PROJECT_DIR")"
+report_total="$(python3 "$COST" total "$PROJECT_DIR")"
+report_alpha="$(python3 "$COST" total "$PROJECT_DIR" alpha)"
+report_beta="$(python3 "$COST" total "$PROJECT_DIR" beta)"
+[[ "$report" == *$'alpha\t'"$report_alpha"* ]] || \
+  fail "report alpha total differs from total command"
+[[ "$report" == *$'beta\t'"$report_beta"* ]] || \
+  fail "report beta total differs from total command"
+[[ "$report" == *$'TOTAL\t'"$report_total"* ]] || \
+  fail "report project total differs from total command"
+printf '%s\n' "$report" | grep -F \
+  $'ATTEMPT\t' | grep -F \
+  $'\talpha\tdeveloper\tcodex-one\tcodex\t0.0400\t13937\t5' >/dev/null || \
+  fail "report omits live Codex attempt fields"
+assert_eq "$(python3 "$COST" import "$PROJECT_DIR")" "imported=0" \
+  "live attempt envelope is not re-imported"
+
+WATCH_FLOW="$TEST_ROOT/watch-flow"
+mkdir -p "$WATCH_FLOW"
+cp "$WATCH" "$WATCH_FLOW/watch.py"
+ln -s "$PROJECT_DIR" "$WATCH_FLOW/legacy-project"
+watch_output="$(PM_FLOW_PROJECT=legacy-project python3 "$WATCH_FLOW/watch.py")"
+watch_total="$(python3 "$COST" total "$PROJECT_DIR")"
+watch_spend="$(python3 -c 'import sys; print(f"${float(sys.argv[1]):.2f}")' \
+  "$watch_total")"
+[[ "$watch_output" == *"$watch_spend"* ]] || fail "watch omits store spend"
+[[ "$watch_output" == *"13937"* ]] || fail "watch omits Codex input tokens"
+
+mkdir -p "$WATCH_FLOW/empty-project"
+PM_FLOW_PROJECT=empty-project python3 "$WATCH_FLOW/watch.py" >/dev/null
+[[ ! -e "$WATCH_FLOW/empty-project/runs/pm_flow.db" ]] || \
+  fail "watch created a store for an empty project"
+assert_eq "$(grep -c cost_ledger "$WATCH" || true)" "0" \
+  "watch has no legacy ledger references"
 
 printf 'store ledger tests passed\n'
