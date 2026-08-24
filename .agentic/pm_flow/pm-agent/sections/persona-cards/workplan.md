@@ -117,49 +117,151 @@
 
 ## Task T3 — Identity across projects and in comparisons
 
-- Status: pending.
+- Status: complete (cycle 003, GO_WITH_CHANGES).
 - Outcome: export from A and install into B is lossless; two same-name
-  different-author personas list distinctly; a `compare --report` fixture
-  names each card per arm.
+  different-author personas list distinctly and are separately addressable;
+  the card each arm of a `compare --report` actually ran is resolvable from
+  the rows the report reads.
 - Paths: `src/pm_flow/persona_card.py`, `template/.agentic/pm_flow/catalog.py`,
   `tests/persona_cards_test.sh`.
-- Reuse: pack export; `topology-compare`'s report persona field (read only;
-  if the field is absent the test asserts on the store rows the report reads).
-- Also carried from T2, because `persona_card.py` is writable again here:
-  return the rejected field path from `_reject_forbidden_fields`
-  (`persona_card.py:35-49`) — as an attribute on `PersonaCardError`, so the
-  contract message is unchanged — and delete
-  `catalog.py:forbidden_card_field_path`, which currently re-implements the
-  same depth-first walk purely to produce the install diagnostic. Two walks
-  that must agree on which field was rejected is the drift risk. Rename the
-  `persona_card(raw_metadata)` accessor (`catalog.py:1228`) at the same time;
-  it collides by name with the module object `read_pack` binds locally.
 - Acceptance IDs: A3, A4.
-- Validation: `zsh tests/persona_cards_test.sh` — two-project round trip with
-  field-by-field equality; author/name collision matrix; a mutation dropping
-  author makes the two personas collide and fails.
 - Depends on: T2.
+
+### The identity rule, settled
+
+- Card identity is `(key, card author)`; an uncarded persona's identity is
+  `(key, no card)`. Group in SQL on
+  `COALESCE(json_extract(p.metadata,'$.card.author'), '')`, not on
+  `p.author`. `p.author` holds the *pack* author for an uncarded row, so
+  grouping on it would split two versions of one uncarded persona the moment a
+  pack changed hands — and `sections/persona-packs/cycles/011/assertions.py:188`
+  asserts `persona list` omits the superseded `H1`. The `COALESCE`-to-`''`
+  form keeps every uncarded persona grouped exactly as it is today, which is
+  what protects A5 and that harness.
+- `persona list` (`catalog.py:1692-1725`) currently collapses on
+  `MAX(id) … WHERE b.key = p.key`, so two same-key personas show as one row and
+  the table has no author column at all. One row per identity, newest version
+  within it, plus an `AUTHOR` column printed as stored — claim label intact.
+- `persona show` (`catalog.py:1728`) and `persona swap`
+  (`swap_seat_persona` → `newest_persona`, `catalog.py:329-337`) both resolve a
+  bare key to the newest row. With two card identities under one key that is a
+  silent wrong answer, so both take `--author` and refuse an ambiguous key by
+  naming the candidates. A key with one identity resolves exactly as it does
+  now, so no existing behaviour moves and A1's evidence stands.
+
+### Export, and why the round trip is lossless by construction
+
+- `persona export <key> [--author A] --out <dir>` writes an installable pack:
+  `persona-pack.json`, `personas/<key>.md` carrying the stored `body` verbatim,
+  and `cards/<key>.card.json` from `persona_card.export`, which validates on the
+  way out. An uncarded persona exports without a `card` entry.
+- `content_hash` is `store.content_hash(key, layer, body)` (`catalog.py:120`) —
+  body only, not the file text and not the frontmatter. So the exported pack
+  reinstalls into project B under the identical hash, and A4's "identical in
+  every field" is a comparison of two store rows rather than of a row against
+  the fixture that produced it.
+
+### The compare half of A3, and the gap it leaves
+
+- `compare.py:arm_personas` (`compare.py:509-525`) prints `role=key` from
+  `attempts.persona_stack`, and `telemetry.py:573-580` writes that stack as
+  `{key, layer, content_hash}`. Neither file is in this section's owned paths,
+  so the report's printed column cannot be made to say the card here. The brief
+  lists `topology-compare`'s report persona field under *Interfaces consumed*,
+  which is the same reading.
+- What is reachable is the whole substance: `personas` is
+  `UNIQUE (key, content_hash)` (`store.py:99`), so the `(key, content_hash)` the
+  stack already records addresses exactly one row and therefore exactly one
+  card. T3 delivers that resolution in `catalog.py` and proves on a real
+  two-arm report that the two arms resolve to different cards. Naming the card
+  in the column itself is a one-line change to `arm_personas` for whichever
+  section owns `compare.py` — recorded the same way as the missing
+  `pm_flow.sh persona` wrapper, not silently dropped.
+
+### Carried from T2, now that `persona_card.py` is writable
+
+- Attach the rejected field's path to `PersonaCardError` in
+  `_reject_forbidden_fields` (`persona_card.py:35-49`) — the message itself is
+  unchanged, because brief A2 pins it — and delete
+  `catalog.py:forbidden_card_field_path` (`catalog.py:953-971`), which
+  re-implements the same depth-first walk only to produce the install
+  diagnostic. Two walks that must agree on which field was refused is the drift
+  risk.
+- Rename the `persona_card(raw_metadata)` accessor (`catalog.py:1228`); it
+  collides by name with the module object `read_pack` binds locally
+  (`catalog.py:1038`).
+- Settle `persona show`'s shape before A3 compares two personas side by side:
+  it prints `tags:` for an uncarded persona and omits it for a carded one.
+- Take A1's no-dispatch counts against the store with real attempts that this
+  task's compare fixture produces, rather than the `0`/`0` T2 could observe.
+
+### Validation
+
+- `zsh tests/persona_cards_test.sh`: two-project export/install round trip
+  compared field by field with set-equality guards; a same-key
+  different-author matrix through `persona list`, `show` and `swap`; and a real
+  two-arm `compare report` whose arms resolve to distinct cards.
+- The two-arm fixture reuses proven machinery rather than seeding rows:
+  `tests/topology_compare_test.sh:159-181` installs `tests/fixtures/stub_success.zsh`
+  as the `claude` on PATH and drives real ticks, and
+  `sections/persona-packs/cycles/011/acceptance.sh` does the same for a single
+  tick. `compare report <run-a> <run-b>` (`compare.py:660-666`) needs only two
+  runs under two topologies in one project store.
 
 ## Task T4 — Closeout
 
 - Status: pending.
-- Outcome: packaged cards ship for the default personas; both suites pass.
+- Outcome: packaged cards ship for the default personas; both suites pass, and
+  the suite validates the tree it is run from rather than whichever
+  `pm_flow.persona_card` happens to be importable.
 - Paths: `template/.agentic/pm_flow/cards/**`, `tests/persona_cards_test.sh`.
 - Reuse: T1–T3.
 - Acceptance IDs: A7.
 - Validation: `zsh tests/persona_cards_test.sh` and `zsh tests/pm_flow_test.sh`
-  exit 0.
+  exit 0, run twice: once with the repo venv's `python3` on PATH and once
+  without it. Both must agree.
 - Depends on: T3.
+
+### Carried from T3 — the suite is not hermetic
+
+- `run_catalog` (`tests/persona_cards_test.sh:207-215`) invokes plain `python3`
+  and unsets only `PM_FLOW_*`. `load_persona_card_module`
+  (`catalog.py:998-1021`) tries `import pm_flow.persona_card` first, so under
+  the repo's own venv — an editable install rooted at the *main checkout* —
+  a worktree's `catalog.py` validates the main checkout's `persona_card.py`.
+  Every T3 assertion that depends on a `persona_card.py` change therefore
+  passes or fails on which interpreter is first on PATH, not on the tree under
+  review. Observed at cycle 003 review: exit 1 under the venv `python3`, exit 0
+  under `/opt/homebrew/bin/python3`, same worktree.
+- Fix inside owned paths: give `run_catalog`/`run_catalog_db` an explicit
+  `PYTHONPATH="$ROOT/src"` so the tree under test wins, and add `-u PYTHONPATH`
+  to the two `python3 -S` isolated invocations (`:639-654`) so the fail-closed
+  case still sees no module. The line-474 copy of `persona_card.py` into the
+  wheel-layout position is dead as long as the import branch wins; keep it only
+  if the wheel layout is asserted separately.
+- This is a review-environment trap, not a shipping defect: on merge the two
+  copies of `persona_card.py` become one file and the skew disappears. It will
+  recur for every future cycle that edits `src/pm_flow/**` and is reviewed in a
+  worktree, which is every cycle.
 
 ## Integration and end-to-end validation
 
-- T3 is where scenario 3 is observable end to end.
+- T3 is where scenario 3 is observable end to end, up to the ownership
+  boundary recorded under T3: two same-name different-author personas install,
+  list, show and swap distinctly, and a real two-arm `compare report` resolves
+  to a different card per arm. The report's own `personas` column still prints
+  `role=key`, because `compare.py` is not an owned path.
 
 ## Risks and rollback
 
 - Presenting provenance as verified is the failure to avoid; the label is an
   acceptance requirement. Cards are optional, so disabling parsing leaves
   every persona working.
+- The card cannot reach the comparison report's printed column from inside
+  this section. `compare.py:arm_personas` renders `role=key` and
+  `telemetry.py` writes the stack it reads; both are outside owned paths. The
+  section delivers the resolution and records the one-line gap. This is an
+  ownership boundary, not an external dependency: nothing waits on anyone.
 - The brief spells the scenarios `pm-flow persona …`. That spelling does not
   exist: `pm_flow.sh` has no `persona` subcommand and neither does
   `src/pm_flow/cli.py`, and both are outside owned paths. Every validation in

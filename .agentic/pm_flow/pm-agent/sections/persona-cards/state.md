@@ -2,9 +2,79 @@
 
 ## Current task
 
-- T3 — identity across projects and in comparisons. T2 accepted cycle 002.
+- T4 — closeout (A7). T3 accepted cycle 003 (GO_WITH_CHANGES); the one change
+  is carried into T4 and recorded under `Carried into later tasks`.
 
 ## Completed tasks and evidence
+
+- T3 — identity across projects and in comparisons. Acceptance IDs A3, A4, plus
+  A1 re-observed against a store with real attempts. Delivered in
+  `src/pm_flow/persona_card.py`, `template/.agentic/pm_flow/catalog.py` and
+  `tests/persona_cards_test.sh`; `git diff --stat HEAD` in the developer
+  worktree lists exactly those three paths, and the persona-packs harness's own
+  guard independently printed the same three, so `compare.py`, `telemetry.py`,
+  `store.py` and `FORBIDDEN_KEYS` are untouched.
+  - `zsh tests/persona_cards_test.sh` re-run by the reviewer against the
+    developer worktree — exit 0, every A3/A4/A1 assertion passing, when
+    `python3` is not the repo venv's. Under the venv's `python3` the same tree
+    exits 1 on the carried-debt diagnostic only; cause and fix are recorded
+    under `Carried into later tasks` and in the workplan under T4.
+  - A3, listing and addressing. Two packs each install a `reviewer` with a
+    different card author; `persona list` prints two `reviewer` rows carrying
+    `unverified claim: Alice Example` and `unverified claim: Bob Example`, and
+    the uncarded `plain-persona` still occupies exactly one row.
+    `persona show reviewer` exits non-zero naming both candidates and pointing
+    at `--author`; `--author 'Alice Example'` (unlabelled) and
+    `--author 'unverified claim: Bob Example'` (labelled) each print that
+    author's card and never the other's. `persona swap` behaves the same way on
+    a real seat, and `persona export` refuses the ambiguous key before creating
+    the output directory.
+  - A3, comparison. A real two-arm `compare report` over two topologies in one
+    project store, driven by real ticks against `tests/fixtures/stub_success.zsh`
+    installed as `claude`. The test reads each arm's base `(key, content_hash)`
+    out of `attempts.persona_stack` and resolves each through `catalog.py`:
+    `resolved=reviewer|fbd35c7e…|unverified claim: Alice Example|1.4.0` and
+    `resolved=reviewer|57069211…|unverified claim: Bob Example|2.7.0` — same
+    key, different hash, author and version. The report's own line reads
+    `pm=reviewer` on both arms, asserted rather than implied, so the
+    `arm_personas` gap is evidenced.
+  - A1 re-observed. `SELECT COUNT(*)` on `attempts` and `spans` against that
+    compare store: `2 4` before `persona show` and `2 4` after. Non-zero and
+    equal, which is what cycle 002's `0`/`0` could not show.
+  - A4. `persona export reviewer --author 'Alice Example'` from store A, then
+    `persona add` of that directory into store B, with no hand-editing:
+    `metadata.card` compared field by field with top-level and per-skill
+    set-equality guards, skill order asserted by `id` sequence, and
+    `content_hash` identical across the two stores. An uncarded persona exports
+    with `tags` present and no `card` entry.
+  - Carried debt closed. `forbidden_card_field_path` is gone from `catalog.py`;
+    `_reject_forbidden_fields` attaches the child path to `PersonaCardError` and
+    `read_pack` reads it, with the contract message byte-identical. The
+    `persona_card(raw_metadata)` accessor is renamed `stored_persona_card`, so
+    it no longer collides with the module `read_pack` binds. `persona show`
+    prints `tags:` in both branches above the card block, so the two arms of A3
+    compare like for like.
+  - Regressions. `sections/persona-packs/cycles/011/regressions.sh` exit 0
+    (`cycle_008/009/010_exit=0`) and `acceptance.sh` exit 0
+    (`assertions_exit=0`), both run by the reviewer with the developer worktree
+    as `git rev-parse --show-toplevel`, so `assertions.py:188`'s "list omits H1"
+    still holds with the new `AUTHOR` column in place. `zsh tests/pm_flow_test.sh`
+    exit 0, ten `PASS:` lines.
+  - All four required mutations reproduced by the reviewer on throwaway copies
+    under `$TMPDIR`, so no implementation source was edited in place. (1)
+    grouping reverted to key-only in `persona list` — exit 1, `persona list
+    identity rows: expected 2 reviewer rows, got 1`. (2) the ambiguity refusal
+    replaced by the newest row in `persona show` — exit 1, `ambiguous persona
+    show returned the wrong card:` followed by Bob's full card, so the assertion
+    binds the returned card and not merely a missing message. (3) `persona
+    export` dropping `provenance` — exit 1, `AssertionError: round-trip
+    top-level card fields changed`, so the comparison is not shallow. (4)
+    `_reject_forbidden_fields` attaching the parent path — exit 1, `forbidden
+    endpoint refusal omitted its field path: … card field path: skills[0]`, so
+    the single walk is what produces the diagnostic. `md5 -q` of both source
+    files in the worktree after all mutation runs matched the pre-run values
+    (`b118bd4d214988aba6a1bc92b2324075`,
+    `ebe8d7e8156701a132f74032a686d79a`).
 
 - T2 — install and display. Acceptance IDs A1, A2 (install half), A5.
   Delivered in `template/.agentic/pm_flow/catalog.py` and
@@ -122,6 +192,24 @@
 - The card is plain JSON, not Markdown frontmatter, so `split_frontmatter`
   (`catalog.py:62`) is not reused. Revisit only if T2 needs a card inside a
   persona Markdown file.
+- Card identity is `(key, card author)`, and the grouping key in SQL is
+  `COALESCE(json_extract(p.metadata,'$.card.author'), '')` — never `p.author`,
+  which holds the pack author on an uncarded row. Every uncarded persona
+  therefore groups exactly as it does today, which is what keeps A5 and
+  `persona-packs` cycle 011's "list omits H1" assertion true.
+- A bare key that resolves to two card identities is refused by `persona show`
+  and `persona swap` rather than answered with the newest row; `--author`
+  selects. A key with one identity is unchanged, so no existing behaviour
+  moves.
+- A4's round trip goes through a real exported pack, not a hand-built fixture.
+  `content_hash` is `store.content_hash(key, layer, body)` (`catalog.py:120`) —
+  body only — so an exported pack reinstalls under the identical hash and the
+  comparison is row against row.
+- The comparison report's printed persona column stays `role=key` this section.
+  `compare.py:arm_personas` and `telemetry.py`'s stack writer are outside owned
+  paths. What is delivered is the resolution from the `(key, content_hash)` the
+  stack already records to the card, and the one-line `arm_personas` gap is
+  recorded for whichever section owns `compare.py`.
 - How `catalog.py` reaches `persona_card` is settled, not left to T2's
   judgement: try `import pm_flow.persona_card`, then
   `Path(__file__).resolve().parent.parent / "persona_card.py"` (wheel:
@@ -133,32 +221,43 @@
 
 ## Carried into later tasks
 
-- T3 — the vestigial `path` in `_reject_forbidden_fields`
-  (`persona_card.py:35-49`) is still vestigial. Cycle 002's assignment asked to
-  resolve it but did not make `persona_card.py` writable, so the developer took
-  the only reachable option and produced the field path a second time, in
-  `catalog.py:forbidden_card_field_path`. That duplicate walk must stay in step
-  with the module's own walk or the install diagnostic will name a different
-  field from the one that was refused. T3 owns `persona_card.py`: attach the
-  path to `PersonaCardError` — leaving the message itself unchanged, because
-  brief A2 pins it — and delete the catalog copy. This was my drafting error,
-  not the developer's; do not re-issue a rejection condition whose fix is
-  outside the writable paths of the same assignment.
-- T3 — `catalog.py:1228` defines an accessor `persona_card(raw_metadata)` while
-  `read_pack` binds the *module* to the same name locally
-  (`catalog.py:1038`). Both work today only because `read_pack` never calls the
-  accessor. Rename the accessor when T3 touches the file.
-- T3 — mutation A (cycle 001) showed a top-level `url` is caught by the card
+- T4, the accepted change from T3's GO_WITH_CHANGES — the suite is not
+  hermetic. `run_catalog` (`tests/persona_cards_test.sh:207-215`) runs plain
+  `python3`, and `load_persona_card_module` (`catalog.py:998-1021`) tries
+  `import pm_flow.persona_card` first. The repo venv is an editable install
+  rooted at the *main checkout*, so a worktree's `catalog.py` validates the main
+  checkout's `persona_card.py`, not the one under review. Fix inside owned
+  paths: set `PYTHONPATH="$ROOT/src"` in `run_catalog`/`run_catalog_db`, and add
+  `-u PYTHONPATH` to the two `python3 -S` isolated invocations
+  (`:639-654`) so the fail-closed case still sees no module. Details and the
+  observed exits are in the workplan under T4.
+- T4 — the new `AUTHOR` column prints `p.author` as stored, which is right for a
+  carded row (`unverified claim: …`) but shows an uncarded row's *pack* author
+  bare, next to labelled ones. This is the shape cycle 003's assignment asked
+  for and matches `persona show`'s uncarded branch, so it is not the developer's
+  drift; it is mine to settle. Brief non-goal 2 is "presenting an unverified
+  author as a trust signal", and an unlabelled column entry beside labelled ones
+  reads as the verified case. Decide in T4: either label the pack author on
+  display too, or head the column so the distinction is legible. Do not strip
+  the card label to make them match.
+- T4 — `cmd_persona_list` carries two queries. `has_cards` picks the identity
+  grouping when any card author exists and `cardless_persona_list_rows`
+  otherwise, but `COALESCE(json_extract(…),'')` collapses to the legacy key
+  grouping on an all-uncarded store, so the branches cannot differ. Both are
+  exercised today (this suite takes the carded branch, persona-packs cycle 011
+  the cardless one) and both pass, so this is redundancy, not a bug — collapse
+  to one query in T4 rather than keeping two paths that must agree.
+- T4 — `cmd_persona_export` catches `(OSError, PackError)` but
+  `card_module.export` raises `PersonaCardError`, which is a `ValueError`. A
+  stored card was validated on the way in so this is close to unreachable, but
+  if it fired the operator would get a traceback and a half-written directory
+  instead of a `persona export: …` line. Widen the except, or say why not.
+  Related: the `assert set(entry).issubset(PERSONA_ENTRY_KEYS)` guard in that
+  function is a developer check in a shipped path.
+- T4 — mutation A (cycle 001) showed a top-level `url` is caught by the card
   vocabulary allowlist even with `FORBIDDEN_CARD_KEYS` emptied of it. The two
   checks overlap at the top level; only the nested path is uniquely the walk's.
   Keep the nested case in every future forbidden-field assertion.
-- T3 — A1's no-dispatch observation currently reads `0`/`0` on both sides. It
-  does detect a dispatch (a dispatch would move `attempts`), but it cannot tell
-  a working count from an empty table. When T3 has a store with real attempts
-  in it, take the counts there instead.
-- T3 — `persona show` prints `tags:` for an uncarded persona and omits it for a
-  carded one. A3 compares two same-name personas side by side, so settle one
-  output shape before writing that assertion.
 - T4 — `tests/persona_cards_test.sh:85` asserts the literal string
   `"Transcribed"` in the schema's `acquisition` header. That couples the test
   to one wording, so a later byte-exact acquisition would fail a test on a
@@ -183,9 +282,11 @@
   none of it section state — drop rather than commit: from cycle 001,
   `sections/persona-cards/review_probe.sh` and
   `sections/persona-cards/.review_backup/`; from cycle 002,
-  `sections/persona-cards/review_002_{run,probe,mutations,mut1_tail,suite}.sh`.
-  Cycle 002's reviewer mutated an isolated copy of the tree under `/tmp`, so
-  no `.review_backup/` of implementation source was needed this time.
+  `sections/persona-cards/review_002_{run,probe,mutations,mut1_tail,suite}.sh`;
+  from cycle 003, `sections/persona-cards/cycles/003/probe_*.sh` (six files) and
+  `sections/persona-cards/scope_005_probe.sh` if it is still present. Cycles 002
+  and 003 both mutated isolated copies under `$TMPDIR`, so no `.review_backup/`
+  of implementation source was needed.
 - Running `sections/persona-packs/cycles/011/acceptance.sh` rewrites that
   cycle's own `transcripts/`, `prompt-v1.txt` and `prompt-v2.txt` in the main
   checkout (`acceptance.sh:348-352`). The reviewer's run left them
@@ -196,7 +297,68 @@
   lines from the dispatch after cycle 001. A quarantine, not a section failure;
   no evidence in this file depends on it.
 
-## Probes run this cycle (002 scope)
+## Probes run reviewing cycle 003
+
+- `python3` on PATH in this repo is `.venv/bin/python3`, and
+  `from pm_flow import persona_card` there resolves to
+  `/Users/salah/code/personal/pm-flow/src/pm_flow/persona_card.py` — the main
+  checkout, not the worktree under review. That file carries no
+  `error.path = child_path`, which is exactly why the worktree's suite loses the
+  `card field path:` line under the venv interpreter and keeps it under
+  `/opt/homebrew/bin/python3`. Same tree, two exits. Any future review of a
+  change to `src/pm_flow/**` hits this.
+- `PYTHONPATH="$ROOT/src"` alone is not the fix: it also reaches the two
+  `python3 -S` invocations at `:639-654`, which then find the module and the
+  fail-closed assertion silently stops holding. The fix needs `-u PYTHONPATH`
+  there too.
+- `git rev-parse --show-toplevel` from inside a worktree returns the worktree,
+  so `sections/persona-packs/cycles/011/{acceptance,regressions}.sh` can be run
+  against a developer worktree by `cd`-ing there first; `.agentic/` is not
+  tracked, so the harness itself only exists in the main checkout.
+- `grep` for `swap_seat_persona|newest_persona|forbidden_card_field_path` across
+  `template/`, `src/` and `tests/` — every caller of the two changed signatures
+  is inside `catalog.py`, and `forbidden_card_field_path` has no survivors.
+- `SWAP_OVERRIDE_KEY` / `layer_overrides` have exactly three readers, all in
+  `catalog.py` (`:453`, `:817`, and `override_persona`). The new
+  `{"key", "author"}` override value therefore reaches nothing outside the file,
+  and `layer_overrides` still accepts the legacy bare-string form, so stores
+  written before this cycle keep swapping.
+
+## Probes run scoping cycle 003
+
+- `catalog.py:1692-1699` — `persona list` collapses on
+  `MAX(id) … WHERE b.key = p.key` and selects no author column at all. Two
+  same-key personas show as one row today; A3's listing half is real work, not
+  a formatting change.
+- `catalog.py:329-337`, `catalog.py:497` — `swap_seat_persona` resolves a bare
+  key through `newest_persona`, which is `ORDER BY id DESC LIMIT 1`. With two
+  card identities under one key an operator cannot choose which one a seat
+  runs, and gets no warning.
+- `catalog.py:120` — `content_hash` is `store.content_hash(key, layer, body)`.
+  Body only: not the file text, not the frontmatter. An exported pack carrying
+  the stored body reinstalls under the identical hash.
+- `store.py:99` — `personas` is `UNIQUE (key, content_hash)`, so the pair the
+  persona stack records addresses exactly one row and one card.
+- `telemetry.py:563-580` — `persona_stack` is written as
+  `{key, layer, content_hash}` per layer, from `seat_personas`.
+  `compare.py:509-525` (`arm_personas`) reads it and prints `role=key` for the
+  `base` layer only. Both files are outside owned paths.
+- `compare.py:660-666` — `compare report <run-a> <run-b>` needs only two runs
+  under two topologies in one project store; it drives no ticks itself.
+- `tests/topology_compare_test.sh:159-181` — real compare arms run against
+  `tests/fixtures/stub_success.zsh` installed as `claude` on PATH. That is the
+  fixture pattern for T3's two-arm report, and it produces the store with real
+  `attempts` that A1's no-dispatch counts need.
+- `sections/persona-packs/cycles/011/assertions.py:79-95,181-188` — the only
+  assertions anywhere that parse `persona list` output. They select a line by
+  substring and assert the superseded `H1` is absent, so extra columns are
+  safe but one-row-per-key must survive for uncarded personas.
+- `grep` for `persona list` across `tests/` — only
+  `tests/persona_cards_test.sh:285-292`, this section's own file.
+- `persona_card.py:35-49` re-read — `child_path` is still computed after the
+  forbidden-key check, so attaching it to the error means computing it first.
+
+## Probes run in cycle 002 scope
 
 - `git status --porcelain` on the four owned paths — empty; `persona_card.py`,
   both card files and `tests/persona_cards_test.sh` are committed and on disk,
@@ -241,6 +403,7 @@
 
 ## Next eligible task
 
-- T3 — identity across projects and in comparisons (A3, A4). T2 is complete, so
-  its dependency is satisfied. Carry the four T3 items above into the
-  assignment; `persona_card.py` must be writable this time.
+- T4 — closeout (A7). T3 landed in cycle 003. T4 ships cards for the packaged
+  personas and folds in the five items under `Carried into later tasks`, the
+  first of which — the suite's non-hermetic module resolution — is the accepted
+  change from T3's GO_WITH_CHANGES and must land in that cycle.
