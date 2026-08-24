@@ -441,3 +441,140 @@ printf 'PASS: graceful stop outlasts and records the dispatch in flight\n'
 printf 'PASS: stopping becomes idle with one tick and no stop file\n'
 printf 'PASS: restart performs the next action without rewriting the stopped result\n'
 printf 'PASS: stop and restart keep runtime under runs and fixture porcelain empty\n'
+
+# --- the routed command exposes start, status, stop, and safe restart -------
+
+ROUTED_SECTION_KEY="routed-work"
+MARKER="$TEST_ROOT/routed-dispatch-started.marker"
+WOKE_MARKER="$MARKER.woke"
+STUB_BIN="$TEST_ROOT/routed-stub-bin"
+mkdir -p "$STUB_BIN"
+/bin/cp "$REPO_ROOT/tests/fixtures/stub_detach.zsh" "$STUB_BIN/claude"
+chmod +x "$STUB_BIN/claude"
+
+engine_command init-section "$ROUTED_SECTION_KEY" <<'SECTIONBRIEF' > "$TEST_ROOT/init-routed-section.out"
+## Objective
+
+- Prove the operator-facing command routes detached run controls.
+
+## Scope
+
+- The routed detached fixture only.
+
+## Priority
+
+- must-have: operators need a reachable detached command.
+
+## Owned paths
+
+- `src/routed/**`
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- Routed start, status, stop, and restart reach the supervisor.
+
+## Rejection conditions
+
+- Runtime state leaves the project runs directory.
+SECTIONBRIEF
+
+routed_scope_output="$(engine_command --section "$ROUTED_SECTION_KEY" run --max-ticks 1 2>&1)"
+assert_contains "$routed_scope_output" "scope 001 -> ASSIGN" \
+  "routed fixture preparation scopes one cycle"
+
+git -C "$FIXTURE_REPO" add -A
+git -C "$FIXTURE_REPO" -c user.name=pm-flow-test -c user.email=pm-flow@example.invalid \
+  commit -qm "test routed fixture baseline"
+[[ -z "$(git -C "$FIXTURE_REPO" status --porcelain)" ]] || \
+  fail "routed fixture repository was dirty before start"
+
+help_output="$(engine_command help)"
+assert_contains "$help_output" "run-detach" "engine help"
+
+routed_start_output="$(engine_command run-detach start --max-ticks 2 \
+  --section "$ROUTED_SECTION_KEY" 2> "$TEST_ROOT/routed-start.err")"
+routed_supervisor_pid="$(output_value "$routed_start_output" pid)"
+routed_log_path="$(output_value "$routed_start_output" log)"
+[[ "$routed_supervisor_pid" == <-> ]] || fail "routed start did not print a numeric pid"
+[[ "$routed_log_path" == "$RUNS_DIR"/* ]] || \
+  fail "routed start log was outside the project runs directory"
+
+fixture_status="$(git -C "$FIXTURE_REPO" status --porcelain)"
+[[ -z "$fixture_status" ]] || \
+  fail "fixture repository became dirty after routed start:\n$fixture_status"
+bad_runtime="$(find "$FLOW_DIR" -name 'run-detach*' ! -path "$RUNS_DIR/*" -print)"
+[[ -z "$bad_runtime" ]] || \
+  fail "routed start wrote runtime files outside project runs: $bad_runtime"
+
+wait_for_file "$MARKER" "routed dispatch marker"
+routed_status="$(engine_command --section "$ROUTED_SECTION_KEY" run-detach status)"
+assert_contains "$routed_status" "running" "routed live status"
+assert_contains "$routed_status" "pid=$routed_supervisor_pid" "routed live status pid"
+assert_contains "$routed_status" "log=$routed_log_path" "routed live status log"
+
+# The driver's in-flight bookkeeping is tracked fixture state. Record it so
+# the duplicate-start and stop porcelain checks measure only those commands.
+git -C "$FIXTURE_REPO" add -A
+git -C "$FIXTURE_REPO" -c user.name=pm-flow-test -c user.email=pm-flow@example.invalid \
+  commit -qm "record in-flight routed fixture state"
+
+routed_second_code=0
+routed_second_output="$(engine_command run-detach start --max-ticks 2 \
+  --section "$ROUTED_SECTION_KEY" 2>&1)" || routed_second_code=$?
+(( routed_second_code != 0 )) || fail "a routed second start succeeded while live"
+assert_contains "$routed_second_output" "pid=$routed_supervisor_pid" \
+  "routed second start reports the live pid"
+assert_contains "$routed_second_output" "log=$routed_log_path" \
+  "routed second start reports the live log"
+
+fixture_status="$(git -C "$FIXTURE_REPO" status --porcelain)"
+[[ -z "$fixture_status" ]] || \
+  fail "fixture repository became dirty after routed second start:\n$fixture_status"
+bad_runtime="$(find "$FLOW_DIR" -name 'run-detach*' ! -path "$RUNS_DIR/*" -print)"
+[[ -z "$bad_runtime" ]] || \
+  fail "routed second start wrote runtime files outside project runs: $bad_runtime"
+
+routed_stop_output="$(engine_command --section "$ROUTED_SECTION_KEY" run-detach stop)"
+assert_contains "$routed_stop_output" "stop after the current dispatch" "routed stop response"
+assert_contains "$routed_stop_output" "pid=$routed_supervisor_pid" "routed stop pid"
+assert_contains "$routed_stop_output" "log=$routed_log_path" "routed stop log"
+
+fixture_status="$(git -C "$FIXTURE_REPO" status --porcelain)"
+[[ -z "$fixture_status" ]] || \
+  fail "fixture repository became dirty after routed stop:\n$fixture_status"
+bad_runtime="$(find "$FLOW_DIR" -name 'run-detach*' ! -path "$RUNS_DIR/*" -print)"
+[[ -z "$bad_runtime" ]] || \
+  fail "routed stop wrote runtime files outside project runs: $bad_runtime"
+
+routed_stopping_status="$(engine_command --section "$ROUTED_SECTION_KEY" run-detach status)"
+assert_contains "$routed_stopping_status" "stopping" "routed stopping status"
+wait_for_file "$WOKE_MARKER" "routed post-stop woke marker"
+wait_for_exit "$routed_supervisor_pid" "routed stopped supervisor completion"
+routed_idle_status="$(engine_command --section "$ROUTED_SECTION_KEY" run-detach status)"
+assert_contains "$routed_idle_status" "idle" "routed idle status"
+assert_contains "$(/usr/bin/tail -n 1 "$routed_log_path")" \
+  "stopped by request after tick 1" "routed stopped log final line"
+
+git -C "$FIXTURE_REPO" add -A
+git -C "$FIXTURE_REPO" -c user.name=pm-flow-test -c user.email=pm-flow@example.invalid \
+  commit -qm "record routed stop result"
+[[ -z "$(git -C "$FIXTURE_REPO" status --porcelain)" ]] || \
+  fail "routed fixture repository was dirty before stale-stop start"
+
+printf 'stale stop request\n' > "$RUNS_DIR/run-detach.stop"
+stale_stop_start_output="$(engine_command run-detach start --max-ticks 2 \
+  --section "$ROUTED_SECTION_KEY" 2> "$TEST_ROOT/stale-stop-start.err")"
+stale_stop_supervisor_pid="$(output_value "$stale_stop_start_output" pid)"
+[[ "$stale_stop_supervisor_pid" == <-> ]] || \
+  fail "stale-stop start did not print a numeric pid"
+wait_for_exit "$stale_stop_supervisor_pid" "stale-stop supervisor completion"
+[[ "$(state_value "$STATE_FILE" ticks)" == 2 ]] || \
+  fail "a stale stop request prevented the routed run from reaching two ticks"
+[[ ! -f "$RUNS_DIR/run-detach.stop" ]] || \
+  fail "routed start did not clear the stale stop request"
+
+printf 'PASS: routed run-detach covers help, start, status, stop, refusal, and stale-stop restart\n'
