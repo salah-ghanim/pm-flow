@@ -2,7 +2,35 @@
 
 ## Current task
 
-- None. T3 was accepted in cycle 004 and was the last workplan task.
+- None. T3 was accepted in cycle 004 and was the last workplan task. Cycle 005
+  re-verified every acceptance ID on merged `main` rather than on a worktree.
+
+## Section-end verification, cycle 005 (on merged `main`)
+
+- The accepted T3 code is on `main`:
+  `grep -n 'include_non_convention_attributes' template/.agentic/pm_flow/telemetry.py`
+  → `247` (the keyword-only default), `263` and `304` (the two gated blocks),
+  `633` and `742` (the two child call sites passing `False`).
+- A1, A2, A3, A5: `zsh tests/otel_semconv_test.sh` exits 0 on `main` and prints
+  `ROUTE: stdlib OTLP/JSON fallback via trace_export.py --file --replay` with no
+  `bind prohibited` suffix, so the receiver bound a real TCP socket;
+  `TREE primary: 61e56eb0442d29d7 invoke_agent -> b37abcf1cb062168 chat
+  parent=61e56eb0442d29d7 input_tokens=31 output_tokens=13`, the same tree for
+  the secondary pin, both `SPLIT` lines identical to cycle 004, and all six PASS
+  lines.
+- A4: the grep matches `src/pm_flow/semconv.py` lines 8, 9, 24-28, 32, 33 and
+  the one exempted comment at `template/.agentic/pm_flow/catalog.py:250`.
+  The reword has not landed yet, so the exemption stays.
+- A6 remains unproven, and the probe was re-run this cycle rather than carried
+  over: `docker ps` → exit 1,
+  `failed to connect to the docker API at unix:///Users/salah/.docker/run/docker.sock
+  … dial unix … connect: no such file or directory`. The brief's escape hatch
+  applies; `docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one`
+  plus `curl -s 'http://localhost:16686/api/traces?service=pm-flow'` is what
+  settles it.
+- A7: `zsh tests/pm_flow_test.sh` exits 0 on `main` with 10 PASS lines, after
+  the other sections' merges, so nothing merged since cycle 004 has regressed
+  this section.
 
 ## Completed tasks and evidence
 
@@ -330,10 +358,12 @@
 
 ## Next eligible task
 
-- None. T3 was the last task and is accepted, so every workplan task is done.
-  Every brief acceptance ID has current evidence except A6, which the brief
-  allows to be recorded unproven and which the handoff carries as such. The
-  section is a candidate for COMPLETE at cycle 005; the only work that would
-  reopen it is `persona-cards` rewording
-  `template/.agentic/pm_flow/catalog.py:250`, at which point the test's
-  one-file A4 exemption is deleted.
+- None. T3 was the last task and is accepted, every workplan task is done, and
+  cycle 005 re-verified the whole acceptance set on merged `main`. A6 is
+  recorded unproven with the probe re-run this cycle, as the brief allows. The
+  section is COMPLETE as of cycle 005.
+- Two follow-ups belong to whoever picks them up, and neither reopens this
+  section on its own:
+  - `persona-cards` rewording `template/.agentic/pm_flow/catalog.py:250`, at
+    which point the test's one-file A4 exemption is deleted.
+  - A host with Docker settling A6 by running the brief's Jaeger command.
