@@ -17,7 +17,8 @@ PROJECT="fixture"
 PROJECT_DIR="$QA_ROOT/.agentic/pm_flow/$PROJECT"
 STATE_DIR="$PROJECT_DIR/project_state"
 SECTIONS_DIR="$PROJECT_DIR/sections"
-mkdir -p "$STATE_DIR" "$SECTIONS_DIR/alpha" "$SECTIONS_DIR/beta" "$SECTIONS_DIR/gamma"
+mkdir -p "$STATE_DIR" "$SECTIONS_DIR/alpha" "$SECTIONS_DIR/beta" \
+  "$SECTIONS_DIR/gamma" "$SECTIONS_DIR/delta"
 printf '%s\n' "$PROJECT" > "$QA_ROOT/.agentic/pm_flow/.project-key"
 
 cat > "$STATE_DIR/plan.md" <<'EOF'
@@ -281,19 +282,95 @@ cat > "$SECTIONS_DIR/gamma/handoff.md" <<'EOF'
 - Inspect output.
 EOF
 
+cat > "$SECTIONS_DIR/delta/brief.md" <<'EOF'
+# delta brief
+
+### Objective
+- Pin depth-scoped workplan section reads.
+### Scope
+- Durable fixture files only.
+### Priority
+- nice-to-have: the fixture detects a section terminator regression.
+### Owned paths
+- `src/delta/`
+### Dependencies
+- None.
+### Acceptance
+- A1: repeated prose outside the design summary is not stale.
+### Rejection conditions
+- A state file is compared with later workplan sections.
+EOF
+
+cat > "$SECTIONS_DIR/delta/workplan.md" <<'EOF'
+# delta workplan
+
+### Design summary
+- Keep the design summary short and distinct from every state paragraph.
+### Interfaces and data changes
+- Standard output only.
+### Task T1 — Rank
+- Paths: `src/delta/`
+- Acceptance IDs: A1.
+### Integration and end-to-end validation
+- Run the fixture command.
+### Risks and rollback
+
+This repeated rollback paragraph has enough ordinary words to prove that depth scoped markdown sections stop at the next peer heading.
+
+### Acceptance coverage
+| Brief ID | Workplan task | Evidence required |
+|---|---|---|
+| A1 | T1 | state has echo but not stale |
+EOF
+
+cat > "$SECTIONS_DIR/delta/state.md" <<'EOF'
+# delta state
+
+### Current task
+- T1.
+### Completed tasks and evidence
+- None.
+### Active decisions
+
+This repeated rollback paragraph has enough ordinary words to prove that depth scoped markdown sections stop at the next peer heading.
+
+### Blockers
+- None.
+### Next eligible task
+- T1.
+EOF
+
+cat > "$SECTIONS_DIR/delta/handoff.md" <<'EOF'
+# delta handoff
+
+### Outcome
+- Terminator fixture ready.
+### Decisions
+- Keep the repeated paragraph outside the design summary.
+### Interfaces
+- Standard output.
+### Risks
+- None.
+### What is unproven
+- Nothing else.
+### Next action
+- Inspect output.
+EOF
+
 run_rank() {
   PM_FLOW_REPO_ROOT="$QA_ROOT" \
-    PYTHONPATH="$REPO_ROOT/src" python3 -m pm_flow.quality rank --project "$PROJECT"
+    PYTHONPATH="$REPO_ROOT/src" python3 -m pm_flow.quality rank --project "$PROJECT" "$@"
 }
 
 run_rank > "$QA_ROOT/initial.out" || fail "rank command failed"
 line_count="$(wc -l < "$QA_ROOT/initial.out" | tr -d ' ')"
-[[ "$line_count" == 13 ]] || fail "rank printed $line_count lines instead of one for each of 13 files"
+[[ "$line_count" == 17 ]] || fail "rank printed $line_count lines instead of one for each of 17 files"
 for file in project_state/plan.md sections/alpha/brief.md sections/alpha/workplan.md \
     sections/alpha/state.md sections/alpha/handoff.md sections/beta/brief.md \
     sections/beta/workplan.md sections/beta/state.md sections/beta/handoff.md \
     sections/gamma/brief.md sections/gamma/workplan.md sections/gamma/state.md \
-    sections/gamma/handoff.md; do
+    sections/gamma/handoff.md sections/delta/brief.md sections/delta/workplan.md \
+    sections/delta/state.md sections/delta/handoff.md; do
   grep -q "$file" "$QA_ROOT/initial.out" || fail "rank omitted $file"
 done
 for file in brief.md workplan.md state.md handoff.md; do
@@ -312,7 +389,122 @@ if grep -Eqi 'composite|quality:[[:space:]]*[0-9]|score[=:][[:space:]]*[0-9]' "$
 fi
 beta_brief_line="$(grep 'sections/beta/brief.md' "$QA_ROOT/initial.out")"
 [[ "$beta_brief_line" != *"echo:"* ]] || fail "cross-section repetition was reported as echo"
+delta_state_line="$(grep 'sections/delta/state.md' "$QA_ROOT/initial.out")"
+[[ "$delta_state_line" == *"echo:"* ]] || fail "depth terminator fixture did not produce echo"
+[[ "$delta_state_line" != *"stale:"* ]] || \
+  fail "depth terminator fixture incorrectly produced stale: $delta_state_line"
 printf 'PASS: rank prints every file worst first with separate dimension findings and no composite\n'
+
+QUALITY_DIR="$PROJECT_DIR/quality"
+[[ -f "$QUALITY_DIR/latest.md" ]] || fail "rank did not write latest.md"
+[[ -f "$QUALITY_DIR/latest.json" ]] || fail "rank did not write latest.json"
+cmp -s "$QA_ROOT/initial.out" "$QUALITY_DIR/latest.md" || \
+  fail "latest.md differs from rank stdout"
+snapshots=("$QUALITY_DIR"/*Z.json(N))
+[[ "${#snapshots}" == 1 ]] || \
+  fail "first rank wrote ${#snapshots} timestamped snapshots instead of one"
+cmp -s "$QUALITY_DIR/latest.json" "$snapshots[1]" || \
+  fail "first timestamped snapshot differs from latest.json"
+python3 - "$QUALITY_DIR/latest.json" "$QA_ROOT/initial.out" <<'PY' || \
+  fail "latest.json does not match rank stdout"
+import json
+import sys
+
+record_path, stdout_path = sys.argv[1:]
+with open(record_path, encoding="utf-8") as handle:
+    record = json.load(handle)
+with open(stdout_path, encoding="utf-8") as handle:
+    lines = [line.rstrip("\n") for line in handle]
+
+expected = []
+for line in lines:
+    parts = line.split(" | ")
+    findings = []
+    if parts[1] != "findings: none":
+        for value in parts[1:]:
+            code, message = value.split(": ", 1)
+            findings.append({"code": code, "message": message})
+    expected.append({"file": parts[0], "findings": findings})
+
+actual = [
+    {"file": artifact["file"], "findings": artifact["findings"]}
+    for artifact in record["artifacts"]
+]
+assert record["project"] == "fixture"
+assert record["generated_at"].endswith("Z")
+assert set(record) == {"project", "generated_at", "artifacts"}
+assert all(
+    set(artifact) == {"file", "words", "budget", "over", "findings"}
+    for artifact in record["artifacts"]
+)
+assert actual == expected, (actual, expected)
+print("MATCH: " + ", ".join(artifact["file"] for artifact in actual))
+PY
+
+cp "$QUALITY_DIR/latest.json" "$QA_ROOT/first-latest.json"
+sleep 1
+run_rank > "$QA_ROOT/second.out" || fail "second rank command failed"
+cmp -s "$QA_ROOT/second.out" "$QUALITY_DIR/latest.md" || \
+  fail "second rank did not replace latest.md with stdout"
+snapshots=("$QUALITY_DIR"/*Z.json(N))
+[[ "${#snapshots}" == 2 ]] || \
+  fail "second rank left ${#snapshots} timestamped snapshots instead of two"
+cmp -s "$QUALITY_DIR/latest.json" "$snapshots[-1]" || \
+  fail "second timestamped snapshot differs from latest.json"
+cmp -s "$QA_ROOT/first-latest.json" "$QUALITY_DIR/latest.json" && \
+  fail "second rank did not replace latest.json"
+printf 'PASS: rank writes matching latest records and preserves timestamped snapshots\n'
+
+if run_rank --out "$SECTIONS_DIR/alpha/quality" \
+    > "$QA_ROOT/sections-refusal.out" 2> "$QA_ROOT/sections-refusal.err"; then
+  fail "rank accepted an output directory inside sections"
+fi
+grep -q 'sections' "$QA_ROOT/sections-refusal.err" || \
+  fail "sections refusal did not explain the rejected path"
+section_records=("${(@f)$(find "$SECTIONS_DIR" -name 'quality*' -print)}")
+[[ -z "${section_records[1]:-}" ]] || \
+  fail "sections refusal created a quality path: ${section_records[1]}"
+printf 'PASS: --out inside sections is refused before creating a path\n'
+
+LINKED_ROOT="$QA_ROOT/linked-worktree"
+mkdir -p "$LINKED_ROOT"
+printf 'gitdir: %s\n' "$QA_ROOT/missing-gitdir" > "$LINKED_ROOT/.git"
+if run_rank --out "$LINKED_ROOT/quality" \
+    > "$QA_ROOT/worktree-refusal.out" 2> "$QA_ROOT/worktree-refusal.err"; then
+  fail "rank accepted an output directory inside a linked worktree"
+fi
+grep -q 'linked git worktree' "$QA_ROOT/worktree-refusal.err" || \
+  fail "worktree refusal did not explain the rejected path"
+[[ ! -e "$LINKED_ROOT/quality" ]] || \
+  fail "worktree refusal created its output directory"
+printf 'PASS: linked-worktree output is refused before creating a path\n'
+
+TRACKED_ROOT="$QA_ROOT/tracked-repo"
+mkdir -p "$TRACKED_ROOT/.agentic/pm_flow/tracked/project_state"
+git -C "$TRACKED_ROOT" init -q
+if PM_FLOW_REPO_ROOT="$TRACKED_ROOT" PYTHONPATH="$REPO_ROOT/src" \
+    python3 -m pm_flow.quality rank --project tracked --out "$TRACKED_ROOT/quality" \
+    > "$QA_ROOT/tracked-refusal.out" 2> "$QA_ROOT/tracked-refusal.err"; then
+  fail "rank accepted a git-visible output directory"
+fi
+grep -q 'git does not ignore' "$QA_ROOT/tracked-refusal.err" || \
+  fail "git-visible refusal did not explain the rejected path"
+[[ ! -e "$TRACKED_ROOT/quality" ]] || \
+  fail "git-visible refusal created its output directory"
+printf 'PASS: git-visible output is refused before creating a path\n'
+
+if PM_FLOW_REPO_ROOT="$QA_ROOT" PYTHONPATH="$REPO_ROOT/src" \
+    python3 -m pm_flow.quality rank --project nosuch \
+    > "$QA_ROOT/nosuch.out" 2> "$QA_ROOT/nosuch.err"; then
+  fail "zero-artifact project exited successfully"
+fi
+grep -q "project 'nosuch'" "$QA_ROOT/nosuch.err" || \
+  fail "zero-artifact error did not name the project key"
+grep -q '/.agentic/pm_flow/nosuch/sections' "$QA_ROOT/nosuch.err" || \
+  fail "zero-artifact error did not name the sections directory"
+[[ ! -e "$QA_ROOT/.agentic/pm_flow/nosuch/quality" ]] || \
+  fail "zero-artifact run created a quality directory"
+printf 'PASS: zero-artifact project fails loudly without writing a record\n'
 
 alpha_handoff_before="$(grep 'sections/alpha/handoff.md' "$QA_ROOT/initial.out")"
 [[ "$alpha_handoff_before" == *"echo:"* ]] || fail "repeated handoff paragraph did not produce echo"
@@ -368,3 +560,21 @@ gamma_state_line="$(grep 'sections/gamma/state.md' "$QA_ROOT/undeclared.out")"
   fail "state-only gamma path did not produce boundaries"
 printf '%s\n' "$gamma_state_line"
 printf 'PASS: depth-three grouped coverage and declared references stay clean while real defects fire\n'
+
+host_status_before="$(git -C "$REPO_ROOT" status --porcelain)"
+if PYTHONPATH="$REPO_ROOT/src" python3 -m pm_flow.quality rank --project pm-agent \
+    > "$QA_ROOT/host.out" 2> "$QA_ROOT/host.err"; then
+  host_branch="wrote ignored project metadata"
+else
+  host_branch="refused linked worktree"
+  grep -q 'linked git worktree' "$QA_ROOT/host.err" || \
+    fail "host rank failed for an unexpected reason: $(<"$QA_ROOT/host.err")"
+fi
+host_status_after="$(git -C "$REPO_ROOT" status --porcelain)"
+[[ "$host_status_before" == "$host_status_after" ]] || \
+  fail "host repository status changed after rank"
+host_section_records=("${(@f)$(find "$REPO_ROOT/.agentic/pm_flow/pm-agent/sections" \
+  \( -name 'quality*' -o -name '*.score' \) -print)}")
+[[ -z "${host_section_records[1]:-}" ]] || \
+  fail "host rank wrote under sections: ${host_section_records[1]}"
+printf 'PASS: host rank leaves git status and sections unchanged (%s)\n' "$host_branch"
