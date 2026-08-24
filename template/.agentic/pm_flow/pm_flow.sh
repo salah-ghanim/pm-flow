@@ -40,6 +40,7 @@ Usage:
   pm_flow.sh [--project <name>] status
   pm_flow.sh [--project <name>] next
   pm_flow.sh [--project <name>] cost
+  pm_flow.sh [--project <name>] compare <a> <b> [--max-ticks <n>]
   pm_flow.sh [--project <name>] access [--all]
   pm_flow.sh [--project <name>] trace export [--otlp <url>|--file <path>] [--header k=v]
   pm_flow.sh [--project <name>] trace status
@@ -1937,6 +1938,10 @@ main() {
     cost)
       shift || true
       cmd_cost "$@"
+      ;;
+    compare)
+      shift || true
+      cmd_compare "$@"
       ;;
     trace)
       shift || true

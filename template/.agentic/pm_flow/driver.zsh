@@ -467,6 +467,26 @@ cmd_cost() {
   python3 "$SCRIPT_DIR/cost.py" report "$PROJECT_DIR"
 }
 
+cmd_compare() {
+  local topology_a="${1:-}" topology_b="${2:-}" max_ticks=100
+  [[ -n "$topology_a" ]] || fail "compare requires two topology keys"
+  [[ -n "$topology_b" ]] || fail "compare requires two topology keys"
+  shift 2 || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --max-ticks)
+        shift || fail "--max-ticks requires a value"
+        max_ticks="${1:-}"
+        [[ "$max_ticks" == <-> ]] || fail "--max-ticks requires a positive integer"
+        ;;
+      *) fail "unknown compare argument: $1" ;;
+    esac
+    shift || true
+  done
+  python3 "$SCRIPT_DIR/compare.py" run "$topology_a" "$topology_b" \
+    --flow "$FLOW_DIR" --project "$PROJECT_KEY" --max-ticks "$max_ticks"
+}
+
 # What the roles actually reached for.
 #
 # The access tiers describe what a role is *allowed* to touch, and on two of the
