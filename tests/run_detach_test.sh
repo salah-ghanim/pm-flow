@@ -272,3 +272,172 @@ printf 'PASS: launcher process-group SIGHUP leaves supervisor and dispatch alive
 printf 'PASS: live, idle, and stale-pid status reporting\n'
 printf 'PASS: duplicate start refusal preserves tick state\n'
 printf 'PASS: detached runtime stays under the project runs directory\n'
+
+# --- graceful stop finishes one dispatch, then resumes at the next action ---
+
+git -C "$FIXTURE_REPO" add -A
+git -C "$FIXTURE_REPO" -c user.name=pm-flow-test -c user.email=pm-flow@example.invalid \
+  commit -qm "record hangup fixture result"
+
+STOP_SECTION_KEY="stop-work"
+STOP_SECTION_DIR="$PROJECT_DIR/sections/$STOP_SECTION_KEY"
+MARKER="$TEST_ROOT/stop-dispatch-started.marker"
+WOKE_MARKER="$MARKER.woke"
+STUB_BIN="$TEST_ROOT/stop-stub-bin"
+mkdir -p "$STUB_BIN"
+/bin/cp "$REPO_ROOT/tests/fixtures/stub_detach_stop.zsh" "$STUB_BIN/claude"
+chmod +x "$STUB_BIN/claude"
+
+engine_command init-section "$STOP_SECTION_KEY" <<'SECTIONBRIEF' > "$TEST_ROOT/init-stop-section.out"
+## Objective
+
+- Prove a graceful stop records the dispatch in flight and resumes after it.
+
+## Scope
+
+- The detached stop fixture only.
+
+## Priority
+
+- must-have: stop must never repeat paid work.
+
+## Owned paths
+
+- `src/stopped/**`
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- The in-flight result is recorded and the restart performs the following action.
+
+## Rejection conditions
+
+- The stop signal reaches the dispatch or the restart repeats it.
+SECTIONBRIEF
+
+stop_scope_output="$(engine_command --section "$STOP_SECTION_KEY" run --max-ticks 1 2>&1)"
+assert_contains "$stop_scope_output" "scope 001 -> ASSIGN" \
+  "stop fixture preparation scopes one cycle"
+
+git -C "$FIXTURE_REPO" add -A
+git -C "$FIXTURE_REPO" -c user.name=pm-flow-test -c user.email=pm-flow@example.invalid \
+  commit -qm "test stop fixture baseline"
+[[ -z "$(git -C "$FIXTURE_REPO" status --porcelain)" ]] || \
+  fail "stop fixture repository was dirty before start"
+
+next_before_stop="$(engine_command --section "$STOP_SECTION_KEY" next)"
+action_before_stop="$(printf '%s\n' "$next_before_stop" | \
+  awk -v section="$STOP_SECTION_KEY" '$2 == section {print $3; exit}')"
+[[ -n "$action_before_stop" ]] || fail "next did not name the stop section action"
+
+stop_start_output="$(detach_command start --max-ticks 4 --section "$STOP_SECTION_KEY" \
+  2> "$TEST_ROOT/stop-start.err")"
+stop_supervisor_pid="$(output_value "$stop_start_output" pid)"
+stop_log_path="$(output_value "$stop_start_output" log)"
+[[ "$stop_supervisor_pid" == <-> ]] || fail "stop start did not print a numeric pid"
+[[ "$stop_log_path" == "$RUNS_DIR"/* ]] || fail "stop log was outside the project runs directory"
+
+fixture_status="$(git -C "$FIXTURE_REPO" status --porcelain)"
+[[ -z "$fixture_status" ]] || \
+  fail "fixture repository became dirty after stopped-run start:\n$fixture_status"
+bad_runtime="$(find "$FLOW_DIR" -name 'run-detach*' ! -path "$RUNS_DIR/*" -print)"
+[[ -z "$bad_runtime" ]] || fail "stop start wrote runtime files outside project runs: $bad_runtime"
+
+wait_for_file "$MARKER" "stop dispatch marker"
+STOP_CYCLE_DIR="$STOP_SECTION_DIR/cycles/001"
+STOP_CYCLE_RESULT="$STOP_CYCLE_DIR/result.md"
+[[ ! -f "$STOP_CYCLE_RESULT" ]] || fail "the stop dispatch finished before stop was requested"
+
+# The driver's in-flight bookkeeping is tracked fixture state. Record it so
+# the porcelain check below measures stop itself, not the ordinary dispatch.
+git -C "$FIXTURE_REPO" add -A
+git -C "$FIXTURE_REPO" -c user.name=pm-flow-test -c user.email=pm-flow@example.invalid \
+  commit -qm "record in-flight stop fixture state"
+
+stop_output="$(detach_command stop)"
+assert_contains "$stop_output" "stop after the current dispatch" "stop response"
+assert_contains "$stop_output" "pid=$stop_supervisor_pid" "stop response pid"
+assert_contains "$stop_output" "log=$stop_log_path" "stop response log"
+
+fixture_status="$(git -C "$FIXTURE_REPO" status --porcelain)"
+[[ -z "$fixture_status" ]] || fail "fixture repository became dirty after stop:\n$fixture_status"
+bad_runtime="$(find "$FLOW_DIR" -name 'run-detach*' ! -path "$RUNS_DIR/*" -print)"
+[[ -z "$bad_runtime" ]] || fail "stop wrote runtime files outside project runs: $bad_runtime"
+
+stopping_status="$(detach_command status)"
+assert_contains "$stopping_status" "stopping" "status during the stopped dispatch"
+[[ ! -f "$WOKE_MARKER" ]] || fail "the stopped dispatch finished before stopping status was observed"
+
+wait_for_file "$WOKE_MARKER" "post-stop woke marker"
+wait_for_file "$STOP_CYCLE_RESULT" "stopped developer cycle result"
+stop_result_output="$(/bin/cat "$STOP_CYCLE_RESULT")"
+assert_contains "$stop_result_output" "## Status" "stopped developer result status heading"
+assert_contains "$stop_result_output" "DELIVERED" "stopped developer normal status"
+stop_result_mtime="$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_mtime_ns)' \
+  "$STOP_CYCLE_RESULT")"
+
+wait_for_exit "$stop_supervisor_pid" "stopped supervisor completion"
+stop_last_line="$(/usr/bin/tail -n 1 "$stop_log_path")"
+assert_contains "$stop_last_line" "stopped by request after tick 1" "stopped log final line"
+assert_contains "$(/bin/cat "$stop_log_path")" \
+  "$STOP_SECTION_KEY: $action_before_stop" "stopped run action from next"
+[[ "$(state_value "$STATE_FILE" ticks)" == 1 ]] || \
+  fail "stopped state did not record exactly one tick"
+[[ ! -f "$RUNS_DIR/run-detach.stop" ]] || fail "the honoured stop request was not removed"
+
+stopped_idle_status="$(detach_command status)"
+assert_contains "$stopped_idle_status" "idle" "status after graceful stop"
+
+no_live_stop="$(detach_command stop)"
+assert_contains "$no_live_stop" "no run-detach supervisor is live" "stop with no live supervisor"
+[[ ! -f "$RUNS_DIR/run-detach.stop" ]] || fail "idle stop created a request file"
+
+next_before_restart="$(engine_command --section "$STOP_SECTION_KEY" next)"
+action_before_restart="$(printf '%s\n' "$next_before_restart" | \
+  awk -v section="$STOP_SECTION_KEY" '$2 == section {print $3; exit}')"
+[[ -n "$action_before_restart" ]] || fail "next did not name the resume action"
+[[ "$action_before_restart" != "$action_before_stop" ]] || \
+  fail "the stopped dispatch did not advance the section action"
+
+git -C "$FIXTURE_REPO" add -A
+git -C "$FIXTURE_REPO" -c user.name=pm-flow-test -c user.email=pm-flow@example.invalid \
+  commit -qm "record stopped fixture result"
+[[ -z "$(git -C "$FIXTURE_REPO" status --porcelain)" ]] || \
+  fail "stop fixture repository was dirty before restart"
+
+restart_output="$(detach_command start --max-ticks 1 --section "$STOP_SECTION_KEY" \
+  2> "$TEST_ROOT/restart.err")"
+restart_supervisor_pid="$(output_value "$restart_output" pid)"
+restart_log_path="$(output_value "$restart_output" log)"
+[[ "$restart_supervisor_pid" == <-> ]] || fail "restart did not print a numeric pid"
+wait_for_exit "$restart_supervisor_pid" "restarted supervisor completion"
+
+STOP_CYCLE_REVIEW="$STOP_CYCLE_DIR/review.md"
+wait_for_file "$STOP_CYCLE_REVIEW" "post-restart cycle review"
+assert_contains "$(/bin/cat "$restart_log_path")" \
+  "$STOP_SECTION_KEY: $action_before_restart" "restart action from next"
+restart_result_mtime="$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_mtime_ns)' \
+  "$STOP_CYCLE_RESULT")"
+[[ "$restart_result_mtime" == "$stop_result_mtime" ]] || \
+  fail "restart rewrote the pre-stop developer result"
+
+fixture_status="$(git -C "$FIXTURE_REPO" status --porcelain)"
+if [[ -n "$fixture_status" ]]; then
+  [[ "$fixture_status" == " M .agentic/pm_flow/$PROJECT_KEY/project_state/sections.md" ]] || \
+    fail "fixture repository had unexpected changes after restart:\n$fixture_status"
+  git -C "$FIXTURE_REPO" add -A
+  git -C "$FIXTURE_REPO" -c user.name=pm-flow-test -c user.email=pm-flow@example.invalid \
+    commit -qm "record resumed fixture index"
+  fixture_status="$(git -C "$FIXTURE_REPO" status --porcelain)"
+fi
+[[ -z "$fixture_status" ]] || fail "fixture repository remained dirty after restart:\n$fixture_status"
+bad_runtime="$(find "$FLOW_DIR" -name 'run-detach*' ! -path "$RUNS_DIR/*" -print)"
+[[ -z "$bad_runtime" ]] || fail "restart wrote runtime files outside project runs: $bad_runtime"
+
+printf 'PASS: graceful stop outlasts and records the dispatch in flight\n'
+printf 'PASS: stopping becomes idle with one tick and no stop file\n'
+printf 'PASS: restart performs the next action without rewriting the stopped result\n'
+printf 'PASS: stop and restart keep runtime under runs and fixture porcelain empty\n'
