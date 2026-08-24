@@ -56,6 +56,7 @@ COPIED_ENGINE_FILES=(
   cost.py
   store.py
   telemetry.py
+  topology.py
   trace_export.py
   prompt_quality.py
   watch.py
@@ -71,6 +72,7 @@ COPIED_ENGINE_DIRS=(
   roles
   domains
   tasks
+  topologies
   project
   tests
   __pycache__

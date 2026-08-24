@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "key": "heavy",
+  "name": "Heavy",
+  "description": "Three consultant seats with the larger developer model.",
+  "roles": {
+    "cpo": {
+      "cli": "claude",
+      "model": "claude-fable-5",
+      "difficulty": "xhigh"
+    },
+    "pm": {
+      "cli": "claude",
+      "model": "claude-fable-5",
+      "difficulty": "xhigh"
+    },
+    "developer": {
+      "cli": "codex",
+      "model": "gpt-5.6-sol",
+      "difficulty": "xhigh"
+    },
+    "consultant": [
+      {
+        "cli": "claude",
+        "model": "claude-fable-5",
+        "difficulty": "xhigh"
+      },
+      {
+        "cli": "codex",
+        "model": "gpt-5.6-sol",
+        "difficulty": "xhigh"
+      },
+      {
+        "cli": "copilot",
+        "model": "",
+        "difficulty": "xhigh"
+      }
+    ],
+    "10x_developer": {
+      "cli": "claude",
+      "model": "claude-fable-5",
+      "difficulty": "max"
+    },
+    "maintenance_engineer": {
+      "cli": "codex",
+      "model": "gpt-5.6-sol",
+      "difficulty": "xhigh"
+    }
+  }
+}

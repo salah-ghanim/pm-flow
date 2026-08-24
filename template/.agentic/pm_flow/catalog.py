@@ -229,6 +229,8 @@ def register_clis(connection):
             "thinking_levels": {"low": "low", "medium": "medium", "high": "high",
                                 "xhigh": "xhigh", "max": "max"},
             "capabilities": {
+                "models": ["claude-fable-5", "claude-opus-5", "claude-sonnet-5",
+                           "claude-haiku-4-5-20251001"],
                 "usage_source": "response_envelope",
                 "reports_cost": True,
                 "accepts_traceparent": True,
@@ -242,6 +244,7 @@ def register_clis(connection):
             "thinking_levels": {"low": "low", "medium": "medium", "high": "high",
                                 "xhigh": "high", "max": "high"},
             "capabilities": {
+                "models": ["gpt-5.6-sol", "gpt-5.1-codex"],
                 # Its response file holds only the last message, so usage has to
                 # come out of the JSONL event stream instead.
                 "usage_source": "jsonl_events",
@@ -258,6 +261,8 @@ def register_clis(connection):
             "thinking_levels": {"low": "low", "medium": "medium", "high": "high",
                                 "xhigh": "xhigh", "max": "max"},
             "capabilities": {
+                # An empty list means this backend is not model-constrained.
+                "models": [],
                 "usage_source": None,
                 "reports_cost": False,
                 "accepts_traceparent": False,
