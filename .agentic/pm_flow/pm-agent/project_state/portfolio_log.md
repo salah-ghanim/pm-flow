@@ -262,3 +262,65 @@ has not moved in three. Older entries are compacted to their summary line.
   and `run.zsh` green from inside a dispatch; non-zero Codex tokens in the
   store; that a reviewer's worktree dispatch leaks the same way (inferred from
   the same unguarded code path, not observed).
+
+## 2026-08-24 — portfolio review 003
+
+- Decision: OFF_TRACK. $32.04 and 15 dispatches since review 002 closed
+  `codex-usage` (done, 8 cycles, $42.42) and bought `store-ledger` its first
+  accepted cycle (`558837f`: `cost.py import` and `tests/store_ledger_test.sh`,
+  $6.04 over 2 cycles). The head of the path has finally moved; the two
+  parallel arms have not. `trace-commands` and `otel-semconv` wait on
+  nothing, are must-have, and have zero cycles after three reviews.
+- Criteria: worktree isolation MET (`git worktree list` shows the
+  `store-ledger` checkout under `../.pm-flow-worktrees/`). Suite MET from
+  this tier: `zsh tests/pm_flow_test.sh` exit 0, ten PASS groups;
+  `zsh tests/prompt_quality_test.sh` exit 0 (56 shipped prompts clean);
+  `zsh template/.agentic/pm_flow/tests/run.zsh` exit 0, `all suites passed`;
+  `zsh tests/store_ledger_test.sh` exit 0. `git status --short` unchanged
+  after all four — the guard landed in `ec8130f` and the review-002 leak
+  does not recur. Trace, ledger, persona measure, compare, MCP/ACP all NOT
+  MET by the same probes as 002 (`git ls-files src/pm_flow` still
+  `__init__ cli paths`; `cli.py` has no `trace`/`compare`/`acp`/`mcp`;
+  `config.json`, `agent_exec.sh`, `pm_flow.sh` have no `otlp_endpoint`,
+  `acp`, `mcp`; `catalog.py` has no `compare`/`measure`; `cost_ledger.tsv`
+  on disk beside `pm_flow.db`, written at `driver.zsh:445-471` and read at
+  `cost.py:221` and `watch.py:50`).
+- `store-ledger`: cycle 001 is on `main` and covers A3 (second import
+  prints `imported=0`, row count unchanged). A1, A2, A4 are open: `cost.py
+  totals` still takes the ledger path (`cost.py:213-221`), `driver.zsh:467`
+  still passes it, `record_dispatch_cost` still appends. The section's
+  `handoff.md` still reads "Nothing delivered yet" — the manager did not
+  update it on acceptance; the artifact settles it, but the next scope call
+  must sync the handoff.
+- `otel-semconv`: `last_dispatch.txt` is 2026-08-23T19:37:15Z, six seconds
+  after `codex-usage` closed, yet cycles 0 and spend $0.00, with its run dir
+  holding an empty `pending/` from section creation. The dispatch left no
+  cycle. Not read further (that is the transcript). The driver orders
+  must-haves by least-recent dispatch, so `trace-commands` (never dispatched)
+  and `otel-semconv` come before `store-ledger` at the next tick.
+- Refused in this tier: `sqlite3` on `runs/pm_flow.db` (approval). The
+  store's attempt count and summed Codex tokens remain unprobed; the
+  criterion they bear on is NOT MET on other evidence, so nothing rests on
+  them.
+- Plan structure: unstarted dependency CLEAR — `topology-compare` and
+  `agent-bindings` wait on `store-ledger`, now at two cycles;
+  `persona-cards` waits on `persona-packs`, done. Unreachable CLEAR —
+  `run-detach` (new since 002, nice-to-have, waits on nothing) owns the four
+  paths it writes and its `pm_flow.sh` arm (A7) is gated on a release this
+  officer makes after `trace-commands` is done. Must-have inflation CLEAR —
+  the five live must-haves map to the trace, ledger, compare and MCP/ACP
+  bullets one-to-one. Linear chain CLEAR — two deep.
+- `run-detach` stays live and nice-to-have: `resume_claude.sh` at the repo
+  root says launcher deaths are happening now, each one costs the dispatch
+  in flight and records it as `failed (unknown)` in the attempt table that
+  the measurement layer reads; it is free until no must-have is eligible.
+- Plan: harness-hazard paragraph removed (fixed by `ec8130f`); `codex-usage`
+  dropped from the order of work; `run-detach` added to the nice-to-haves
+  with its routing-arm gate. No scope reduced, no graph edge changed.
+- Shortest path: `store-ledger` A1/A2/A4 (`totals` from `attempts`, driver
+  functions off the TSV), then `topology-compare` T1; `trace-commands` T1
+  and `otel-semconv` T1 in parallel now — neither has a reason left to wait.
+  Work in flight (`store-ledger` cycle 002, scope done) is on the path.
+- Unproven after this review: every planned must-have; `store-ledger` A1,
+  A2, A4, A5; non-zero Codex tokens in the store; why the 19:37Z
+  `otel-semconv` dispatch produced no cycle.
