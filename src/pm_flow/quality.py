@@ -574,14 +574,33 @@ def rank(project: str | None, out: str | None) -> int:
     return 0
 
 
+def show(project: str | None, out: str | None) -> int:
+    layout = Paths(project_key=project)
+    destination = resolve_record_dir(layout, out)
+    record = destination / "latest.md"
+    if not record.is_file():
+        raise SystemExit(
+            f"no quality record at {destination}; "
+            "run 'python -m pm_flow.quality rank' first"
+        )
+    text = record.read_text(encoding="utf-8")
+    sys.stdout.write(text)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     rank_parser = subparsers.add_parser("rank", help="print durable artifact findings worst first")
     rank_parser.add_argument("--project")
     rank_parser.add_argument("--out")
+    show_parser = subparsers.add_parser("show", help="print the latest durable artifact findings")
+    show_parser.add_argument("--project")
+    show_parser.add_argument("--out")
     args = parser.parse_args(argv)
-    return rank(args.project, args.out)
+    if args.command == "rank":
+        return rank(args.project, args.out)
+    return show(args.project, args.out)
 
 
 if __name__ == "__main__":
