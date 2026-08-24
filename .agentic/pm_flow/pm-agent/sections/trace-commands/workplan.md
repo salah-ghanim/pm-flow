@@ -79,19 +79,41 @@
 
 ## Task T3 — End to end through the installed command
 
-- Status: pending.
-- Outcome: a packaged install records a stub run, exports to the receiver and
-  to a file, reports counts, and re-exports nothing.
-- Paths: `tests/trace_commands_test.sh`.
-- Reuse: the harness in `tests/packaged_layout_test.sh`.
+- Status: done (cycle 003, accepted). A1–A5 met through a wheel-installed
+  `pm-flow`; all three suites exit 0.
+- Outcome: a wheel-installed `pm-flow` records a stub run, exports those spans
+  to a receiver and to a file, reports counts that agree with the store, and
+  re-exports nothing. Every case to date drives `zsh $ENGINE/pm_flow.sh` from
+  the checkout; none proves the command a user actually has.
+- Paths: `tests/trace_commands_test.sh`,
+  `template/.agentic/pm_flow/trace_export.py`.
+- Carried in: `print_status` counted `exported_at IS NULL` with no `ended_at`
+  filter while `fetch_spans` ships only finished spans, so `status`
+  over-reported mid-run. Closed in cycle 003: the unexported count now carries
+  `ended_at IS NOT NULL` and a fifth `in-flight spans:` line reports the open
+  ones, so no count is lost. The packaged tick left one genuinely open span, so
+  the discrepancy was real and is now asserted, not hypothetical.
+- Reuse: the offline build recipe at `tests/packaged_layout_test.sh:99-227` —
+  wheelhouse at `tests/packaging-build-wheelhouse`, build venv for hatchling,
+  `pip wheel --no-index --no-build-isolation --no-deps`, runtime venv with
+  `--no-index --no-deps`, `$VENV/bin/pm-flow`; `install.sh` plus `init-section`
+  plus the `stub_success.zsh` tick from this suite's own A4 block; the
+  receiver, `exported_count`, `request_count` and `body_ids` helpers already in
+  `tests/trace_commands_test.sh`.
 - Acceptance IDs: A1–A5.
 - Validation: `zsh tests/trace_commands_test.sh`, `zsh tests/pm_flow_test.sh`,
-  `zsh tests/packaged_layout_test.sh` exit 0.
+  `zsh tests/packaged_layout_test.sh` exit 0 — the new packaged block records
+  spans through a real tick, exports them to the loopback receiver and to a
+  file, and `status` counts match the store on both sides of the export.
 - Depends on: T2.
 
 ## Integration and end-to-end validation
 
-- T3 proves scenarios 1–3 through `.venv/bin/pm-flow`.
+- T3 proves scenarios 1–3 through a `pm-flow` entry point installed from a
+  built wheel, not through `template/.agentic/pm_flow/pm_flow.sh`. That venv
+  installs the wheel with `--no-deps` and pm-flow declares no runtime
+  dependencies, so it is itself the "no OpenTelemetry SDK installed" machine
+  scenario 2 names.
 
 ## Risks and rollback
 
@@ -106,5 +128,5 @@
 | A1 | T1, T2, T3 | Receiver count equals marked count; rerun prints 0 |
 | A2 | T2, T3 | SDK-less file passes both schema checks |
 | A3 | T1, T2 | 5xx/timeout leave spans retryable |
-| A4 | T2 | Disabled recording: no span, status says so |
+| A4 | T2, T3 | Disabled recording: no span, status says so |
 | A5 | T3 | Three suites exit 0 |

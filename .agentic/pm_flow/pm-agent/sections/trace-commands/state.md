@@ -2,7 +2,8 @@
 
 ## Current task
 
-- T3, cycle 003 — the packaged end-to-end run and A5.
+- None. T1, T2 and T3 are done and A1–A5 are all closed. The workplan holds no
+  unfinished task; the section needs a new one or none.
 
 ## Completed tasks and evidence
 
@@ -29,16 +30,42 @@
   count unchanged, and `pm-flow trace status` prints `recording: disabled`;
   an exception raised from inside the exporter during a real tick still leaves
   the tick's exit status 0.
-- Regressions: `zsh tests/pm_flow_test.sh` and `zsh
-  tests/packaged_layout_test.sh` both exit 0.
-
-## Evidence in hand, not yet closing an ID
-
-- A5 stays open until T3 proves the three suites through `.venv/bin/pm-flow`.
+- T3 — A1, A2, A4, A5. `zsh tests/trace_commands_test.sh` in the cycle-003
+  worktree exits 0 with the receiver running. Traced with `zsh -fx`, the
+  packaged block observed: a wheel built offline from
+  `tests/packaging-build-wheelhouse`, installed `--no-index --no-deps` into its
+  own venv, `"$VENV/bin/python" -c 'import opentelemetry'` non-zero. A real
+  `$VENV/bin/pm-flow tick` in an `install.sh`-created repo took the store from
+  0 to 2 spans, 1 finished (`99b2d34aaedd17bc`) and 1 still open. A1: `pm-flow
+  trace export --otlp` printed `exported 1 span(s)`, `SELECT COUNT(*) …
+  exported_at IS NOT NULL` was 1, the receiver logged 1 request whose
+  `resourceSpans[0].scopeSpans[0].spans` carried exactly `99b2d34aaedd17bc`;
+  the second invocation printed `exported 0 span(s)` and the request count
+  stayed 1. A2: after `reset_exports`, `--file` printed `exported 1 span(s)`
+  from that SDK-less venv and the line passed `validate_otlp_json` and the
+  suite's independent JSON-Schema subset checker. A4: with a synthetic open
+  span added beside the run's own, `trace status` printed `unexported spans: 1`
+  — equal to what the next export shipped — and `in-flight spans: 2`, with
+  `recording:`, `endpoint:` and `exported spans:` unchanged; a second packaged
+  repo at `telemetry.enabled: false` ticked to exit 0, kept span count at 0,
+  and printed `recording: disabled`.
+- Regressions and A5: `zsh tests/trace_commands_test.sh`, `zsh
+  tests/pm_flow_test.sh` and `zsh tests/packaged_layout_test.sh` each exit 0
+  in the cycle-003 worktree.
+- Mutation: dropping `AND ended_at IS NOT NULL` from `print_status` and
+  rerunning the suite fails at `FAIL: packaged status did not match the next
+  export count` (exit 1), then the file restores to sha256
+  `942ddd4c…b413f02`. The status fix is asserted, and the packaged block is
+  proven to execute rather than to be skipped.
 
 ## Active decisions
 
 - Acknowledgement, not attempt, marks a span exported.
+- `trace status` reports five lines, not four. `unexported spans:` means
+  finished-and-unexported — what the next export would ship — and
+  `in-flight spans:` carries the open ones so the operator loses no count.
+  The four original lines keep their wording; anything keying on them still
+  works.
 - `pm_flow.sh` is owned for the `trace` routing and its `usage` line only.
 - HTTP delivery is a stdlib `urllib` POST of OTLP/JSON, not the SDK exporter.
   Probed 2026-08-24: `ls .venv/lib/python3*/site-packages | grep -i
@@ -57,6 +84,13 @@
   opt-in, the default invocation runs everything, and offline mode says on
   stdout that A1/A3 did not run. Nothing may invoke the suite with it — a CI
   entry point that does would make the receiver-backed cases silently absent.
+- The packaged venv is the SDK-less machine A2 names. `pyproject.toml:47`
+  force-includes `template/.agentic/pm_flow` as `pm_flow/engine`, so
+  `trace_export.py` travels in the wheel; the wheel declares no runtime
+  dependencies and `packaged_layout_test.sh` installs it `--no-deps`, so no
+  OpenTelemetry package can be present. That is a stronger A2 witness than
+  cycle 002's poison-package venv, and it costs nothing extra once the install
+  exists.
 
 ## Blockers
 
@@ -71,14 +105,26 @@
   PM sandbox also refuses the bind was wrong: only a bare `python3 -c` needed
   approval; `zsh tests/trace_commands_test.sh` binds and passes.
 
-## Known gaps, not blocking T2
+## Known gaps, outside this section
 
-- `trace status` counts every span with `exported_at IS NULL`, including spans
-  with no `ended_at`, while `trace export` only ships finished ones. During a
-  live run `status` can therefore report more unexported spans than the next
-  export will send. Fold a `ended_at IS NOT NULL` filter, or a separate
-  in-flight line, into T3.
+- A completed packaged tick leaves exactly one span with `ended_at IS NULL`
+  (observed 2026-08-24: store held 2 spans, 1 finished, 1 open, after the tick
+  returned 0). A span that never ends never exports, so the brief's objective —
+  a recorded run ships — is not fully true of that span. `trace status` now
+  surfaces it rather than hiding it, which is all this section can do:
+  what is recorded and when a span closes belongs to the recording layer
+  (`telemetry.py finish_span`, called from `cmd_run_end`/`cmd_span_end`), which
+  `otel-semconv` owns. Raised in the handoff; not a trace-commands task.
+- The packaged path exercises a single-span payload, because that is what one
+  stub tick records. Multi-span batching and payload ordering are covered only
+  by the checkout block's three seeded spans.
+- `fetch_spans` orders by `started_at ASC` while the test's expected-id query
+  orders by `started_at ASC, span_id ASC`. Identical today at one span; if a
+  future tick records two finished spans with the same `started_at`, the id
+  assertion could flap. Add the `span_id` tiebreak to `fetch_spans` if that
+  is ever seen.
 
 ## Next eligible task
 
-- T3 — the packaged end-to-end run through `.venv/bin/pm-flow`, for A5.
+- None. The workplan is complete and A1–A5 are closed. Any further cycle needs
+  a new task, not a continuation.
