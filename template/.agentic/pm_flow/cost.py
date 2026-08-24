@@ -231,8 +231,10 @@ def stored_attempts(project_dir):
         return list(connection.execute(
             "SELECT a.started_at, COALESCE(t.key, '(project)') AS section,"
             " a.role_key, a.label, a.cli, a.cost_usd, a.input_tokens,"
-            " a.output_tokens FROM attempts a"
+            " a.output_tokens, tp.key AS topology FROM attempts a"
             " LEFT JOIN tasks t ON t.id = a.task_id"
+            " LEFT JOIN runs r ON r.id = a.run_id"
+            " LEFT JOIN topologies tp ON tp.id = r.topology_id"
             " ORDER BY a.started_at, a.id"
         ))
     finally:
@@ -259,6 +261,7 @@ def report_store(project_dir):
             "ATTEMPT", stamp, row["section"], row["role_key"],
             present(row["label"]), present(row["cli"]), amount,
             present(row["input_tokens"]), present(row["output_tokens"]),
+            present(row["topology"]),
         )))
 
 
