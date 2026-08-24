@@ -4,6 +4,35 @@ Newest first. Read this before anything else: one review cannot see a
 section that has been nearly done for four of them, or a shortest path that
 has not moved in three. Older entries are compacted to their summary line.
 
+## Review 005 - 2026-08-24T07:51:21Z - $215.8117 spent
+
+- Summary: 2 of 7 criteria met; verdicts CONTINUE 8; shortest path: `store-ledger` T5 — A1 parity on the live project (which also settles the cost-incident correction), A4 `max_usd` refusal from the store, then delete the TSV...
+
+### Completion criteria
+
+- Finished run opens in Phoenix/Langfuse/Jaeger with every role, prompt, retry, stall, tokens, dollars — `git grep -inE 'otlp_endpoint|"trace"|compare|\bacp\b|\bmcp\b' -- src/pm_flow/cli.py` empty — NOT MET
+- `cost_ledger.tsv` gone, host absorbs no per-dispatch writes — `git grep -n cost_ledger -- template` hits only `cost.py:184,191` (import reader); TSV still on disk, last written 07:17Z (the merge minute), while `pm_flow.db` advanced at 07:38Z — NOT MET (write stopped; file not gone)
+- Sections run in isolated worktrees — `git worktree list`: `store-ledger` checkout under `../.pm-flow-worktrees/` — MET
+- Persona installed from elsewhere, dropped on a seat, measured — `git grep -inE 'compare|measure' -- template/pm_flow/catalog.py` empty — NOT MET
+- Two topologies compared in one command — `git ls-files src/pm_flow` = `__init__ cli paths`, no `compare.py` — NOT MET
+- Drivable over MCP, binds any ACP agent — `git grep -inE 'otlp_endpoint|\bacp\b|\bmcp\b' -- '*config.json' '*agent_exec.sh' '*pm_flow.sh'` empty — NOT MET
+- Test suite runs to completion — all four suites exit 0 from this tier (10 PASS; 57 prompts; store ledger passed; `all suites passed` 35/41/32/58/74); `git status --short` unchanged after — MET
+
+### Verdicts
+
+- agent-bindings: CONTINUE
+- artifact-quality: CONTINUE
+- otel-semconv: CONTINUE
+- persona-cards: CONTINUE
+- run-detach: CONTINUE
+- store-ledger: CONTINUE
+- topology-compare: CONTINUE
+- trace-commands: CONTINUE
+
+### Shortest path
+
+`store-ledger` T5 — A1 parity on the live project (which also settles the cost-incident correction), A4 `max_usd` refusal from the store, then delete the TSV — closes the section; `topology-compare` T1 immediately after, with `trace-commands` and `otel-semconv` assignments interleaving. The next tick is `store-ledger` cycle 006 scope, which is on the path.
+
 ## Review 005 - 2026-08-24T07:49:41Z - $211.6728 spent (driver figure; under-counted, see cost incident)
 
 - Summary: 2 of 7 criteria met; verdicts CONTINUE 8; ON_TRACK for the first time - `store-ledger` T4 landed (`1c5a301`), the driver and all fixtures are off the TSV, and `trace-commands`/`otel-semconv` finally have their first cycles. Shortest path: `store-ledger` T5 (live A1 parity, A4 refusal, delete the TSV) then `topology-compare` T1.
@@ -127,61 +156,9 @@ Changes made: `plan.md` current position rewritten (harness-hazard paragraph rem
 
 - Summary: 1 of 7 criteria met; verdicts CONTINUE 8; shortest path: `store-ledger` T1 on a project-wide run, with `trace-commands` T1 and `otel-semconv` T1 in parallel; `topology-compare` and `agent-bindings` the moment `stor...
 
-### Completion criteria
-
-- Finished run opens in Phoenix/Langfuse/Jaeger with every role, prompt, retry, stall, tokens, dollars — `git grep -iE 'otlp_endpoint|"trace"|compare|acp|mcp' -- src/pm_flow/cli.py` printed nothing; `git ls-files src/pm_flow` = `__init__.py cli.py paths.py` — **NOT MET**
-- `cost_ledger.tsv` gone, host absorbs no per-dispatch writes — `git grep -n cost_ledger -- template` hits `driver.zsh:441-471,839`, `watch.py:50`; `ls runs/` shows `cost_ledger.tsv` beside `pm_flow.db` — **NOT MET**
-- Sections run in isolated worktrees — `git worktree list` shows `codex-usage` under `../.pm-flow-worktrees/` — **MET**
-- Persona installed from elsewhere, dropped on a seat, measured against the one it replaced — `git grep -inE 'compare|measure' -- template/pm_flow/catalog.py` printed nothing — **NOT MET**
-- Two topologies compared in one command — `git ls-files src/pm_flow` has no `compare.py`; `cli.py` grep above empty — **NOT MET**
-- Drivable over MCP, binds any ACP agent — `git grep -inE 'otlp_endpoint|\bacp\b|\bmcp\b'` on `config.json`, `agent_exec.sh`, `pm_flow.sh` printed nothing — **NOT MET**
-- Test suite runs to completion — `zsh tests/pm_flow_test.sh` exit 0, ten PASS groups; `zsh tests/prompt_quality_test.sh` exit 1 (pass=8 fail=30), every failure `another pm_flow driver is already running for project 'pm-agent'` = the live driver dispatching this review — **UNKNOWN** (main suite green from this tier; the second cannot be judged from inside a dispatch until the guard lands)
-
-### Verdicts
-
-- agent-bindings: CONTINUE (now waits on `store-ledger`: A5 reads `pm-flow cost`, which `store-ledger` rewrites; brief's `Dependencies: None` to be synced by its manager)
-- artifact-quality: CONTINUE
-- codex-usage: CONTINUE
-- otel-semconv: CONTINUE
-- persona-cards: CONTINUE
-- store-ledger: CONTINUE
-- topology-compare: CONTINUE
-- trace-commands: CONTINUE
-
-### Shortest path
-
-`store-ledger` T1 on a project-wide run, with `trace-commands` T1 and `otel-semconv` T1 in parallel; `topology-compare` and `agent-bindings` the moment `store-ledger` lands. Before `store-ledger`'s `run.zsh` validation: add the four-line inherited-selector guard from `tests/pm_flow_test.sh:12-14` to `template/.agentic/pm_flow/tests/run.zsh` and `tests/prompt_quality_test.sh` (by hand or a maintenance engineer — no live owner), or every reviewer on the path hits a red suite for a plumbing reason. Nothing in flight is on the path: `codex-usage` T3 is the only active work and it closes scaffolding.
-
 ## Review 001 - 2026-08-23T13:50:52Z - $112.3201 spent
 
 - Summary: 1 of 7 criteria met; verdicts CONTINUE 8, CUT 2; shortest path: `store-ledger` T1 now (it heads the chain to `compare`, the objective itself), with `trace-commands` T1 and `otel-semconv` T1 in parallel on disjoint paths; ...
-
-### Completion criteria
-
-- Finished run opens in Phoenix/Langfuse/Jaeger with every role, prompt, retry, stall, tokens, dollars — **NOT MET**: `git grep otlp_endpoint` on both `config.json` printed nothing; `trace_export.py` is reached only from `driver.zsh:736` autoexport; `src/pm_flow/cli.py` has no `trace`.
-- `cost_ledger.tsv` gone, host absorbs no per-dispatch writes — **NOT MET**: `driver.zsh:441-471` still writes/reads `runs/cost_ledger.tsv`; `ls` shows it on disk beside `pm_flow.db` (both gitignored, so no *tracked* writes).
-- Sections run in isolated worktrees — **MET**: `git worktree list` shows `codex-usage` and `persona-packs` checkouts under `../.pm-flow-worktrees/`, outside the repo; `driver.zsh:2268-2270` issues `worktree add`.
-- Persona installed from elsewhere, dropped on a seat, measured against the one it replaced — **NOT MET**: `catalog.py:1665-1681` registers `persona add|list|swap`; no compare/measure exists anywhere in `src/` or `template/`.
-- Two topologies compared in one command — **NOT MET**: `git grep -i compare src/pm_flow/cli.py` printed nothing; `src/pm_flow/compare.py` is not tracked.
-- Drivable over MCP, binds any ACP agent — **NOT MET**: `git grep -iE 'acp|mcp'` on `agent_exec.sh`, `pm_flow.sh`, `config.json`, `cli.py` printed nothing.
-- Test suite runs to completion — **NOT MET by probe**: `tests/pm_flow_test.sh`, `zsh -f tests/pm_flow_test.sh` and `zsh -f tests/prompt_quality_test.sh` were each refused under approval in this tier; last suite commit `988781c` (today); green-suite/packaging handoffs claim exit 0 and remain claims.
-
-### Verdicts
-
-- a2a-binding: CUT no plan bullet names A2A (the binding criterion is ACP); waits on an unstarted section; its own stated risk is an unauthenticated endpoint that spends budget. Product no longer guarantees an A2A-bound seat.
-- agent-bindings: CONTINUE
-- codex-usage: CONTINUE
-- otel-semconv: CONTINUE
-- persona-cards: CONTINUE
-- persona-packs: CONTINUE
-- repo-hooks: CUT advances no plan bullet; the driver already writes Conventional Commits; its failure mode (hook refusing the driver's subject) stops the flow. Product no longer guarantees a commit-message hook or an install registry. Reopen with a planned handoff once the must-haves close.
-- store-ledger: CONTINUE
-- topology-compare: CONTINUE
-- trace-commands: CONTINUE
-
-### Shortest path
-
-`store-ledger` T1 now (it heads the chain to `compare`, the objective itself), with `trace-commands` T1 and `otel-semconv` T1 in parallel on disjoint paths; `topology-compare` the moment `store-ledger` lands; `agent-bindings` after. Nothing in flight is on that path: the two active sections (`codex-usage` T3, `persona-packs` COMPLETE) are closing scaffolding.
 
 ## 2026-08-22 — `agents-md` panel adjudication
 

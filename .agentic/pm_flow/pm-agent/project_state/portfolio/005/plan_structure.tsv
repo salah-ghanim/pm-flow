@@ -1,0 +1,4 @@
+UNSTARTED_DEPENDENCY	CLEAR	— `topology-compare` and `agent-bindings` wait on `store-ledger` (5 cycles, active, one task from done); `persona-cards` waits on `persona-packs` (done).
+UNREACHABLE_SECTION	CLEAR	— review 004's ownership gap was closed by the boundary extension and T4 landed inside it.
+MUST_HAVE_INFLATION	CLEAR	— the five live must-haves map to the trace, ledger, compare and MCP/ACP bullets one-to-one.
+LINEAR_CHAIN_RISK	CLEAR	— depth two, and the starvation broke: both trace sections took their first scope cycles this window.

@@ -1,1 +1,1 @@
-Section created; its PM sub-agent has not been launched yet.
+Cycle 0; last action scope.

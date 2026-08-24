@@ -1,0 +1,111 @@
+{
+  "context": [
+    {
+      "bytes": 5977,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/plan.md",
+      "words": 906
+    },
+    {
+      "bytes": 35310,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/portfolio_log.md",
+      "words": 4951
+    },
+    {
+      "bytes": 19097,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/task_contract.md",
+      "words": 2960
+    },
+    {
+      "bytes": 5217,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/sections.md",
+      "words": 576
+    },
+    {
+      "bytes": 1662,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/portfolio/005/facts.md",
+      "words": 195
+    },
+    {
+      "bytes": 402,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/agent-bindings/handoff.md",
+      "words": 52
+    },
+    {
+      "bytes": 533,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/artifact-quality/handoff.md",
+      "words": 69
+    },
+    {
+      "bytes": 379,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/otel-semconv/handoff.md",
+      "words": 44
+    },
+    {
+      "bytes": 344,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/persona-cards/handoff.md",
+      "words": 44
+    },
+    {
+      "bytes": 352,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/run-detach/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 1923,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/store-ledger/handoff.md",
+      "words": 294
+    },
+    {
+      "bytes": 399,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/topology-compare/handoff.md",
+      "words": 50
+    },
+    {
+      "bytes": 352,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/trace-commands/handoff.md",
+      "words": 41
+    }
+  ],
+  "findings": [
+    {
+      "code": "context-fanout",
+      "message": "prompt asks the role to read 13 context files",
+      "severity": "warning"
+    },
+    {
+      "code": "context-budget",
+      "message": "listed context contains approximately 10224 words",
+      "severity": "warning"
+    }
+  ],
+  "metrics": {
+    "bytes": 6895,
+    "context_files": 13,
+    "context_words": 10224,
+    "duplicate_ratio": 0.0,
+    "task_ratio": 0.7176,
+    "task_words": 719,
+    "words": 1002
+  },
+  "path": "/Users/salah/code/personal/pm-flow/.agentic/pm_flow/pm-agent/project_state/portfolio/005/prompt.md",
+  "runtime": {
+    "commit_owner": "product-officer",
+    "phase": "portfolio_review",
+    "role": "cpo",
+    "version": "2"
+  },
+  "schema_version": 1
+}
