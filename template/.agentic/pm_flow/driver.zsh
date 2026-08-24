@@ -2766,13 +2766,14 @@ cmd_tick() {
   local section_dir action
   acquire_run_lock
   prune_section_worktrees
+  telemetry_begin_run "${PM_FLOW_COMMAND:-tick}"
   if [[ -n "$requested_section" ]]; then
     section_dir="$(resolve_section_dir "$requested_section")"
     action="$(section_next_action "$section_dir")"
     case "$action" in
-      waiting-dependencies) printf 'waiting=%s\n' "$(basename "$section_dir")"; return 0 ;;
-      quarantined)          printf 'quarantined=%s\n' "$(basename "$section_dir")"; return 0 ;;
-      idle)                 printf 'idle=%s\n' "$(basename "$section_dir")"; return 0 ;;
+      waiting-dependencies) printf 'waiting=%s\n' "$(basename "$section_dir")"; telemetry_end_run ok; return 0 ;;
+      quarantined)          printf 'quarantined=%s\n' "$(basename "$section_dir")"; telemetry_end_run ok; return 0 ;;
+      idle)                 printf 'idle=%s\n' "$(basename "$section_dir")"; telemetry_end_run ok; return 0 ;;
     esac
   else
     # Project-level work comes first. A portfolio review that only ran when no
@@ -2790,12 +2791,14 @@ cmd_tick() {
           printf 'result=%s\n' "$(run_portfolio_review)"
         fi
         printf 'spent_usd=%s\n' "$(spent_usd)"
+        telemetry_end_run ok
         return 0
         ;;
     esac
     section_dir="$(first_line_of "$(actionable_sections)")"
     if [[ -z "$section_dir" ]]; then
       printf 'idle=project\n'
+      telemetry_end_run ok
       return 0
     fi
     action="$(section_next_action "$section_dir")"
@@ -2816,7 +2819,13 @@ cmd_tick() {
   printf 'spent_usd=%s\n' "$(spent_usd)"
   if [[ -f "$section_dir/quarantine.txt" ]]; then
     printf 'quarantined=%s\n' "$(basename "$section_dir")"
+    telemetry_end_run error
     return 1
+  fi
+  if (( action_status == 0 )); then
+    telemetry_end_run ok
+  else
+    telemetry_end_run error
   fi
   return "$action_status"
 }
@@ -2840,6 +2849,7 @@ cmd_run() {
   # directory, and git then refuses to reuse the path. Clearing that once per
   # run is what keeps a crash from blocking the next one.
   prune_section_worktrees
+  telemetry_begin_run "${PM_FLOW_COMMAND:-run}"
   local tick=0 section_dir action quarantined deadlocked project_action
   while (( tick < max_ticks )); do
     if [[ -n "${SECTION_OVERRIDE:-}" ]]; then
@@ -2898,11 +2908,14 @@ cmd_run() {
   # Non-zero only when nothing can move: every live section is quarantined, or a
   # dependency was cancelled and its dependents can never become actionable.
   if [[ -n "$deadlocked" ]]; then
+    telemetry_end_run error
     return 1
   fi
   if [[ -n "$quarantined" ]] && [[ -z "$(actionable_sections)" ]]; then
+    telemetry_end_run error
     return 1
   fi
+  telemetry_end_run ok
   return 0
 }
 

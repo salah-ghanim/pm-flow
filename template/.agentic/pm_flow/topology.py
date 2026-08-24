@@ -22,6 +22,7 @@ FALLBACK_MODELS = {
     # Empty is deliberately unconstrained, not a registry with no valid model.
     "copilot": [],
 }
+DEFAULT_ENGINE = Path(__file__).resolve().parent
 
 
 class TopologyError(Exception):
@@ -97,10 +98,15 @@ def load_config(flow: Path) -> dict:
     return config
 
 
-def load_document(key: str, flow: Path) -> dict:
-    path = flow / "topologies" / f"{key}.json"
+def load_document(
+        key: str, flow: Path, engine: Path = DEFAULT_ENGINE) -> dict:
+    flow_path = flow / "topologies" / f"{key}.json"
+    engine_path = engine / "topologies" / f"{key}.json"
+    path = flow_path if flow_path.is_file() else engine_path
     if not path.is_file():
-        raise TopologyError(f"topology {key!r} is missing; expected document at {path}")
+        raise TopologyError(
+            f"topology {key!r} is missing; expected document at {flow_path}; "
+            f"also looked at {engine_path}")
     document = load_json(path, f"topology {key!r}")
     if not isinstance(document, dict):
         raise TopologyError(f"topology {key!r} at {path} must be an object")
@@ -116,9 +122,11 @@ def load_document(key: str, flow: Path) -> dict:
     return document
 
 
-def merged_config(key: str, flow: Path) -> tuple[dict, dict]:
+def merged_config(
+        key: str, flow: Path,
+        engine: Path = DEFAULT_ENGINE) -> tuple[dict, dict]:
     config = load_config(flow)
-    document = load_document(key, flow)
+    document = load_document(key, flow, engine)
     merged = dict(config)
     merged_roles = dict(config["roles"])
     merged_roles.update(document["roles"])
@@ -130,11 +138,17 @@ def merged_config(key: str, flow: Path) -> tuple[dict, dict]:
     return document, merged
 
 
-def domain_definition(flow: Path, config: dict) -> tuple[str, dict]:
+def domain_definition(
+        flow: Path, config: dict,
+        engine: Path = DEFAULT_ENGINE) -> tuple[str, dict]:
     domain = config.get("domain") or "generic"
-    path = flow / "domains" / f"{domain}.json"
+    flow_path = flow / "domains" / f"{domain}.json"
+    engine_path = engine / "domains" / f"{domain}.json"
+    path = flow_path if flow_path.is_file() else engine_path
     if not path.is_file():
-        raise TopologyError(f"unknown domain {domain!r}; no definition at {path}")
+        raise TopologyError(
+            f"unknown domain {domain!r}; no definition at {flow_path}; "
+            f"also looked at {engine_path}")
     definition = load_json(path, f"domain {domain!r}")
     if not isinstance(definition, dict):
         raise TopologyError(f"domain {domain!r} at {path} must be an object")
@@ -150,16 +164,26 @@ def validate_binding(
         titles: dict,
         registry: dict[str, list[str]],
         check_model: bool,
+        engine: Path = DEFAULT_ENGINE,
 ) -> list[dict]:
     seats = binding if isinstance(binding, list) else [binding]
     if not seats:
         raise TopologyError(f"role {role!r} is an empty panel in topology {key!r}")
-    base_persona = flow / "roles" / f"{role}.md"
-    domain_persona = flow / "domains" / domain / "roles" / f"{role}.md"
-    if not base_persona.is_file() and not domain_persona.is_file():
+    flow_base_persona = flow / "roles" / f"{role}.md"
+    flow_domain_persona = flow / "domains" / domain / "roles" / f"{role}.md"
+    engine_base_persona = engine / "roles" / f"{role}.md"
+    engine_domain_persona = engine / "domains" / domain / "roles" / f"{role}.md"
+    persona_paths = (
+        flow_base_persona,
+        flow_domain_persona,
+        engine_base_persona,
+        engine_domain_persona,
+    )
+    if not any(path.is_file() for path in persona_paths):
         raise TopologyError(
-            f"role {role!r} has no persona file under {flow / 'roles'}"
-            f" or {domain_persona.parent}")
+            f"role {role!r} has no persona file at {flow_base_persona}"
+            f" or {flow_domain_persona}; also looked at {engine_base_persona}"
+            f" or {engine_domain_persona}")
     if role not in titles:
         raise TopologyError(f"domain {domain!r} does not define a title for role {role!r}")
     for index, seat in enumerate(seats, start=1):
@@ -182,9 +206,11 @@ def validate_binding(
     return seats
 
 
-def validate(key: str, flow: Path) -> tuple[dict, list[str]]:
-    document, merged = merged_config(key, flow)
-    domain, definition = domain_definition(flow, merged)
+def validate(
+        key: str, flow: Path,
+        engine: Path = DEFAULT_ENGINE) -> tuple[dict, list[str]]:
+    document, merged = merged_config(key, flow, engine)
+    domain, definition = domain_definition(flow, merged, engine)
     titles = definition.get("titles", {})
     if not isinstance(titles, dict):
         titles = {}
@@ -193,7 +219,7 @@ def validate(key: str, flow: Path) -> tuple[dict, list[str]]:
     for role in sorted(merged["roles"]):
         seats = validate_binding(
             key, role, merged["roles"][role], flow, domain, titles, registry,
-            role in document["roles"])
+            role in document["roles"], engine)
         descriptions = []
         for index, seat in enumerate(seats, start=1):
             descriptions.append(
@@ -211,8 +237,10 @@ def build_parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("key")
         subparser.add_argument("--flow", required=True, type=Path)
+        subparser.add_argument("--engine", type=Path, default=DEFAULT_ENGINE)
     subparser = subparsers.add_parser("list")
     subparser.add_argument("--flow", required=True, type=Path)
+    subparser.add_argument("--engine", type=Path, default=DEFAULT_ENGINE)
     return parser
 
 
@@ -221,13 +249,17 @@ def main(argv):
     args = parser.parse_args(argv[1:])
     try:
         flow = args.flow.resolve()
+        engine = args.engine.resolve()
         if args.command == "list":
-            directory = flow / "topologies"
-            if directory.is_dir():
-                for path in sorted(directory.glob("*.json")):
-                    print(path.stem)
+            documents = {}
+            for directory in (engine / "topologies", flow / "topologies"):
+                if directory.is_dir():
+                    for path in sorted(directory.glob("*.json")):
+                        documents[path.stem] = path
+            for stem in sorted(documents):
+                print(stem)
             return 0
-        merged, summaries = validate(args.key, flow)
+        merged, summaries = validate(args.key, flow, engine)
         if args.command == "validate":
             for summary in summaries:
                 print(summary)
