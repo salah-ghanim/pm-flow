@@ -2,12 +2,11 @@
 
 ## Current task
 
-- T5 — scenarios 1-3 through the installed wheel. T4 closed at cycle 005: the
-  command now runs from a flow directory that holds project data only, a `runs`
-  row is one invocation rather than one dispatch subshell, and the
-  `topology_edges` import is mutation-tested. What is left is the brief's three
-  user-visible scenarios driven through a `pm-flow` entry point installed from a
-  built wheel, including the topology key on `pm-flow cost`'s attempt lines.
+- None. T5 was accepted at cycle 006 and it was the last task in the workplan.
+  Every brief acceptance ID (A1-A6) now has current evidence through the
+  installed entry point. What remains is the handoff, and in it two disclosures:
+  the `fail`-path open run below, and the brief's owned-paths correction
+  (engine Python lives under `template/.agentic/pm_flow/`, not `src/pm_flow/`).
 
 ## Completed tasks and evidence
 
@@ -183,6 +182,93 @@
     — the `n_runs` assertion goes red, not merely `wall_clock_s`;
     the edge SELECT disabled → `FAIL: data-only import omitted topology edges`.
 
+- T5 — scenarios 1-3 through the installed wheel. Accepted cycle 006.
+  Acceptance IDs: A1, A2, A3, A4, A5, plus the A6 regression gate.
+  - `zsh tests/topology_compare_test.sh` → exit 0,
+    `PASS: topology compare reports literal metrics, limits, personas, and copy retention`.
+    Run twice by the reviewer, 2026-08-24, both green. The suite now builds the
+    wheel itself: a build venv installs the pinned wheelhouse under
+    `--require-hashes`, `pip wheel --no-index --no-build-isolation --no-deps`
+    produces exactly one `pm_flow-*.whl`, and a separate runtime venv installs it
+    `--no-index --no-deps`. The build reaches no index; the suite also refuses if
+    an inherited `PIP_*`/`UV_*` setting survives into it.
+  - The engine answers from the venv, not the checkout. `command -v pm-flow`
+    under the fixture's `PATH` is asserted equal to `<runtime-venv>/bin/pm-flow`;
+    `pm_flow.paths.engine_root()` is asserted to sit inside that venv; the
+    runtime venv is asserted not to contain the build backend. No
+    `PM_FLOW_ENGINE_ROOT`, `PM_FLOW_FLOW_DIR` or `PYTHONPATH` is set anywhere in
+    the wheel block — `PYTHONPATH` is unset before it (`:561`) — so cycle 005's
+    variables cannot be answering for the wheel.
+  - The fixture repository holds project data only: its `.agentic/pm_flow/`
+    is asserted, dotfiles included, to be exactly
+    `.project-key config.json local_env.sh wheel-topology-project` — no
+    `topologies/`, `roles/` or `domains/`. So the topology documents the compare
+    resolves can only have come from the wheel.
+  - A1. After `pm-flow --project wheel-topology-project compare lean heavy
+    --max-ticks 6`, the store reads exactly
+    `heavy|wheel-topology-project` / `lean|wheel-topology-project`. Both
+    `copy_path` values are read from the command's own stdout, differ from each
+    other and from the origin checkout, and `starting_commit=` equals the
+    fixture's `git rev-parse HEAD`.
+  - A2. The header is `metric lean heavy` and the eight contract rows print in
+    order (`cost_usd tokens cycles_to_done rescue_rate abandon_rate
+    escalation_depth wall_clock_s n_runs`), asserted as a string, from the wheel
+    command's stdout. Both `wall_clock_s` values are `> 0`. The seeded fixture's
+    literal values are untouched — the test file's diff is 264 insertions and 0
+    deletions, so the `cmp` at `:125` and T1's `$FLOW/topologies/missing.json`
+    refusal still stand where they were.
+  - A3. The last line is
+    `Limits: lean n=1; heavy n=1. No difference between the arms can be inferred.`
+    and the store's own run count per topology is asserted separately as
+    `heavy|1` / `lean|1`, so the sentence is shown to count runs.
+  - A4, now against a non-zero baseline. `compare heavy missing` runs *after* the
+    successful compare: the attempt count before it is asserted `> 0`, the
+    command exits non-zero, writes nothing to stdout, names both
+    `<fixture-flow>/topologies/missing.json` and
+    `<venv>/…/pm_flow/engine/topologies/missing.json` on stderr, and leaves the
+    attempt count equal to that non-zero baseline. Cycle 005's `0 == 0` is
+    retired.
+  - A5. The wheel report's per-arm block reads `lean|pm=pm` / `heavy|pm=pm` and
+    the store's `attempts.persona_stack` base layer agrees in both directions.
+    The differentiating case — a swap on one arm only — remains the
+    mutation-tested `--persona lean:pm=cpo` block from T3.
+  - Scenario 3. `pm-flow cost` immediately after the compare prints `ATTEMPT`
+    lines of exactly 10 tab fields; field 10 read with `awk -F'\t'` and `sort -u`
+    is exactly `heavy` / `lean` — an exact field match, not a substring. `TOTAL`
+    equals `cost.py total` on the same project, so there is one accounting.
+  - Reviewer negative check on field 10, 2026-08-24, at the data level rather
+    than by editing source (`cycles/006/review_probe.zsh`): a throwaway store
+    with three attempts — one on a `lean` run, one on a `heavy` run, one with no
+    `run_id` — reports field 10 as `lean`, `heavy` and `-` respectively, and
+    `TOTAL 1.2500` still includes the run-less attempt's `0.25`. The field is
+    therefore data-derived and no topology filter reached any sum. Dropping the
+    join would make every field 10 read `-`, which is the developer's reported
+    mutation line (`expected 'heavy\nlean', got '-'`).
+  - `cost.py`'s diff is 4 insertions and 1 deletion, confined to
+    `stored_attempts`' SELECT (the two joins and `tp.key AS topology`) and one
+    appended `present(row["topology"])` in `report_store`. `stored_totals`,
+    `import_legacy` and every sum are untouched, and the first nine fields keep
+    their order.
+  - A6. `zsh tests/pm_flow_test.sh` → exit 0, 10 `PASS:` lines;
+    `zsh tests/packaged_layout_test.sh` → exit 0, 13 `PASS:` lines including
+    `a copied-engine repository migrates losslessly and keeps running`;
+    `zsh tests/store_ledger_test.sh` → exit 0, `store ledger tests passed`;
+    `zsh tests/prompt_quality_test.sh` → exit 0, 4 `PASS:` lines;
+    `zsh tests/agent_bindings_test.sh` → exit 0, 17 `PASS:` lines. All five run
+    by the reviewer against the developer's tree.
+  - Suite runtime, measured by the reviewer (`cycles/006/review_timing.zsh`):
+    `exit=0 elapsed_s=49` for the whole gate suite including the offline wheel
+    build. Cycle 005's timeout risk did not recur.
+  - The three environment mutations the developer reported were confirmed by
+    reading the assertions rather than re-running them: the `PATH` mutation is
+    caught by `assert_eq "$wheel_command_path" "$WHEEL_PM_FLOW"`, the removed
+    `topologies` directory by `[[ -d "$WHEEL_ENGINE/topologies" ]] || fail "the
+    installed wheel omits its topology documents"`, and the reordered refusal by
+    `(( wheel_attempts_before > 0 ))` — each an unconditional `fail` under
+    `set -euo pipefail`, and each matching the failure line reported verbatim.
+    A PM does not edit source, so the source-side mutation was verified through
+    the data probe above instead.
+
 ## Active decisions
 
 - Engine Python lives in `template/.agentic/pm_flow/`, not `src/pm_flow/`.
@@ -271,23 +357,28 @@
   which was outside T4's writable fence (`driver.zsh`, the `cmd_run` and
   `cmd_tick` call sites only). Not a T5 acceptance; give it its own task if the
   budget-exhausted run has to be measurable.
-- Booked for T5, not a blocker: scenario 3 needs a topology key on
-  `pm-flow cost`'s attempt lines, and `cost.py` has no notion of a topology
-  (no match for `topology` in the file, 2026-08-24). One trailing field on the
-  `ATTEMPT` line (`cost.py:251-262`), joined through `runs.topology_id`, is a
-  presentation change and not a second accounting; every current consumer reads
-  fields 1-7 or a `grep -F` substring, so nothing breaks. `cost.py` is
-  `store-ledger`'s file and that section has handed off, so the edit is named in
-  our handoff when it lands.
-
-- Open risk for T5, observed 2026-08-24: the data-only compare's arm runs vary
-  wildly in wall clock. In five reviewer runs the whole suite finished inside
-  600s; in a sixth the `heavy` arm's run alone measured `702.4` seconds against
-  `lean`'s `4.4`, and the suite exceeded a 600s timeout. `wall_clock_s` is
-  measuring real elapsed time, which is what it is for, so this is not a
-  reporting defect — but nothing bounds an arm's run, and T5 adds a wheel build
-  on top. If the suite starts timing out, bound the arm rather than loosening
-  the assertion.
+- Handoff obligation, not a blocker: this section edited `store-ledger`'s
+  `cost.py` at T5. The `ATTEMPT` line is now ten fields, the tenth being the
+  attempt's run topology key (`-` when the attempt has no run or the run no
+  topology). The first nine keep their positions and `stored_totals`,
+  `import_legacy` and every sum are unchanged, so it is a presentation change
+  and not a second accounting. Six call sites across four suites read those
+  positions; all four suites are green. Name this in the handoff so
+  `store-ledger` and any downstream reader of `pm-flow cost` know the shape
+  changed.
+- Standing note for anyone widening the `ATTEMPT` line again: its consumers are
+  `tests/store_ledger_test.sh`, `tests/agent_bindings_test.sh:367-370`,
+  `tests/prompt_quality_test.sh` (through
+  `template/.agentic/pm_flow/tests/transitions.zsh:196`, `:318` and
+  `tests/on_demand.zsh:172`), and `driver.zsh:887` (`dispatch_count`, a
+  `^ATTEMPT` count). All read fields 1-7 or a count, which is why a trailing
+  tenth field broke none of them. A change to fields 1-9 would break all four.
+- Arm wall clock still varies and nothing bounds an arm's run. Cycle 005 saw a
+  `heavy` arm take 702.4s against `lean`'s 4.4s and exceed a 600s suite timeout.
+  Cycle 006 did not reproduce it: three reviewer runs of the gate suite, now
+  including an offline wheel build, all finished green, one timed at 49s. The
+  variance is real elapsed time and not a reporting defect; if the suite starts
+  timing out, bound the arm rather than loosening `wall_clock_s > 0`.
 - The migration rule stays open as a standing rule
   for the rest of the section: every task that adds a file under
   `template/.agentic/pm_flow/` must add its name to `install.sh`'s
@@ -319,11 +410,10 @@
 
 ## Next eligible task
 
-- T5 — scenarios 1-3 through the installed wheel. Depends on T4, now done. It
-  drives `compare lean heavy --max-ticks 6`, `compare heavy missing` and
-  `pm-flow cost` through a `pm-flow` entry point installed from a built wheel
-  into a repository holding project data only, and appends the attempt's run
-  topology key as one trailing field on `cost.py`'s `ATTEMPT` line. It is the
-  section's gate: T4 made the command work outside a flow directory that
-  happens to hold the engine, and T5 is where that is shown through the
-  installed entry point rather than `zsh pm_flow.sh`.
+- None. T5 was the workplan's last task and the section's gate; it was accepted
+  at cycle 006 with A1-A6 evidenced through the installed entry point. The
+  section is complete and the next step is the handoff, not another cycle.
+- Three things belong in that handoff rather than in a new task: the `ATTEMPT`
+  line's tenth field (`store-ledger`'s file, this section's edit), the
+  brief's owned-paths correction, and the `fail`-path open run as a disclosed
+  limitation. No acceptance ID depends on the last of those.

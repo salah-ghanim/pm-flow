@@ -326,37 +326,72 @@ change of scope; every acceptance ID is unaffected.
 
 ## Task T5 — Scenarios 1-3 through the installed wheel
 
-- Status: pending.
+- Status: done (cycle 006). The section's gate is closed. A1-A5 met through a
+  `pm-flow` entry point installed from a wheel built offline inside the suite,
+  against a repository holding project data only; the A6 regression gate holds
+  across all six suites that read the `ATTEMPT` line. Scenario 3's tenth field
+  is data-derived, not a constant: reviewer probe, `-` for an attempt with no
+  run and the run's topology key otherwise, with `TOTAL` still summing the
+  run-less attempt. No task follows; the section is complete apart from the
+  `fail`-path open run booked in `state.md` as a disclosed limitation.
 - Outcome: the brief's three user-visible scenarios driven through a `pm-flow`
   entry point installed from a built wheel, in a repository that holds project
   data only: `compare lean heavy --max-ticks 6` prints the table, the arm sizes
   and the limits sentence; `compare heavy missing` exits non-zero before any
   dispatch; `pm-flow cost` afterwards shows attempts from both arms, each
   carrying its topology key.
+- An arm needs no work to run under a wheel. Probed 2026-08-24: `run_compare`
+  takes `engine = Path(__file__).resolve().parent` (`compare.py:596`) and
+  `run_arm` drives `zsh <engine>/pm_flow.sh --project … run` with
+  `PM_FLOW_ENGINE_ROOT` at that same directory (`:568-585`). Under a wheel that
+  path is `<venv>/…/site-packages/pm_flow/engine`, which the force-include at
+  `pyproject.toml:47-51` populates from `template/.agentic/pm_flow` — documents,
+  `roles/` and `domains/` included. So T5's engine-side risk is the wheel's
+  *contents*, not the dispatch path, and the fixture proves it by holding none of
+  those names itself.
 - Scenario 3 needs one field that does not exist. `cost.py` knows nothing about
   topologies (probed 2026-08-24: no match for `topology` in the file), and its
   `ATTEMPT` line is
   `ATTEMPT\t<started_at>\t<section>\t<role>\t<label>\t<cli>\t<cost>\t<in>\t<out>`
   (`cost.py:251-262`). Append one trailing field, the attempt's run topology key
-  through `runs.topology_id → topologies.key`, `-` when a run has none. This is
-  presentation only: `stored_totals`, `import_legacy` and every sum stay
-  untouched, so it is not a second accounting. Every existing consumer reads
-  positional fields 1-7 or a `grep -F` substring
-  (`store_ledger_test.sh:173-176`, `:311`, `:397`, `:407`, `:417-419`;
-  `agent_bindings_test.sh:367-370`), so a trailing field breaks none of them —
-  which `zsh tests/store_ledger_test.sh` must prove. `cost.py` is `store-ledger`'s
-  file and that section has handed off, so this edit is named in the handoff.
+  through `attempts.run_id → runs.topology_id → topologies.key`, `-` when a run
+  has none. Two edits and no others: `stored_attempts`' SELECT (`cost.py:227-239`)
+  gains the join and the column, and `report_store`'s `print` (`:258-262`) gains
+  one `present(...)` at the end. `stored_totals`, `import_legacy` and every sum
+  stay untouched, so it is not a second accounting.
+- Every existing `ATTEMPT` consumer reads positional fields 1-7, a `grep -F`
+  substring or a `grep -c '^ATTEMPT'` count, so a trailing tenth field breaks
+  none of them. The full list, re-probed 2026-08-24 — the first two suites are
+  new to this list and must be run:
+  - `tests/prompt_quality_test.sh`, through
+    `template/.agentic/pm_flow/tests/transitions.zsh:196`, `:318` (`$7`) and
+    `tests/on_demand.zsh:172` (`$5`, `$3`).
+  - `tests/agent_bindings_test.sh:367`, `:370` (`$4`, `$6`).
+  - `tests/store_ledger_test.sh:174`, `:185`, `:292`, `:307`, `:311`, `:322`,
+    `:397`, `:405-413`, `:418`, `:473`.
+  - `driver.zsh:887`, `dispatch_count`, which counts `^ATTEMPT` lines.
+  `cost.py` is `store-ledger`'s file and that section has handed off, so this
+  edit is named in our handoff when it lands.
+- A4's "no new attempt" is currently `0 == 0`: cycle 005's data-only refusal runs
+  before any compare, so the count was zero on both sides and the assertion
+  cannot fail on that clause alone (reviewer, cycle 005). In the wheel fixture,
+  put the refusal *after* the successful compare, so the expected count is the
+  non-zero number the compare wrote.
 - Paths: `template/.agentic/pm_flow/cost.py` (the report join only),
   `tests/topology_compare_test.sh`.
-- Reuse: `tests/packaged_layout_test.sh`'s wheel-and-venv harness (`:99-244`,
-  `install_pinned_venv` at `:1158-1171`) for a real `<venv>/bin/pm-flow`; the
-  stub-CLI harness for the arms.
+- Reuse: `tests/packaged_layout_test.sh`'s offline wheel build (`:88-244`) and
+  `install_pinned_venv` (`:1158-1172`) for a real `<venv>/bin/pm-flow`; this
+  suite's own data-only fixture (`tests/topology_compare_test.sh:370-447`) for
+  the repository layout, its `install_driver_stub` for the arms, and
+  `src/pm_flow/cli.py:72-84` for the `pm-flow --project <key> <command>` spelling.
 - Acceptance IDs: A1-A6.
 - Validation: `zsh tests/topology_compare_test.sh` drives all three scenarios
   through the venv entry point and asserts the printed report, the refusal, and
   `pm-flow cost` output carrying both arms' topology keys with the total
-  unchanged; `zsh tests/pm_flow_test.sh`, `zsh tests/packaged_layout_test.sh`
-  and `zsh tests/store_ledger_test.sh` exit 0.
+  unchanged; `zsh tests/pm_flow_test.sh`, `zsh tests/packaged_layout_test.sh`,
+  `zsh tests/store_ledger_test.sh`, `zsh tests/prompt_quality_test.sh` and
+  `zsh tests/agent_bindings_test.sh` exit 0 — the last two because they read the
+  `ATTEMPT` line's fields.
 - Depends on: T4.
 
 ## Integration and end-to-end validation
@@ -407,6 +442,6 @@ change of scope; every acceptance ID is unaffected.
 | A1 | T2, T4, T5 | Runs under both keys, one project key |
 | A2 | T3, T4, T5 | Every column equals the hand-computed fixture; `wall_clock_s` non-zero when driven |
 | A3 | T3, T4, T5 | Limits sentence present; its removal fails; arm size counts runs |
-| A4 | T1, T4, T5 | Refusal before dispatch; no new attempt row; both searched paths named |
+| A4 | T1, T4, T5 | Refusal before dispatch; the attempt count unchanged against a non-zero baseline; both searched paths named |
 | A5 | T2, T3 | Persona key per arm, in the store and the column |
 | A6 | T4, T5 | The three named suites exit 0, plus `store_ledger_test.sh` |
