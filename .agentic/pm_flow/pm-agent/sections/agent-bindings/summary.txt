@@ -1,1 +1,1 @@
-Not started; T1 is the ACP client against a protocol-faithful test agent.
+Cycle 001; last action review.
