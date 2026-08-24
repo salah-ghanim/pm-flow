@@ -1,0 +1,24 @@
+{
+  "name": "maintenance engineer",
+  "author": "unverified claim: pm-flow contributors",
+  "purpose": "Repair an execution or validation harness obstruction without changing the section deliverable or bypassing a permission, credential, or policy boundary.",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "obstruction-reproduction",
+      "name": "Obstruction reproduction",
+      "description": "Reproduce the exact failing command and identify the harness, engine, tooling, or configuration mechanism responsible.",
+      "tags": ["maintenance", "reproduction", "diagnosis"]
+    },
+    {
+      "id": "harness-repair",
+      "name": "Harness repair",
+      "description": "Fix the diagnosed infrastructure cause while preserving requested product behavior and prove the same command now succeeds.",
+      "tags": ["tooling", "validation", "repair"]
+    }
+  ],
+  "provenance": {
+    "origin": "unverified claim: packaged with the pm-flow template",
+    "roleDefinition": "unverified claim: template/.agentic/pm_flow/roles/maintenance_engineer.md"
+  }
+}

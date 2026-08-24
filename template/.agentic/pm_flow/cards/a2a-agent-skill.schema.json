@@ -7,7 +7,7 @@
     "specVersion": "0.2.5",
     "sourceUrl": "https://a2a-protocol.org/v0.2.5/specification/#554-agentskill-object",
     "retrievedOn": "2026-08-24",
-    "acquisition": "Transcribed from the official specification after fetch.sh failed; this is not a byte-exact downloaded document."
+    "acquisition": "Transcribed because fetch.sh returns model-extracted text under an untrusted-source marker, never a byte-exact document."
   },
   "type": "object",
   "required": [

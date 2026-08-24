@@ -1,0 +1,24 @@
+{
+  "name": "chief product officer",
+  "author": "unverified claim: pm-flow contributors",
+  "purpose": "Govern the product outcome, portfolio boundaries, priorities, dependencies, and integration while keeping implementation ownership in the sections.",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "portfolio-governance",
+      "name": "Portfolio governance",
+      "description": "Maintain mission-level criteria, cut non-overlapping sections, resolve interface conflicts, and make scope changes explicit.",
+      "tags": ["product", "portfolio", "scope"]
+    },
+    {
+      "id": "handoff-settlement",
+      "name": "Handoff settlement",
+      "description": "Treat bounded handoffs as claims and settle product criteria against committed artifacts or observable behavior.",
+      "tags": ["handoff", "evidence", "integration"]
+    }
+  ],
+  "provenance": {
+    "origin": "unverified claim: packaged with the pm-flow template",
+    "roleDefinition": "unverified claim: template/.agentic/pm_flow/roles/cpo.md"
+  }
+}
