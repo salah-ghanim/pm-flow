@@ -73,25 +73,39 @@ Everything below serves that sentence.
 - Met: sections run in isolated worktrees outside the repository; the four
   suites exit 0 from the officer's tier (`zsh tests/pm_flow_test.sh`,
   `zsh tests/prompt_quality_test.sh`, `zsh tests/store_ledger_test.sh`,
-  `zsh template/.agentic/pm_flow/tests/run.zsh`).
+  `zsh template/.agentic/pm_flow/tests/run.zsh`), with the engine fixtures
+  now seeding and reading the store.
 - Unmet: backend-readable traces (no OTLP endpoint in `config.json`, no
-  `pm-flow trace`), the ledger still written by the driver, no compare, no
+  `pm-flow trace`), `runs/cost_ledger.tsv` still on disk, no compare, no
   persona measurement, no MCP or ACP surface.
-- `store-ledger`: `cost.py import|total|report`, `watch.py` and `pm-flow
-  cost` read the store; `driver.zsh` `record_dispatch_cost`, `spent_usd` and
-  `dispatch_count` still go through `runs/cost_ledger.tsv`. Its boundary
-  includes the three engine test fixtures and the README line that touch
-  the TSV, so T4 can remove the write without going red on its own suite.
-  `trace-commands` and `otel-semconv` wait on nothing and have no cycle.
-- Order of work: `store-ledger` to done, then `topology-compare` (the
+- `store-ledger`: T4 is on `main` (`1c5a301`). The driver's
+  `record_dispatch_cost`, `spent_usd` and `dispatch_count` go through the
+  store; `git grep cost_ledger -- template` hits only `cost.py:184,191`,
+  the import reader, which is legitimate. Remaining to done: delete the
+  TSV after proving A1 parity on the live project (`pm-flow cost` after
+  import equals the TSV report to the cent on `pm-agent`) and A4 (a
+  project at `max_usd` is refused its next dispatch with the store as the
+  source).
+- Cost-recording integrity: between 02:17Z and 06:08Z on 2026-08-24 the
+  cost reader recorded a blank cost for one developer dispatch, $0.00 for
+  one review, and ~$0.0022 for five scope dispatches whose historical
+  price is $2.7-4.8. `9452a80` keeps the run alive through a broken
+  reader; it does not repair the rows. The store carries known-low rows
+  for that window, the driver's spend-since-review figure ($2.3986) is a
+  third of what the TSV recorded for the same window ($8.74), and budget
+  governance under-counts until `store-ledger`'s A1 parity settles which
+  totals are right. The TSV must not be deleted before that parity check
+  runs against it.
+- `trace-commands` and `otel-semconv` each have cycle 001 scope done and
+  wait on nothing; their first assignments are next.
+- Order of work: `store-ledger` T5 to done, then `topology-compare` (the
   objective) and `agent-bindings`, which wait on it (compare needs cost
   totals, `pm-flow cost` for an ACP attempt needs the rewritten `cost.py`).
-  The driver is one loop that ranks by dependents before recency, so
-  `trace-commands` and `otel-semconv` get ticks only while `store-ledger`
-  is not actionable; once it is done the four must-haves interleave by
-  least-recent dispatch. `persona-cards`, `artifact-quality` and
-  `run-detach` are the live nice-to-haves; the driver dispatches must-haves
-  first.
+  The driver ranks by dependents before recency, so `trace-commands` and
+  `otel-semconv` get ticks only while `store-ledger` is not actionable;
+  once it is done the four must-haves interleave by least-recent dispatch.
+  `persona-cards`, `artifact-quality` and `run-detach` are the live
+  nice-to-haves; the driver dispatches must-haves first.
 - `run-detach` gets its `pm_flow.sh` routing arm and help line at the first
   portfolio review after `trace-commands` reports done; until then its
   script is invoked directly.

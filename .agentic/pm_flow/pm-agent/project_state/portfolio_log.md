@@ -4,6 +4,66 @@ Newest first. Read this before anything else: one review cannot see a
 section that has been nearly done for four of them, or a shortest path that
 has not moved in three. Older entries are compacted to their summary line.
 
+## Review 005 - 2026-08-24T07:49:41Z - $211.6728 spent (driver figure; under-counted, see cost incident)
+
+- Summary: 2 of 7 criteria met; verdicts CONTINUE 8; ON_TRACK for the first time - `store-ledger` T4 landed (`1c5a301`), the driver and all fixtures are off the TSV, and `trace-commands`/`otel-semconv` finally have their first cycles. Shortest path: `store-ledger` T5 (live A1 parity, A4 refusal, delete the TSV) then `topology-compare` T1.
+
+### Completion criteria
+
+- Finished run opens in Phoenix/Langfuse/Jaeger with every role, prompt, retry, stall, tokens, dollars — `git grep -inE 'otlp_endpoint|"trace"|compare|\bacp\b|\bmcp\b' -- src/pm_flow/cli.py` empty; same grep over `*config.json *agent_exec.sh *pm_flow.sh` empty — **NOT MET**
+- `cost_ledger.tsv` gone, host absorbs no per-dispatch writes — `git grep -n cost_ledger -- template` hits only `cost.py:184,191` (import reader); `driver.zsh` clean for the first time; `ls runs/` shows the TSV still on disk, last written 07:17Z (the merge minute), while `pm_flow.db` and run logs advanced at 07:38Z from a post-merge dispatch — **NOT MET** (write stopped; file not gone)
+- Sections run in isolated worktrees — `git worktree list`: `store-ledger` checkout under `../.pm-flow-worktrees/` at `1c5a301` — **MET**
+- Persona installed from elsewhere, dropped on a seat, measured against the one it replaced — `git grep -inE 'compare|measure' -- template/pm_flow/catalog.py` empty — **NOT MET**
+- Two topologies compared in one command — `git ls-files src/pm_flow` = `__init__ cli paths`, no `compare.py`; `cli.py` grep above empty — **NOT MET**
+- Drivable over MCP, binds any ACP agent — `git grep -inE 'otlp_endpoint|\bacp\b|\bmcp\b' -- '*config.json' '*agent_exec.sh' '*pm_flow.sh'` empty — **NOT MET**
+- Test suite runs to completion — `zsh tests/pm_flow_test.sh` exit 0 (10 PASS); `zsh tests/prompt_quality_test.sh` exit 0 (57 prompts); `zsh tests/store_ledger_test.sh` exit 0; `zsh template/.agentic/pm_flow/tests/run.zsh` `all suites passed` (35/41/32/58/74); `git status --short` unchanged after all four — **MET**
+
+### Findings
+
+- Cost-reader incident, 02:17Z-06:08Z today: `cost_ledger.tsv` rows show the
+  `store-ledger` 005 developer dispatch with a blank cost, its first review
+  at 0.000000, and five section scopes at ~$0.0022 against a $2.7-4.8
+  historical price; the 07:17Z review row is normal ($3.87). `9452a80
+  fix(driver): a broken cost reader no longer kills the run` is the owner's
+  patch. The driver's interval figure ($2.3986/22 dispatches) is a third of
+  the TSV's sum for the same window ($8.74). The store now carries
+  known-low rows; `store-ledger` A1 parity on `pm-agent` is the probe that
+  settles the correction, and the TSV stays until it runs.
+- `store-ledger` cycle 005 (T4) accepted and merged (`1c5a301`, `33df08d`,
+  `7ef20bc`); A5 settled by my own probe (`run.zsh` exit 0 with fixtures
+  on the store). Its `handoff.md` was not updated at acceptance — last
+  change is `ec8e4dc` (the reopen); `7ef20bc`'s subject says "state and
+  handoff" but the commit carries only state/workplan/summary stamps. Same
+  manager miss as review 003; the next scope call must sync it.
+- The five scope cycles' section stamps (status/summary/updated_at,
+  `last_dispatch.txt`) sit uncommitted in the main tree — same class as
+  the blocked-record bug `0665841` fixed. Not product state; noted for the
+  owner.
+- Refused in this tier: `sqlite3` on `runs/pm_flow.db` (approval), as in
+  001/003. Store row values probed via the TSV tail instead.
+
+### Verdicts
+
+- agent-bindings: CONTINUE
+- artifact-quality: CONTINUE
+- otel-semconv: CONTINUE
+- persona-cards: CONTINUE
+- run-detach: CONTINUE
+- store-ledger: CONTINUE
+- topology-compare: CONTINUE
+- trace-commands: CONTINUE
+
+### Plan structure
+
+- Unstarted dependency: CLEAR — `topology-compare` and `agent-bindings` wait on `store-ledger` (5 cycles, active, one task from done); `persona-cards` waits on `persona-packs` (done).
+- Unreachable section: CLEAR — the review-004 ownership gap was closed by the boundary extension and T4 landed inside it.
+- Must-have inflation: CLEAR — the five live must-haves map to the trace, ledger, compare and MCP/ACP bullets one-to-one.
+- Linear-chain risk: CLEAR — depth two, and the review-004 starvation broke: both trace sections took their first scope cycles this window.
+
+### Shortest path
+
+`store-ledger` T5 — A1 parity on the live project, A4 `max_usd` refusal from the store, then delete the TSV — closes the section; `topology-compare` T1 immediately after. `trace-commands` and `otel-semconv` assignments interleave. The next tick is `store-ledger` cycle 006 scope, which is on the path.
+
 ## Review 004 - 2026-08-24T01:57:39Z - $209.2742 spent
 
 - Summary: 2 of 7 criteria met; verdicts CONTINUE 7, RESCOPE 1; shortest path: `store-ledger` T4 (driver off the TSV, fixtures on the store) then T5 to done; `topology-compare` T1 next. `trace-commands` and `otel-semconv` get ticks only...
