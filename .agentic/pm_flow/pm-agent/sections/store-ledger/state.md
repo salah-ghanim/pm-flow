@@ -2,11 +2,43 @@
 
 ## Current task
 
-- None assigned. T3 accepted in cycle 003 (GO) and merged to `main`
-  (`cae52de`, `6f469b9`). Cycle 004 scope: `BLOCKED_EXTERNAL` — T4 needs
-  three engine test files outside Owned paths (see Blockers).
+- T5 — end-to-end through the installed command (next to assign; A1–A5).
+  Its validation carries the two checks the T2 suite cannot see (mixed
+  `projects.key` sum, `response_path` byte equality from the real driver).
 
 ## Completed tasks and evidence
+
+- T4 — driver stops writing the ledger (cycle 005, GO; A4, A5). Review
+  reran everything against the worktree (probes in `cycles/005/`):
+  `zsh tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0,
+  now asserting: pre-dispatch store shows 7 `ATTEMPT` lines and total
+  `12.1650`; one stub `section-analysis` dispatch in `COMMAND_WORK` leaves
+  `runs/` holding `pm_flow.db` and no `cost_ledger.tsv`, `git status
+  --porcelain` clean of `runs/`, exactly one new `ATTEMPT` line labelled
+  `analysis dispatch-check` with cost field `0.5000`, `cost.py total` →
+  `12.6650`; with `budget.max_usd 12.66` and no TSV on disk the next
+  dispatch prints `project budget exhausted` and the `ATTEMPT` count is
+  unchanged; the legacy `total <dir> <tsv>` arity exits 2;
+  `grep -c cost_ledger_file driver.zsh` → `0`; `grep -rl cost_ledger
+  template` → `cost.py` only. `record_dispatch_cost` is a documented no-op
+  (`:`) keeping its name and call (`driver.zsh:1020`, four args);
+  `spent_usd` runs `cost.py total "$PROJECT_DIR" "${1:-}"`;
+  `dispatch_count` counts `^ATTEMPT` of `cost.py report`; `cost_ledger_file`
+  and `totals()` deleted, `ledger_rows` (`cost.py:84`) and the importer's
+  TSV read (`:184`) kept. Driver diff hunks: `-439,5 -446,13 -463,3 -467
+  -834,3 -838,4`, all inside the authorized `:436-472` / `:834-843`.
+  Fixtures: `transitions.zsh:195,316-317` read field 7 of `ATTEMPT` lines
+  (`0.5000`/`0.2500`); `governance.zsh` and `on_demand.zsh` each gained one
+  `seed_attempt` helper (telemetry run-start/attempt-start/attempt-end);
+  governance seeds keys `y1`/`y2`, on_demand seeds `y` after the D2
+  baseline. README: only the `:168` ledger paragraph rewritten. Engine
+  suites `all suites passed` (35/41/32/58/74) with all nine named
+  assertions; `tests/pm_flow_test.sh` 10 `PASS:`; `packaged_layout_test.sh`
+  13 `PASS:` (the `cost reports the same spend after migration` check is a
+  silent-on-success `assert_equals` at `:1083`, not its own `PASS:` line).
+  Mutation (`cycles/005/mutation_check.zsh`, reversible, driver restored
+  byte-identical): reintroducing a TSV write in `record_dispatch_cost`
+  fails the suite with `FAIL: dispatch wrote cost_ledger.tsv`.
 
 - T3 — `pm-flow cost` reads the store (cycle 003, GO; A2 `pm-flow cost`
   clause, A5 regression). Diff: `git diff --stat` lists exactly `cost.py`
@@ -88,22 +120,17 @@
   cost; only envelopes absent from the TSV are parsed with `cost_of`.
 - Readers sum `COALESCE(cost_usd, 0)` regardless of `status`, because failed
   dispatches are paid for and imported rows carry `status='imported'`.
-- Interim rule T2→T4 (cycle 003): the new arity (`total <dir> [section]`,
-  `report <dir>`) imports silently then reads `attempts`; the legacy
-  `total <dir> <tsv> [section]` arity keeps `totals()` with no import side
-  effect until T4, because `governance.zsh:198-199` seeds two TSV rows
-  sharing the response key `y` and `spent_usd` must still read `$1.00`
-  there. T3 deletes the legacy `report` arity (only `cmd_cost` used it), so
-  after T3 `pm-flow cost` reads the store while `status` and the budget
-  check read the TSV; they disagree only on a TSV that repeats a
-  `response_path`, which no real dispatch produces.
+- The interim T2→T4 dual-arity rule is retired: T4 (cycle 005) deleted
+  `totals()` and the legacy `total <dir> <tsv>` arity; every reader —
+  `pm-flow cost`, `spent_usd`, `dispatch_count`, `watch.py` — now answers
+  from `attempts` after the silent import.
 - Nothing in the driver may import before `telemetry_end_attempt` at
   `driver.zsh:1056` records the `response_path`: the envelope is already on
   disk and an import in that window inserts it a second time.
 - `watch.py` is read-only against the store (`mode=ro`, no import, no file
-  creation); a legacy project may under-report in the watch view until T4.
+  creation).
 
-## Open risks carried to T4/T5
+## Open risks carried to T5
 
 - The T2 suite cannot see a `project_id` filter: its importer key and its
   telemetry key are both `legacy-project`. The code has none (probe: two keys
@@ -115,41 +142,21 @@
 - `watch.py` returns an empty view on any `sqlite3.Error` (old schema,
   read-only `runs/` with no `-shm`), so it can show `$0.00` for a project that
   has spent. Display only; the budget check never reads watch.
-- After T4, an operator `pm-flow status|cost` between the envelope landing and
-  `attempt-end` (`driver.zsh:1041-1056`) double-counts that dispatch; the TSV
-  row at :1036 closes the window today. Not deterministically testable.
+- An operator `pm-flow status|cost` between the envelope landing and
+  `attempt-end` (`driver.zsh:1041-1056`) double-counts that dispatch; the
+  TSV row that used to close the window is gone as of T4. A few
+  milliseconds wide, not deterministically testable. Recorded, not fixed.
 - Telemetry off or `attempt-start` failing leaves only the envelope: cost
   kept, role `unknown`, label = file name.
 
 ## Blockers
 
-- T4 is blocked on ownership; cycle 004 scope declared `BLOCKED_EXTERNAL`.
-  With T3 merged, nothing executable remains inside the brief's Owned paths:
-  every T4 driver edit goes red on A5 while the engine fixtures stand
-  (workplan T4, boundary conflict), and T5 depends on T4. Probe run at the
-  cycle 004 scope (`cycles/004/scope_probe.zsh`, 2026-08-24):
-  `owned_paths.txt` is still `cost.py`, `watch.py`, `driver.zsh`,
-  `tests/store_ledger_test.sh`; last commit to `brief.md`/`owned_paths.txt`
-  is `3ba4ea7` (2026-08-23); `grep -n cost_ledger template/.agentic/pm_flow/tests/*.zsh`
-  prints seven lines — `governance.zsh:198-199` seed two rows keyed `y`,
-  `transitions.zsh:195,311` `cat` the TSV for `0.500000` / `0.250000`,
-  `on_demand.zsh:158,160` `cat`/`awk` it for `analysis alpha` / `alpha`,
-  `on_demand.zsh:240` seeds one row keyed `y` (no change needed);
-  `grep -l pm_flow/tests sections/*/owned_paths.txt` → none; the only
-  sections that ever owned `tests/**` (`green-suite`, `worktree-isolation`)
-  are `done`. On `main`, `driver.zsh:441-471,837-839` still hold
-  `cost_ledger_file`, `record_dispatch_cost` (called at :1036), `spent_usd`
-  on the `.tsv` arity and `dispatch_count` on the TSV. The request in
-  `handoff.md` was committed at `6f469b9` (2026-08-24 03:32), after
-  portfolio review 003 was recorded (`2045579`, 03:12), so no owner has
-  ruled on it yet. Unblocking observation: `owned_paths.txt` lists
-  `template/.agentic/pm_flow/tests/{transitions,on_demand,governance}.zsh`,
-  or that grep prints nothing because another owner moved the fixtures.
+- None. The cycle 003/004 ownership conflict (engine fixtures read or seed
+  the TSV outside Owned paths) was resolved by portfolio review 004
+  (`ec8e4dc`); the boundary extension is recorded in `brief.md`.
 
 ## Next eligible task
 
-- T4, once the unblocking observation above holds; re-run
-  `zsh cycles/004/scope_probe.zsh` at the next scope before assigning. Until
-  then the section stays blocked; `cost.py total|report|import` and the
-  `pm-flow cost` command are already on `main` for `topology-compare` to
-  consume.
+- T5 — end-to-end through the installed command, the last workplan task. Its
+  validation carries the two checks the T2 suite cannot see (mixed
+  `projects.key` sum, `response_path` byte equality from the real driver).

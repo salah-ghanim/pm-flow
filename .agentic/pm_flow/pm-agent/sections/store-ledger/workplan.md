@@ -7,8 +7,9 @@
   keyed on `response_path`. Then move the driver's ledger functions off the
   TSV one command at a time: `pm-flow cost` first, because it lives inside
   Owned paths and no engine fixture reads its output; then the budget check,
-  the dispatch counter and the TSV write itself, which cannot land until the
-  three engine fixtures that read or seed `runs/cost_ledger.tsv` are owned.
+  the dispatch counter and the TSV write itself, together with the three
+  engine fixtures that read or seed `runs/cost_ledger.tsv` (owned since
+  portfolio review 004) and the README paragraph that documents it.
 
 ## Interfaces and data changes
 
@@ -167,57 +168,95 @@
 
 ## Task T4 — Driver stops writing the ledger
 
-- Status: next; blocked on ownership (see the boundary conflict below).
-  Re-probed at the cycle 004 scope (`cycles/004/scope_probe.zsh`): unchanged,
-  so cycle 004 declared `BLOCKED_EXTERNAL`.
+- Status: done (cycle 005, GO; merge by the driver). The ownership conflict
+  reported in cycle 003 and declared `BLOCKED_EXTERNAL` in cycle 004 was
+  resolved by portfolio review 004 (`ec8e4dc`, 2026-08-24): Owned paths now
+  include the three engine fixtures and `template/.agentic/pm_flow/README.md`,
+  edits limited to what the ledger's removal forces (`brief.md`, "Boundary
+  extended"). `cycles/005/scope_probe.zsh` confirms it.
 - Outcome: `record_dispatch_cost` writes nothing — its call at
   `driver.zsh:1036` is outside the five named functions and stays, so the
-  body becomes a documented no-op and must not import (call order above);
-  `spent_usd` runs `cost.py total "$PROJECT_DIR" [section]`;
-  `dispatch_count` counts `ATTEMPT` lines of `cost.py report "$PROJECT_DIR"`
-  (`grep -c '^ATTEMPT' || true`, since zero matches exits 1); `cost_ledger_file`
-  is deleted; `totals()`, the legacy `.tsv` arity and its usage lines are
-  deleted from `cost.py` (`ledger_rows` stays for the importer).
-- Fixture edits, outside Owned paths today: `transitions.zsh:195,311` read
-  the priced row (`0.5000`, `0.2500`) from an `ATTEMPT` line of `"$FLOWSH"
-  cost` instead of `cat runs/cost_ledger.tsv`; `on_demand.zsh:158-160` read
-  the `analysis alpha` attempt and its section from that line;
-  `governance.zsh:198-199` seed two distinct response keys (`y1`, `y2`) so
-  both rows import and `$1.00` / two dispatches still hold;
-  `on_demand.zsh:240` needs no change (`y` is unique in that project and a
-  seeded TSV row is a legacy-import scenario the importer absorbs).
-- Paths: `template/.agentic/pm_flow/driver.zsh` (the five named functions),
-  `template/.agentic/pm_flow/cost.py`, `tests/store_ledger_test.sh`, plus
-  the three engine test files once owned.
+  body becomes a documented no-op that must not call `cost.py`,
+  `telemetry.py` or touch `RUNS_DIR` (call order above: an import there
+  double-inserts the envelope); `spent_usd` runs
+  `cost.py total "$PROJECT_DIR" "${1:-}"` (an empty operand already means the
+  whole project in `main`); `dispatch_count` counts `ATTEMPT` lines of
+  `cost.py report "$PROJECT_DIR"` (`grep -c '^ATTEMPT' || true`, since zero
+  matches exits 1; a running attempt counts from `attempt-start`, which no
+  fixture can observe because no dispatch is in flight when `next` runs);
+  `cost_ledger_file` is deleted; `totals()`, the legacy `.tsv` arity, its
+  usage line and the docstring sentence about the driver's TSV arity are
+  deleted from `cost.py` (`ledger_rows` and the importer's TSV read stay:
+  A1). The comment blocks that head these functions (`driver.zsh:436-439`,
+  `:834-836`) describe the ledger and are reworded with them.
+- Live pricing needs no driver change: `telemetry.py attempt-end` fills
+  `cost_usd` from the envelope through `usage_from_response`, which parses
+  the failed-dispatch form (cost nested in the `result` string) like
+  `cost_of` does (`telemetry.py:113-155`, `:631-640`).
+- Fixture edits (each fixture defines `FLOW` and copies the template, so
+  `$FLOW/telemetry.py` and `$FLOW/demo/runs/pm_flow.db` are the store):
+  - `transitions.zsh:195` and `:316-317` read the priced row from the cost
+    field of an `ATTEMPT` line of `"$FLOWSH" cost`
+    (`awk -F'\t' '$1 == "ATTEMPT" {print $7}'`), expecting `0.5000` and
+    `0.2500` (the report prints `.4f`); the TSV printed `0.500000`.
+  - `on_demand.zsh:157-160` read `analysis alpha` from `"$FLOWSH" cost` and
+    the section as field 3 of the `ATTEMPT` line whose label (field 5)
+    starts `analysis`.
+  - `governance.zsh:198-199` and `on_demand.zsh:240` seed the store instead
+    of the TSV: a `seed_attempt <section> <role> <label> <cost> <response>`
+    helper runs `telemetry.py --db "$FLOW/demo/runs/pm_flow.db" run-start
+    --project demo --run-key <unique>`, `attempt-start --run <id> --role
+    --task --label`, `attempt-end --attempt <id> --cost-usd <cost> --response
+    <response>` (the shape `tests/store_ledger_test.sh:153-160` already
+    uses; a non-existent response path is fine, `usage_from_response`
+    returns `{}` and `--cost-usd` prices it). Governance seeds two distinct
+    response keys (`y1`, `y2`) so C2 still measures `$1.00` and two
+    dispatches: before `:198` the demo project has dispatched nothing
+    (`init-section --file` does not dispatch) and its baseline is `0`.
+    `on_demand.zsh:240` seeds one row keyed `y` after the D2 review's
+    baseline, so `since` goes `0 → 1`.
+  - `README.md:168-173`: the paragraph that names `runs/cost_ledger.tsv`
+    describes the store (`runs/pm_flow.db`, one `attempts` row per dispatch,
+    `pm-flow cost`, a legacy TSV imported once). Nothing else in the README.
+- Paths: `template/.agentic/pm_flow/driver.zsh` (the five named functions
+  and their heading comments), `template/.agentic/pm_flow/cost.py`,
+  `template/.agentic/pm_flow/tests/{transitions,on_demand,governance}.zsh`
+  (the lines above plus one helper definition where seeding moves),
+  `template/.agentic/pm_flow/README.md` (one paragraph),
+  `tests/store_ledger_test.sh`.
 - Reuse: T2's commands; `assert_within_budget` (`driver.zsh:610-624`) is
-  unchanged and reads `spent_usd`.
+  unchanged and reads `spent_usd`; it runs at `:973`, before
+  `telemetry_begin_attempt` at `:1023`, so a refused dispatch inserts no row.
+  For the suite's own dispatch: the stub `agent_exec.sh` and `set_config`
+  from `transitions.zsh:41-103`, `init-section --file` with the `brief`
+  helper (`:115-118`), and a first tick with a canned `SCOPE_ASSIGN`
+  response (`:139-`); or the single-dispatch `analysis` command of
+  `on_demand.zsh:125-147`. The suite's `COMMAND_WORK` is already a git repo
+  whose flow copy carries the template `.gitignore` (`*/runs/*`), and
+  `rm -- "$LEDGER"` at `:200` has already removed the legacy TSV, so any
+  `cost_ledger.tsv` under `runs/` after the tick was written by the driver.
 - Acceptance IDs: A4, A5.
 - Validation: `zsh template/.agentic/pm_flow/tests/run.zsh` → `all suites
-  passed`, including `F7 the run refuses to spend past budget.max_usd`, `F14
-  the configured ceiling is enforced`, `C2 $1.00 of ledger spend passes a
-  $0.75 threshold`, `C2 two recorded dispatches arm the review`, `D1 the
-  ledger carries the analysis`; `zsh tests/store_ledger_test.sh` — one stub
-  tick on a fixture flow leaves `runs/` holding `pm_flow.db` and no
-  `cost_ledger.tsv`, `git status --porcelain` in the work tree shows nothing
-  under `runs/`, and a project seeded at `budget.max_usd` is refused its next
-  dispatch with `project budget exhausted`; `git grep -n cost_ledger --
-  template` → only the importer's lines in `cost.py`.
-- Boundary conflict (reported in `handoff.md`, cycle 003; declared
-  `BLOCKED_EXTERNAL` at the cycle 004 scope): A4 forbids the TSV write and A5
-  requires `run.zsh` green, but
-  `template/.agentic/pm_flow/tests/{transitions,on_demand,governance}.zsh`
-  read or seed the TSV at the six lines above. They are outside Owned paths
-  and no section owns `template/.agentic/pm_flow/tests/` (`green-suite` and
-  `worktree-isolation` owned `tests/**` and are done; the owner's 2026-08-23
-  rebaseline allocated the engine files and left the engine tests unowned).
-  No partial T4 fits inside Owned paths: `record_dispatch_cost` as a no-op
-  fails `transitions.zsh:195,311` and `on_demand.zsh:158,160` (`cat` of a
-  missing file); `spent_usd` or `dispatch_count` on the store fails
-  `governance.zsh:198-199` (two rows keyed `y` import as one: `$0.50`, one
-  dispatch); `cost_ledger_file` cannot go before the other three. Unblocked
-  when `owned_paths.txt` lists the three files (a `brief.md` commit after
-  `3ba4ea7`), or when `grep -n cost_ledger template/.agentic/pm_flow/tests`
-  prints nothing because another owner moved the fixtures first.
+  passed`, with `F7 the store has a priced row`, `F7 a failed dispatch still
+  records its cost`, `F7 the run refuses to spend past budget.max_usd`, `F14
+  the configured ceiling is enforced and routed to quarantine`, `C2 two
+  recorded dispatches arm the review`, `C2 $1.00 of ledger spend passes a
+  $0.75 threshold`, `D1 the store carries the analysis`, `D1 and charges it
+  to the section`, `D2 and one further dispatch arms it again` all `PASS`;
+  `zsh tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0,
+  now also: after one stub dispatch in `COMMAND_WORK`, `ls
+  "$PROJECT_DIR/runs"` holds `pm_flow.db` and no `cost_ledger.tsv`, `git -C
+  "$COMMAND_WORK" status --porcelain` has no line containing `runs/`,
+  `pm_flow.sh cost` gained exactly one `ATTEMPT` line whose cost field is
+  `0.5000` and `cost.py total` rose by `0.5000` (`12.1650 → 12.6650`);
+  with `budget.max_usd` set below that total and no TSV on disk, the next
+  tick prints `project budget exhausted` and the `ATTEMPT` count is
+  unchanged; `grep -c cost_ledger_file driver.zsh` → `0`; `grep -rl
+  cost_ledger "$REPO_ROOT/template"` lists only `cost.py`. `zsh
+  tests/pm_flow_test.sh` (10 `PASS:`) and `zsh
+  tests/packaged_layout_test.sh` (13 `PASS:`, `cost reports the same spend
+  after migration`) exit 0. `git diff -U0 -- driver.zsh` hunks fall only
+  inside `:436-472` and `:834-843`.
 - Depends on: T3.
 
 ## Task T5 — End-to-end through the installed command
@@ -255,7 +294,14 @@
   envelope landing on disk and `telemetry_end_attempt` recording its path
   (`driver.zsh:1041-1056`) imports the envelope as a second row. Today the
   TSV row at :1036 closes that window; after T4 it is a few milliseconds
-  wide and not deterministically testable. Recorded, not fixed.
+  wide and not deterministically testable. Recorded, not fixed. The driver's
+  own readers are safe: `assert_within_budget` runs at `:973`, before the
+  attempt opens, and `record_portfolio_baseline` (`:3407`, `:3450`) runs
+  after the review's dispatch has ended its attempt.
+- Cost of the budget check after T4: every `spent_usd` call runs the silent
+  import, which globs `**/*.response.json` under the project. Acceptable at
+  today's project sizes; a large project would want the glob bounded. Not in
+  scope.
 - Telemetry off (`telemetry.enabled=0`) or `attempt-start` failing: no live
   row, so the cost survives only through the envelope, absorbed by the next
   `spent_usd` import with role `unknown` and the file name as label. Cost is
