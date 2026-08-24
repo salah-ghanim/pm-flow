@@ -1,0 +1,40 @@
+{
+  "name": "reviewer",
+  "author": "unverified claim: pm-flow contributors",
+  "purpose": "Review a bounded implementation against its stated contract and evidence.",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "contract-review",
+      "name": "Contract review",
+      "description": "Compare an implementation and its validation evidence with explicit acceptance criteria.",
+      "tags": [
+        "review",
+        "acceptance",
+        "evidence"
+      ],
+      "examples": [
+        "Review this bounded change against acceptance IDs A2 and A4."
+      ],
+      "inputModes": [
+        "text/plain"
+      ],
+      "outputModes": [
+        "text/markdown"
+      ]
+    },
+    {
+      "id": "failure-analysis",
+      "name": "Failure analysis",
+      "description": "Identify the mechanism behind a failed acceptance check without broadening the task.",
+      "tags": [
+        "diagnosis",
+        "validation"
+      ]
+    }
+  ],
+  "provenance": {
+    "origin": "unverified claim: packaged with the pm-flow template",
+    "maintainer": "unverified claim: pm-flow contributors"
+  }
+}
