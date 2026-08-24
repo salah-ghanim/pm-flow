@@ -1,27 +1,46 @@
 ## Outcome
 
-- Blocked on an external dependency: — T4 (A4, A5) needs edits to `template/.agentic/pm_flow/tests/{transitions,on_demand,governance}.zsh` (six lines that read or seed `runs/cost_ledger.tsv`), which are outside this brief's Owned paths and owned by no section; unblocked when `owned_paths.txt` lists those three files, or when `grep -n cost_ledger template/.agentic/pm_flow/tests` prints nothing because another owner moved the fixtures.
+- Reopened by a portfolio review: Owned paths now include
+  `template/.agentic/pm_flow/tests/transitions.zsh`, `on_demand.zsh`,
+  `governance.zsh` and `template/.agentic/pm_flow/README.md`. No live
+  section owned them, and T4 cannot hold A5 green while their ledger lines
+  stand. Acceptance is unchanged. T1-T3 are on `main`: `cost.py
+  import|total|report` and `pm-flow cost` read the store.
 
 ## Decisions
 
-- The section manager stopped scoping cycles because no assignment
-  available to it can satisfy the acceptance criteria.
+- The product officer decided this in portfolio review 004, against the
+  mission and the evidence it probed. Edits to the four added files are
+  limited to what the ledger's removal forces: an assertion that read the
+  TSV reads the store, a seed that wrote the TSV seeds the store, the README
+  describes the store.
 
 ## Interfaces
 
-- Nothing new. Dependent sections must assume this capability is unavailable.
+- Unchanged: `cost.py total <dir> [section]`, `report <dir>`,
+  `import <dir>`; `pm-flow cost`. `driver.zsh` `record_dispatch_cost`,
+  `spent_usd` and `dispatch_count` still go through `runs/cost_ledger.tsv`
+  until T4.
 
 ## Risks
 
-- The dependency may never arrive, in which case the section must be rescoped
-  or abandoned as a product decision.
+- `governance.zsh:198-199` seeds two TSV rows sharing response key `y`; a
+  store-seeded fixture must keep C2 measuring $1.00 against a $0.75
+  threshold with two distinct attempts.
+- Once the TSV row no longer closes the window between the envelope landing
+  and `attempt-end`, `status|cost` can double-count one dispatch in flight.
 
 ## What is unproven
 
-- Every acceptance criterion behind the blocked dependency. Nothing here has
-  been demonstrated against the real system.
+- A4: a dispatch appends nothing under `runs/`, and a project at `max_usd`
+  is refused its next dispatch with the store as the source.
+- A5 after T4: `zsh template/.agentic/pm_flow/tests/run.zsh` exits 0 with
+  the fixtures reading and seeding the store.
+- A1 on the live project: `pm-flow cost` after import equals the TSV report
+  to the cent on `pm-agent`, not only on the test fixture.
+- Non-zero Codex tokens on a live attempt row.
 
 ## Next action
 
-- Resolve the external dependency, then reopen this section with an
-  `active` handoff.
+- Scope cycle 005: re-run `cycles/004/scope_probe.zsh`, confirm the four
+  paths are listed in `owned_paths.txt`, assign T4.

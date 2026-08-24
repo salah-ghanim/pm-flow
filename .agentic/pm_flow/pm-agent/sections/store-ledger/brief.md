@@ -65,6 +65,10 @@
 - `template/.agentic/pm_flow/watch.py`
 - `template/.agentic/pm_flow/driver.zsh`
 - `tests/store_ledger_test.sh`
+- `template/.agentic/pm_flow/tests/transitions.zsh`
+- `template/.agentic/pm_flow/tests/on_demand.zsh`
+- `template/.agentic/pm_flow/tests/governance.zsh`
+- `template/.agentic/pm_flow/README.md`
 
 ## Dependencies
 
@@ -104,3 +108,17 @@
 ## Open questions
 
 - None.
+
+## Boundary extended, authorized 2026-08-24
+
+- Added to Owned paths: `template/.agentic/pm_flow/tests/transitions.zsh`,
+  `template/.agentic/pm_flow/tests/on_demand.zsh`,
+  `template/.agentic/pm_flow/tests/governance.zsh` and
+  `template/.agentic/pm_flow/README.md`. No live section owned them, and
+  their lines that read, seed or document `runs/cost_ledger.tsv` cannot
+  survive A4.
+- Acceptance is unchanged. Edits to these four files are limited to what the
+  ledger's removal forces: an assertion that read the TSV reads the store, a
+  seed that wrote the TSV seeds the store, the README describes the store.
+- Rejection condition, binding the reviewer: work is not rejected for
+  modifying these four files within that limit.

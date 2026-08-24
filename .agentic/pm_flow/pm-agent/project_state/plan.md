@@ -70,25 +70,28 @@ Everything below serves that sentence.
 
 ## Current position
 
-- Met: sections run in isolated worktrees outside the repository;
-  `zsh tests/pm_flow_test.sh` exits 0 from the officer's tier. Every stub
-  runner now clears inherited `PM_FLOW_*` selectors (`ec8130f`), so
-  `tests/prompt_quality_test.sh` and `template/.agentic/pm_flow/tests/run.zsh`
-  run from inside a dispatch without touching the live project.
+- Met: sections run in isolated worktrees outside the repository; the four
+  suites exit 0 from the officer's tier (`zsh tests/pm_flow_test.sh`,
+  `zsh tests/prompt_quality_test.sh`, `zsh tests/store_ledger_test.sh`,
+  `zsh template/.agentic/pm_flow/tests/run.zsh`).
 - Unmet: backend-readable traces (no OTLP endpoint in `config.json`, no
-  `pm-flow trace`), the ledger still written and read beside the store, no
-  compare, no persona measurement, no MCP or ACP surface.
-- `store-ledger` is the only unmet criterion with a cycle on it: the
-  idempotent importer (`cost.py import <project_dir>`) and
-  `tests/store_ledger_test.sh` are on `main`; `pm-flow cost`, `watch.py` and
-  the driver's five ledger functions still go through `runs/cost_ledger.tsv`.
+  `pm-flow trace`), the ledger still written by the driver, no compare, no
+  persona measurement, no MCP or ACP surface.
+- `store-ledger`: `cost.py import|total|report`, `watch.py` and `pm-flow
+  cost` read the store; `driver.zsh` `record_dispatch_cost`, `spent_usd` and
+  `dispatch_count` still go through `runs/cost_ledger.tsv`. Its boundary
+  includes the three engine test fixtures and the README line that touch
+  the TSV, so T4 can remove the write without going red on its own suite.
   `trace-commands` and `otel-semconv` wait on nothing and have no cycle.
-- Order of work: `store-ledger` to done, with `trace-commands` and
-  `otel-semconv` in parallel on disjoint paths; `topology-compare` and
-  `agent-bindings` both wait on `store-ledger` (compare needs cost totals,
-  `pm-flow cost` for an ACP attempt needs the rewritten `cost.py`).
-  `persona-cards`, `artifact-quality` and `run-detach` are the live
-  nice-to-haves; the driver dispatches must-haves first.
+- Order of work: `store-ledger` to done, then `topology-compare` (the
+  objective) and `agent-bindings`, which wait on it (compare needs cost
+  totals, `pm-flow cost` for an ACP attempt needs the rewritten `cost.py`).
+  The driver is one loop that ranks by dependents before recency, so
+  `trace-commands` and `otel-semconv` get ticks only while `store-ledger`
+  is not actionable; once it is done the four must-haves interleave by
+  least-recent dispatch. `persona-cards`, `artifact-quality` and
+  `run-detach` are the live nice-to-haves; the driver dispatches must-haves
+  first.
 - `run-detach` gets its `pm_flow.sh` routing arm and help line at the first
   portfolio review after `trace-commands` reports done; until then its
   script is invoked directly.

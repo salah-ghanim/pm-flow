@@ -354,3 +354,97 @@ Changes made: `plan.md` current position rewritten (harness-hazard paragraph rem
 - Unproven after this review: every planned must-have; `store-ledger` A1,
   A2, A4, A5; non-zero Codex tokens in the store; why the 19:37Z
   `otel-semconv` dispatch produced no cycle.
+
+## 2026-08-24 — portfolio review 004
+
+- Decision: OFF_TRACK. $21.07 and 7 dispatches since review 003 bought
+  `store-ledger` cycles 002-003 (`cb84e75`: `cost.py` and `watch.py` read
+  the store; `cae52de`: `pm-flow cost` reads the store) and then a
+  `BLOCKED_EXTERNAL` at cycle 004 scope. Every dispatch went to
+  `store-ledger`: the driver ranks candidates by dependents before recency
+  (`driver.zsh:2672`) and `store-ledger` has two, so `trace-commands` and
+  `otel-semconv` never reached the queue. Review 003's expectation that
+  least-recent order would put them first was wrong. Four reviews, zero
+  cycles on either trace section.
+- Criteria: worktree isolation MET (`git worktree list`: the `store-ledger`
+  checkout under `../.pm-flow-worktrees/`). Suite MET from this tier:
+  `zsh tests/pm_flow_test.sh` exit 0 (10 PASS); `zsh
+  tests/prompt_quality_test.sh` exit 0 (57 prompts clean); `zsh
+  tests/store_ledger_test.sh` exit 0; `zsh
+  template/.agentic/pm_flow/tests/run.zsh` `all suites passed`
+  (35/41/32/58/74) on `main` at `0665841`. One earlier run on the main tree
+  failed a single assertion the owner had uncommitted at that moment
+  (`F2 the dash after the token`), testing the owner's own in-progress
+  `driver.zsh` edit; it passed once committed. Trace, ledger, persona
+  measure, compare, MCP/ACP all NOT MET by the same probes as 003: `git
+  ls-files src/pm_flow` still `__init__ cli paths`; `cli.py` has no
+  `trace`/`compare`/`acp`/`mcp`; `config.json`, `agent_exec.sh`,
+  `pm_flow.sh` have no `otlp_endpoint`/`acp`/`mcp`; `catalog.py` has no
+  `compare`/`measure`; `cost_ledger.tsv` on disk beside `pm_flow.db`,
+  rewritten at 03:35 today by this review's own dispatch.
+- `store-ledger` blocker verified: `git grep -n cost_ledger -- template`
+  prints `governance.zsh:198-199`, `on_demand.zsh:158,160,240`,
+  `transitions.zsh:195,311`, `README.md:168`, plus `driver.zsh:441-467,839`
+  and `cost.py:185,192` (the legacy import path). No live `owned_paths.txt`
+  names `template/.agentic/pm_flow/tests`; `green-suite` and
+  `worktree-isolation` held `tests/**` and both are done. The driver's
+  `record_dispatch_cost` (:445, called :1036), `spent_usd` (:466) and
+  `dispatch_count` (:837) still go through the TSV; A4 cannot land while
+  those fixtures assert on the file. Not external in the contract's sense —
+  no credential, service or clock — but an ownership gap that no role below
+  the officer may close, and the manager escalated it exactly as the
+  anti-drift rule requires.
+- Boundary decision: `store-ledger` Owned paths extended by
+  `template/.agentic/pm_flow/tests/{transitions,on_demand,governance}.zsh`
+  and `template/.agentic/pm_flow/README.md`. Acceptance unchanged; edits
+  limited to what the ledger's removal forces; the reviewer is bound not to
+  reject T4 for editing them within that limit. Recorded in `brief.md`
+  (Owned paths list and `## Boundary extended, authorized 2026-08-24`) and
+  `owned_paths.txt`. Overlap: none — the live sections' prefixes are
+  disjoint from these files and `assert_no_owned_path_overlap` ignores
+  terminal sections. The section was reopened with an active handoff
+  through `pm-flow section-handoff store-ledger active`. This is an
+  expansion, not a reduction, made because a blocked head with no other
+  role able to act stalls the two sections that are the objective; it
+  weakens no criterion and no evidence, and one revert undoes it.
+- The driver left its own record of the block uncommitted (the bug
+  `0665841` fixes); committed first by path as `beac141
+  chore(store-ledger): blocked cycle 004 (state and handoff)` so the
+  blocked handoff is in history before the reopen overwrote it.
+- `otel-semconv`'s 19:37Z dispatch (review 003's open item):
+  `.last_error.txt` reads `claude failed with an unrecognised error;
+  retrying once in 30s` then `role 'pm' did not produce a usable response
+  for scope otel-semconv 001`; the cycle directory was removed and no
+  `quarantine.txt` exists, so it is still eligible. A launcher failure of
+  the class `run-detach` addresses; not a section failure.
+- Owner activity during the run: `0665841 fix(driver): record a blocked
+  section cleanly` landed on `main` mid-review, and `resume_claude.sh` at
+  the root restarts the session after a usage-limit reset. The engine is
+  being edited in the main tree while the flow runs; the principle says a
+  worktree, the owner's call.
+- Persona measurement is reachable: `topology-compare` A5 puts a swapped
+  seat's persona key in the arm's report column and `persona-cards` A3
+  names the card there. No plan bullet lacks an owner.
+- Plan structure: unstarted dependency CLEAR — `topology-compare` and
+  `agent-bindings` wait on `store-ledger` (four cycles, now active);
+  `persona-cards` waits on `persona-packs`, done. Unreachable FOUND —
+  `store-ledger` A4/A5 needed four files no live section owned; closed by
+  the boundary decision above. Must-have inflation CLEAR — the five live
+  must-haves map to the trace, ledger, compare and MCP/ACP bullets
+  one-to-one; `otel-semconv` stays must-have because Phoenix and Langfuse
+  render prompts and tokens from the GenAI attribute names it pins.
+  Linear chain FOUND — depth two only, but the head blocked and both
+  dependents, which are the objective, stalled behind it for a whole review
+  interval while the two independent trace sections were starved by the
+  dependents-first sort. Cured by the reopen; nothing structural changed.
+- Refused in this tier: `pm-flow --help` (approval). `pm-flow
+  section-handoff` ran through a script in the review workspace.
+- Shortest path: `store-ledger` T4 then T5 to done, then `topology-compare`
+  T1. `trace-commands` and `otel-semconv` take ticks only while
+  `store-ledger` is not actionable; after it closes the four must-haves
+  interleave by least-recent dispatch. Nothing is in flight; the next tick
+  is `store-ledger` cycle 005 scope, which is on the path.
+- Unproven after this review: every planned must-have; `store-ledger` A4,
+  A5, and A1 on the live project rather than the fixture; non-zero Codex
+  tokens in the store; that the reopened section's scope call re-runs
+  `cycles/004/scope_probe.zsh` and assigns T4 rather than re-blocking.
