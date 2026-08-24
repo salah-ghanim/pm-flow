@@ -450,7 +450,17 @@ record_dispatch_cost() {
 # was already deep into its spend does not read as zero and get authorised for
 # the whole budget again.
 spent_usd() {
-  python3 "$SCRIPT_DIR/cost.py" total "$PROJECT_DIR" "${1:-}"
+  # A broken cost reader must not take the run down with it: the budget gate
+  # and the tick banner both substitute this, and an empty result turns into
+  # an arithmetic error there. Report zero, say so once on stderr.
+  local out
+  out="$(python3 "$SCRIPT_DIR/cost.py" total "$PROJECT_DIR" "${1:-}" 2>/dev/null)" || out=""
+  if [[ -z "$out" ]]; then
+    printf 'WARNING: cost.py total reported nothing for %s; treating as $0\n' \
+      "${1:-the project}" >&2
+    out="0"
+  fi
+  printf '%s\n' "$out"
 }
 
 cmd_cost() {
