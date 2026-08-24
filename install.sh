@@ -53,6 +53,7 @@ COPIED_ENGINE_FILES=(
   heartbeat.sh
   driver.zsh
   catalog.py
+  compare.py
   cost.py
   store.py
   telemetry.py
