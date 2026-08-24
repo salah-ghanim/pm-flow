@@ -4,6 +4,30 @@ Newest first. Read this before anything else: one review cannot see a
 section that has been nearly done for four of them, or a shortest path that
 has not moved in three. Older entries are compacted to their summary line.
 
+## Review 006 - 2026-08-24T19:34:37Z - $330.1008 spent
+
+- Summary: 6 of 7 criteria met; verdicts CONTINUE 3; shortest path: The one open criterion needs the host, not a section: start Docker, run the Jaeger all-in-one, `pm-flow trace export --otlp http://localhost:4318/v1/traces`,...
+
+### Completion criteria
+
+- Backend render (Phoenix/Langfuse/Jaeger) — everything local passes (`trace_commands_test.sh` exit 0, exact span ids re-fetched; `otlp_endpoint` at `config.json:61`), but no backend has displayed a run and `docker ps` exits 1 (no daemon) — **UNKNOWN**, probe `docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one` + `curl :16686/api/traces?service=pm-flow`
+- `cost_ledger.tsv` gone, no per-dispatch host writes — `git grep cost_ledger -- template` hits only `cost.py:184,191` (import reader); TSV mtime froze at 07:17Z while `pm_flow.db` advanced to 19:10Z; parity gate ran (`imported=0` twice, idempotent), file archived to gitignored `runs/cost_ledger.tsv.imported-20260824` — **MET**
+- Sections run in isolated worktrees — `pm_flow_test.sh` "per-section git worktrees, merge-back, and cleanup" PASS; `git worktree list` = main only, nothing in flight — **MET**
+- Persona installed elsewhere, dropped on a seat, measured — `catalog.py:1508-1642` `persona add/update/list/swap`; `topology_compare_test.sh` PASS asserts `--persona lean:pm=cpo` in `attempts.persona_stack` and the report — **MET**
+- Two topologies compared in one command — `pm_flow.sh:1943 cmd_compare`, usage lines 43-44; suite PASS on `main` — **MET**
+- Drivable over MCP, binds any ACP agent — after `9dfed03`: `agent_bindings_test.sh` exit 0 incl. "MCP lists exactly five tools and drives a section to done" and "ACP developer completes a public driver cycle to GO" — **MET**
+- Test suite runs to completion — all four plan suites exit 0 from this tier (10 PASS; 57 prompts; store ledger passed; 35/41/32/58/74), run twice: before and after the merge — **MET**
+
+### Verdicts
+
+- artifact-quality: CONTINUE
+- persona-cards: CONTINUE
+- run-detach: CONTINUE
+
+### Shortest path
+
+The one open criterion needs the host, not a section: start Docker, run the Jaeger all-in-one, `pm-flow trace export --otlp http://localhost:4318/v1/traces`, read the trace back at `:16686`. The three nice-to-haves in flight are not on it and cannot be. The objective sentence — two designs run, compared, a persona swapped and measured — is demonstrable on `main` today, on stub projects; the next product-level increment beyond the render is running `compare` on a real multi-section project.
+
 ## Review 006 - 2026-08-24 - $105.3747 / 82 dispatches since 005
 
 - Summary: 6 of 7 criteria met; verdicts CONTINUE 3; ON_TRACK - all five
@@ -202,60 +226,9 @@ remaining sits behind an operator dependency.
 
 - Summary: 2 of 7 criteria met; verdicts CONTINUE 7, RESCOPE 1; shortest path: `store-ledger` T4 (driver off the TSV, fixtures on the store) then T5 to done; `topology-compare` T1 next. `trace-commands` and `otel-semconv` get ticks only...
 
-### Completion criteria
-
-- Finished run opens in Phoenix/Langfuse/Jaeger with every role, prompt, retry, stall, tokens, dollars — `git grep -inE 'otlp_endpoint|"trace"|compare|\bacp\b|\bmcp\b' -- src/pm_flow/cli.py` empty; `git ls-files src/pm_flow` = `__init__ cli paths` — **NOT MET**
-- `cost_ledger.tsv` gone, host absorbs no per-dispatch writes — `git grep -n cost_ledger -- template` hits `driver.zsh:441-467,839`, `cost.py:185,192`, seven fixture lines, `README.md:168`; `ls runs/` shows `cost_ledger.tsv` rewritten 03:35 today beside `pm_flow.db` — **NOT MET**
-- Sections run in isolated worktrees — `git worktree list` shows the `store-ledger` checkout under `../.pm-flow-worktrees/` — **MET**
-- Persona installed from elsewhere, dropped on a seat, measured against the one it replaced — `git grep -inE 'compare|measure' -- template/pm_flow/catalog.py` empty — **NOT MET**
-- Two topologies compared in one command — `git ls-files src/pm_flow` has no `compare.py`; `cli.py` grep above empty — **NOT MET**
-- Drivable over MCP, binds any ACP agent — `git grep -inE 'otlp_endpoint|\bacp\b|\bmcp\b' -- '*config.json' '*agent_exec.sh' '*pm_flow.sh'` empty — **NOT MET**
-- Test suite runs to completion — `zsh tests/pm_flow_test.sh` exit 0 (10 PASS); `zsh tests/prompt_quality_test.sh` exit 0 (57 prompts); `zsh tests/store_ledger_test.sh` exit 0; `zsh template/.agentic/pm_flow/tests/run.zsh` `all suites passed` (35/41/32/58/74) on `main` at `0665841` — **MET**
-
-### Verdicts
-
-- agent-bindings: CONTINUE
-- artifact-quality: CONTINUE
-- otel-semconv: CONTINUE
-- persona-cards: CONTINUE
-- run-detach: CONTINUE
-- store-ledger: RESCOPE acceptance unchanged; Owned paths now include `template/.agentic/pm_flow/tests/transitions.zsh`, `on_demand.zsh`, `governance.zsh` and `template/.agentic/pm_flow/README.md`, edits limited to what the ledger's removal forces, and the reviewer may not reject T4 for editing them within that limit; section reopened, next scope re-runs `cycles/004/scope_probe.zsh` and assigns T4
-- topology-compare: CONTINUE
-- trace-commands: CONTINUE
-
-### Shortest path
-
-`store-ledger` T4 (driver off the TSV, fixtures on the store) then T5 to done; `topology-compare` T1 next. `trace-commands` and `otel-semconv` get ticks only while `store-ledger` is not actionable; once it closes, the four must-haves interleave by least-recent dispatch. Nothing is in flight; the next tick is `store-ledger` cycle 005 scope, which is on the path. Committed as `beac141` (driver's blocked record) and `ec8e4dc chore(plan): portfolio review 004`, pushed to `origin/main`.
-
 ## Review 003 - 2026-08-24T00:37:49Z - $181.0513 spent
 
 - Summary: 2 of 7 criteria met; verdicts CONTINUE 8; shortest path: `store-ledger` A1/A2/A4 — `cost.py totals` from `attempts`, the five driver functions off the TSV — then `topology-compare` T1. `trace-commands` T1 and `otel...
-
-### Completion criteria
-
-- Finished run opens in Phoenix/Langfuse/Jaeger with every role, prompt, retry, stall, tokens, dollars — `git grep -inE 'otlp_endpoint|"trace"|compare|\bacp\b|\bmcp\b' -- src/pm_flow/cli.py` empty; `otlp_endpoint` absent from `config.json`; `trace_export.py` reached only from `driver.zsh:736` — **NOT MET**
-- `cost_ledger.tsv` gone, host absorbs no per-dispatch writes — `git grep -n cost_ledger -- template` hits `driver.zsh:441-471`, `cost.py:186,193,221`, `watch.py:50`; `find` shows `runs/cost_ledger.tsv` beside `pm_flow.db` — **NOT MET**
-- Sections run in isolated worktrees — `git worktree list` shows `store-ledger` under `../.pm-flow-worktrees/` — **MET**
-- Persona installed from elsewhere, dropped on a seat, measured against the one it replaced — `git grep -inE 'compare|measure' -- template/pm_flow/catalog.py` empty — **NOT MET**
-- Two topologies compared in one command — `git ls-files src/pm_flow` = `__init__.py cli.py paths.py`; `cli.py` grep above empty — **NOT MET**
-- Drivable over MCP, binds any ACP agent — `git grep -inE 'otlp_endpoint|\bacp\b|\bmcp\b'` on `config.json`, `agent_exec.sh`, `pm_flow.sh` empty — **NOT MET**
-- Test suite runs to completion — `zsh tests/pm_flow_test.sh` exit 0 (10 PASS); `zsh tests/prompt_quality_test.sh` exit 0; `zsh template/.agentic/pm_flow/tests/run.zsh` exit 0 (`all suites passed`); `zsh tests/store_ledger_test.sh` exit 0; `git status --short` unchanged after all four — **MET**
-
-### Verdicts
-
-- agent-bindings: CONTINUE
-- artifact-quality: CONTINUE
-- otel-semconv: CONTINUE
-- persona-cards: CONTINUE
-- run-detach: CONTINUE
-- store-ledger: CONTINUE
-- topology-compare: CONTINUE
-- trace-commands: CONTINUE
-
-### Shortest path
-
-`store-ledger` A1/A2/A4 — `cost.py totals` from `attempts`, the five driver functions off the TSV — then `topology-compare` T1. `trace-commands` T1 and `otel-semconv` T1 in parallel now; neither has a reason left to wait, and the driver's least-recent-dispatch order puts both ahead of `store-ledger` at the next tick. Work in flight (`store-ledger` cycle 002, scope done) is on the path. The `store-ledger` handoff still says "Nothing delivered yet" despite `558837f` on `main`; its next scope call must sync it.
-Changes made: `plan.md` current position rewritten (harness-hazard paragraph removed as fixed by `ec8130f`, `codex-usage` dropped from the order, `run-detach` added with its gate); review 003 appended to `portfolio_log.md`; committed as `8e42ca2 chore(plan): portfolio review 003` and pushed to `origin/main`. No scope reduced, no graph edge or `priority.txt` changed.
 
 ## Review 002 - 2026-08-23T18:26:45Z - $144.0741 spent
 

@@ -1,0 +1,4 @@
+UNSTARTED_DEPENDENCY	CLEAR	— no live section waits on anything unstarted; `persona-cards`' dependency `persona-packs` is done.
+UNREACHABLE_SECTION	FOUND	— the MCP criterion sat in a done section's unmerged branch and the TSV gate had no owner (both cured by officer action this review); the backend-render observation still has no owner and needs Docker, an operator dependency.
+MUST_HAVE_INFLATION	CLEAR	— every must-have is done; the three live sections are nice-to-have.
+LINEAR_CHAIN_RISK	CLEAR	— three independent live sections, no chain.
