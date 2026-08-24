@@ -3420,7 +3420,7 @@ commit_portfolio_record() {
   local section_dir name
   for section_dir in "$SECTIONS_DIR"/*(/N); do
     [[ "$(basename "$section_dir")" != .* ]] || continue
-    for name in status.txt handoff.md summary.txt updated_at.txt portfolio_rescope.txt; do
+    for name in status.txt handoff.md summary.txt updated_at.txt; do
       [[ -f "$section_dir/$name" ]] && paths+=("$section_dir/$name")
     done
   done
