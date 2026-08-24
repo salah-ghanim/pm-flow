@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -85,6 +88,7 @@ class Artifact:
     section_key: str | None
     text: str
     word_count: int
+    budget: int
     length_over: int
     findings: list[Any]
 
@@ -321,6 +325,7 @@ def collect_artifacts(layout: Paths, budgets: dict[str, int], helpers: ModuleTyp
             section_key=section_key,
             text=text,
             word_count=word_count,
+            budget=budgets[kind],
             length_over=max(0, word_count - budgets[kind]),
             findings=[],
         ))
@@ -338,11 +343,10 @@ def add_findings(artifacts: list[Artifact], layout: Paths, helpers: ModuleType) 
             by_section.setdefault(artifact.section_key, {})[artifact.kind] = artifact
 
         if artifact.length_over:
-            budget = artifact.word_count - artifact.length_over
             artifact.findings.append(finding(
                 "warning",
                 "length",
-                f"{artifact.word_count} words exceeds the {budget}-word "
+                f"{artifact.word_count} words exceeds the {artifact.budget}-word "
                 f"{artifact.kind} budget by {artifact.length_over}",
             ))
 
@@ -440,24 +444,133 @@ def add_findings(artifacts: list[Artifact], layout: Paths, helpers: ModuleType) 
         ))
 
 
+def ordered_findings(artifact: Artifact) -> list[Any]:
+    return sorted(artifact.findings, key=lambda item: (item.code, item.message))
+
+
 def render(artifact: Artifact) -> str:
     if not artifact.findings:
         return f"{artifact.label} | findings: none"
-    ordered = sorted(artifact.findings, key=lambda item: (item.code, item.message))
     return artifact.label + " | " + " | ".join(
-        f"{item.code}: {item.message}" for item in ordered
+        f"{item.code}: {item.message}" for item in ordered_findings(artifact)
     )
 
 
-def rank(project: str | None) -> int:
+def resolve_record_dir(layout: Paths, requested: str | None) -> Path:
+    destination = Path(requested).expanduser() if requested else layout.project_dir / "quality"
+    destination = destination.resolve()
+    sections_dir = layout.sections_dir.resolve()
+    flow_dir = layout.flow_dir.resolve()
+
+    try:
+        destination.relative_to(sections_dir)
+    except ValueError:
+        pass
+    else:
+        raise SystemExit(
+            f"refusing quality record directory inside sections: {destination}"
+        )
+
+    try:
+        below_flow = destination.relative_to(flow_dir)
+    except ValueError:
+        below_flow = None
+    if below_flow is not None and "sections" in below_flow.parts:
+        raise SystemExit(
+            f"refusing quality record directory below a sections path: {destination}"
+        )
+
+    git_marker: Path | None = None
+    for candidate in (destination, *destination.parents):
+        marker = candidate / ".git"
+        if marker.is_file():
+            raise SystemExit(
+                f"refusing quality record directory inside a linked git worktree: {destination}"
+            )
+        if marker.is_dir():
+            git_marker = marker
+            break
+
+    # A fixture or an arbitrary directory outside a repository has no ignore
+    # rules to consult. Linked worktrees have already been refused above.
+    if git_marker is None:
+        return destination
+
+    try:
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", str(destination)],
+            cwd=layout.repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return destination
+    if ignored.returncode == 0:
+        return destination
+    if ignored.returncode == 1:
+        raise SystemExit(
+            f"refusing quality record directory because git does not ignore it: {destination}"
+        )
+    detail = ignored.stderr.strip()
+    if "not a git repository" in detail or "is outside repository" in detail:
+        return destination
+    raise SystemExit(
+        f"cannot verify that git ignores quality record directory {destination}: "
+        f"{detail or f'git check-ignore exited {ignored.returncode}'}"
+    )
+
+
+def write_record(
+    layout: Paths,
+    destination: Path,
+    artifacts: list[Artifact],
+    rendered: list[str],
+) -> None:
+    now = datetime.now(timezone.utc)
+    markdown = "\n".join(rendered) + "\n"
+    record = {
+        "project": layout.project_key,
+        "generated_at": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "artifacts": [
+            {
+                "file": artifact.label,
+                "words": artifact.word_count,
+                "budget": artifact.budget,
+                "over": artifact.length_over,
+                "findings": [
+                    {"code": item.code, "message": item.message}
+                    for item in ordered_findings(artifact)
+                ],
+            }
+            for artifact in artifacts
+        ],
+    }
+    encoded = json.dumps(record, indent=2) + "\n"
+    snapshot = now.strftime("%Y%m%dT%H%M%SZ") + ".json"
+
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / "latest.md").write_text(markdown, encoding="utf-8")
+    (destination / "latest.json").write_text(encoded, encoding="utf-8")
+    (destination / snapshot).write_text(encoded, encoding="utf-8")
+
+
+def rank(project: str | None, out: str | None) -> int:
+    layout = Paths(project_key=project)
+    destination = resolve_record_dir(layout, out)
     helpers = load_prompt_quality()
     budgets = load_budgets()
-    layout = Paths(project_key=project)
     artifacts = collect_artifacts(layout, budgets, helpers)
+    if not artifacts:
+        raise SystemExit(
+            f"no durable artifacts found for project {layout.project_key!r} "
+            f"under {layout.sections_dir.resolve()}"
+        )
     add_findings(artifacts, layout, helpers)
     artifacts.sort(key=lambda item: (-len(item.findings), -item.length_over, item.label))
-    for artifact in artifacts:
-        print(render(artifact))
+    rendered = [render(artifact) for artifact in artifacts]
+    write_record(layout, destination, artifacts, rendered)
+    sys.stdout.write("\n".join(rendered) + "\n")
     return 0
 
 
@@ -466,8 +579,9 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     rank_parser = subparsers.add_parser("rank", help="print durable artifact findings worst first")
     rank_parser.add_argument("--project")
+    rank_parser.add_argument("--out")
     args = parser.parse_args(argv)
-    return rank(args.project)
+    return rank(args.project, args.out)
 
 
 if __name__ == "__main__":
