@@ -307,11 +307,19 @@ def layer_overrides(raw) -> dict:
     swapped = overrides.get(SWAP_OVERRIDE_KEY)
     if not isinstance(swapped, dict):
         return {}
-    return {str(layer): key.strip() for layer, key in swapped.items()
-            if isinstance(key, str) and key.strip()}
+    result = {}
+    for layer, identity in swapped.items():
+        if isinstance(identity, str) and identity.strip():
+            result[str(layer)] = identity.strip()
+        elif isinstance(identity, dict):
+            key = identity.get("key")
+            author = identity.get("author")
+            if isinstance(key, str) and key.strip() and isinstance(author, str):
+                result[str(layer)] = {"key": key.strip(), "author": author}
+    return result
 
 
-def with_layer_override(raw, layer, persona_key) -> str:
+def with_layer_override(raw, layer, persona) -> str:
     """The seat's overrides with one layer pointed at one persona key.
 
     Everything else in the blob is carried through untouched: `overrides` is a
@@ -321,7 +329,9 @@ def with_layer_override(raw, layer, persona_key) -> str:
     if not isinstance(overrides, dict):
         overrides = {}
     swapped = layer_overrides(raw)
-    swapped[layer] = persona_key
+    author = stored_persona_author(persona["metadata"])
+    swapped[layer] = ({"key": persona["key"], "author": author}
+                      if author is not None else persona["key"])
     overrides[SWAP_OVERRIDE_KEY] = swapped
     return store.dumps(overrides)
 
@@ -335,6 +345,70 @@ def newest_persona(connection, key):
     return connection.execute(
         "SELECT * FROM personas WHERE key = ? ORDER BY id DESC LIMIT 1", (key,)
     ).fetchone()
+
+
+def persona_identity_rows(connection, key):
+    """Newest row for every card-author identity under *key*."""
+    return connection.execute(
+        "SELECT p.* FROM personas p WHERE p.key = ?"
+        " AND p.id = (SELECT MAX(b.id) FROM personas b WHERE b.key = p.key"
+        " AND COALESCE(json_extract(b.metadata,'$.card.author'), '') ="
+        " COALESCE(json_extract(p.metadata,'$.card.author'), ''))"
+        " ORDER BY p.id DESC",
+        (key,),
+    ).fetchall()
+
+
+def resolve_persona_identity(connection, key, author=None):
+    """Resolve one persona identity, refusing an ambiguous bare key."""
+    rows = persona_identity_rows(connection, key)
+    if not rows:
+        raise PackError(f"no installed persona '{key}'; "
+                        f"`persona list` shows what is installed")
+
+    if author is not None:
+        wanted = author.strip()
+        claim_prefix = load_persona_card_module().CLAIM_PREFIX
+        matches = []
+        for row in rows:
+            stored = stored_persona_author(row["metadata"])
+            if stored is None:
+                continue
+            unlabelled = (stored[len(claim_prefix):]
+                          if stored.startswith(claim_prefix) else stored)
+            if wanted in (stored, unlabelled):
+                matches.append(row)
+        if len(matches) == 1:
+            return matches[0]
+        candidates = ", ".join(
+            stored_persona_author(row["metadata"]) or "no card" for row in rows
+        )
+        raise PackError(
+            f"no installed persona '{key}' with author '{author}'; "
+            f"candidate authors: {candidates}"
+        )
+
+    if len(rows) > 1:
+        candidates = ", ".join(
+            stored_persona_author(row["metadata"]) or "no card" for row in rows
+        )
+        raise PackError(
+            f"persona '{key}' has multiple authors: {candidates}; "
+            "use --author to select one"
+        )
+    return rows[0]
+
+
+def override_persona(connection, identity):
+    """Resolve a legacy key override or a card-author identity override."""
+    if isinstance(identity, dict):
+        try:
+            return resolve_persona_identity(
+                connection, identity["key"], identity["author"]
+            )
+        except (KeyError, PackError):
+            return None
+    return newest_persona(connection, identity)
 
 
 def selected_topology(flow_dir) -> str:
@@ -418,7 +492,7 @@ def swapped_layers(layers, role, project_dir, project_key):
             return layers
         applied = []
         for layer, key, body, path in layers:
-            row = (newest_persona(connection, overrides[layer])
+            row = (override_persona(connection, overrides[layer])
                    if layer in overrides else None)
             if row is None or row["layer"] != layer:
                 applied.append((layer, key, body, path))
@@ -447,7 +521,7 @@ def swapped_persona_ids(connection, layers, persona_ids, overrides):
         return list(persona_ids)
     stack = []
     for (layer, _key, _body, _path), persona_id in zip(layers, persona_ids):
-        row = (newest_persona(connection, overrides[layer])
+        row = (override_persona(connection, overrides[layer])
                if layer in overrides else None)
         if row is None or row["layer"] != layer or row["id"] in stack:
             stack.append(persona_id)
@@ -484,7 +558,7 @@ def set_seat_stack(connection, seat_id, persona_ids) -> None:
 
 
 def swap_seat_persona(connection, *, project_key, topology_key, role_key,
-                      persona_key) -> dict:
+                      persona) -> dict:
     """Point one layer of a role's seats at an installed persona.
 
     The layer is the replacement's own: a base persona replaces a base layer and
@@ -495,10 +569,7 @@ def swap_seat_persona(connection, *, project_key, topology_key, role_key,
     transaction, because a stack that is half swapped is worse than one that was
     not swapped at all: the next dispatch would compose a prompt nobody chose.
     """
-    persona = newest_persona(connection, persona_key)
-    if persona is None:
-        raise PackError(f"no installed persona '{persona_key}'; "
-                        f"`persona list` shows what is installed")
+    persona_key = persona["key"]
     layer = persona["layer"]
     topology = connection.execute(
         "SELECT t.id FROM topologies t LEFT JOIN projects p ON p.id = t.project_id"
@@ -553,7 +624,7 @@ def swap_seat_persona(connection, *, project_key, topology_key, role_key,
                 changed.append(seat["seat"])
             connection.execute(
                 "UPDATE topology_agents SET overrides = ? WHERE id = ?",
-                (with_layer_override(seat["overrides"], layer, persona_key),
+                (with_layer_override(seat["overrides"], layer, persona),
                  seat["id"]),
             )
             # The seat row names the last layer of its stack; sync maintains it
@@ -950,27 +1021,6 @@ def load_persona_card_module():
     return persona_card
 
 
-def forbidden_card_field_path(value, forbidden_keys, path=""):
-    """Locate a rejected field for the secondary install diagnostic only."""
-    if isinstance(value, dict):
-        for key, item in value.items():
-            normalised = str(key).strip().lower().replace("-", "_")
-            child_path = f"{path}.{key}" if path else str(key)
-            if normalised in forbidden_keys:
-                return child_path
-            found = forbidden_card_field_path(item, forbidden_keys, child_path)
-            if found:
-                return found
-    elif isinstance(value, list):
-        for index, item in enumerate(value):
-            found = forbidden_card_field_path(
-                item, forbidden_keys, f"{path}[{index}]"
-            )
-            if found:
-                return found
-    return None
-
-
 def read_pack(path) -> dict:
     """Validate a pack completely, and return what installing it needs.
 
@@ -1043,13 +1093,7 @@ def read_pack(path) -> dict:
                 # The contract message is the primary diagnostic. The file is
                 # secondary context and does not change that stable message.
                 details = []
-                try:
-                    rejected_card = json.loads(card_text)
-                except ValueError:
-                    rejected_card = None
-                rejected_path = forbidden_card_field_path(
-                    rejected_card, persona_card.FORBIDDEN_CARD_KEYS
-                )
+                rejected_path = getattr(error, "path", None)
                 if rejected_path:
                     details.append(f"card field path: {rejected_path}")
                 details.append(f"card file: {card_path.relative_to(root)}")
@@ -1225,10 +1269,17 @@ def persona_commit(raw_metadata):
     return metadata.get(GIT_COMMIT_KEY) if isinstance(metadata, dict) else None
 
 
-def persona_card(raw_metadata):
+def stored_persona_card(raw_metadata):
     """The validated card stored on a persona row, or None."""
     metadata = store.loads(raw_metadata)
     return metadata.get("card") if isinstance(metadata, dict) else None
+
+
+def stored_persona_author(raw_metadata):
+    """The card author that defines identity, or None for an uncarded row."""
+    card = stored_persona_card(raw_metadata)
+    author = card.get("author") if isinstance(card, dict) else None
+    return author if isinstance(author, str) else None
 
 
 def adopt_persona(connection, row, spec, pack, pack_id, source) -> bool:
@@ -1689,27 +1740,51 @@ def cmd_persona_update(args):
     return 1 if failed else 0
 
 
-def cmd_persona_list(args):
-    connection = store.connect(args.db)
-    rows = connection.execute(
-        "SELECT p.key, p.layer, p.version, p.content_hash, p.source_url,"
+def cardless_persona_list_rows(connection):
+    """Newest row per key when every identity in the store is uncarded."""
+    return connection.execute(
+        "SELECT p.key, p.layer, p.author, p.version, p.content_hash, p.source_url,"
         " p.source_path, p.metadata, p.body, k.name AS pack FROM personas p"
         " LEFT JOIN persona_packs k ON k.id = p.pack_id"
         " WHERE p.id = (SELECT MAX(id) FROM personas b WHERE b.key = p.key)"
         " ORDER BY p.layer, p.key"
     ).fetchall()
+
+
+def cmd_persona_list(args):
+    connection = store.connect(args.db)
+    has_cards = connection.execute(
+        "SELECT 1 FROM personas WHERE"
+        " COALESCE(json_extract(metadata,'$.card.author'), '') <> '' LIMIT 1"
+    ).fetchone()
+    if has_cards:
+        rows = connection.execute(
+            "SELECT p.key, p.layer, p.author, p.version, p.content_hash, p.source_url,"
+            " p.source_path, p.metadata, p.body, k.name AS pack FROM personas p"
+            " LEFT JOIN persona_packs k ON k.id = p.pack_id"
+            " WHERE p.id = (SELECT MAX(id) FROM personas b WHERE b.key = p.key"
+            " AND COALESCE(json_extract(b.metadata,'$.card.author'), '') ="
+            " COALESCE(json_extract(p.metadata,'$.card.author'), ''))"
+            " ORDER BY p.layer, p.key,"
+            " COALESCE(json_extract(p.metadata,'$.card.author'), '')"
+        ).fetchall()
+    else:
+        # A cardless store has only the (key, no-card) identity, so the legacy
+        # key grouping remains both sufficient and exactly the existing path.
+        rows = cardless_persona_list_rows(connection)
     if not rows:
         print("no personas installed")
         return 0
     # The commit is per version rather than per pack, so it belongs next to the
     # content hash: together they say which words these are and where they came
     # from, for the version being shown rather than for the pack's newest.
-    print(f"{'KEY':<28} {'LAYER':<8} {'PACK':<18} {'VERSION':<10} {'HASH':<14} "
-          f"{'COMMIT':<14} SOURCE")
+    print(f"{'KEY':<28} {'LAYER':<8} {'PACK':<18} {'AUTHOR':<46} "
+          f"{'VERSION':<10} {'HASH':<14} {'COMMIT':<14} SOURCE")
     for row in rows:
         commit = persona_commit(row["metadata"]) or "-"
         print(f"{row['key']:<28} {row['layer']:<8} {row['pack'] or '-':<18} "
-              f"{row['version'] or '-':<10} {(row['content_hash'] or '')[:12]:<14} "
+              f"{row['author'] or '-':<46} {row['version'] or '-':<10} "
+              f"{(row['content_hash'] or '')[:12]:<14} "
               f"{commit[:12]:<14} "
               f"{row['source_url'] or row['source_path'] or '-'}")
     # A persona is its wording. The table says which version is current and
@@ -1727,16 +1802,10 @@ def cmd_persona_list(args):
 
 def cmd_persona_show(args):
     connection = store.connect(args.db)
-    row = connection.execute(
-        "SELECT p.* FROM personas p WHERE p.key = ?"
-        " AND p.id = (SELECT MAX(id) FROM personas b WHERE b.key = p.key)",
-        (args.key,),
-    ).fetchone()
-    if row is None:
-        raise SystemExit(
-            f"persona show: no installed persona '{args.key}'; "
-            "`persona list` shows what is installed"
-        )
+    try:
+        row = resolve_persona_identity(connection, args.key, args.author)
+    except PackError as error:
+        raise SystemExit(f"persona show: {error}")
 
     print(f"key: {row['key']}")
     print(f"layer: {row['layer']}")
@@ -1744,11 +1813,11 @@ def cmd_persona_show(args):
     print(f"summary: {row['summary'] or '-'}")
     print(f"license: {row['license'] or '-'}")
     print(f"source: {row['source_url'] or row['source_path'] or '-'}")
-    card = persona_card(row["metadata"])
+    print(f"tags: {', '.join(store.loads(row['tags'])) or '-'}")
+    card = stored_persona_card(row["metadata"])
     if card is None:
         print(f"author: {row['author'] or '-'}")
         print(f"version: {row['version'] or '-'}")
-        print(f"tags: {', '.join(store.loads(row['tags'])) or '-'}")
         print("card: this persona has no card")
         return 0
 
@@ -1766,9 +1835,12 @@ def cmd_persona_swap(args):
     project_key = args.project or os.environ.get("PM_FLOW_PROJECT", "")
     topology_key = args.topology or selected_topology(None)
     try:
+        persona = resolve_persona_identity(
+            connection, args.persona, args.author
+        )
         result = swap_seat_persona(
             connection, project_key=project_key, topology_key=topology_key,
-            role_key=args.role, persona_key=args.persona)
+            role_key=args.role, persona=persona)
     except PackError as error:
         # Nothing was written: every seat is checked before the transaction
         # opens, and the transaction rolls back if it fails inside.
@@ -1784,6 +1856,75 @@ def cmd_persona_swap(args):
               f"{args.persona}")
     print(f"  every other layer of the stack is untouched, and the binding, "
           f"model and tool grants are unchanged")
+    return 0
+
+
+def cmd_persona_export(args):
+    connection = store.connect(args.db)
+    try:
+        row = resolve_persona_identity(connection, args.key, args.author)
+        out_dir = Path(args.out)
+        if out_dir.exists() and any(out_dir.iterdir()):
+            raise PackError(f"output directory '{out_dir}' is not empty")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        personas_dir = out_dir / "personas"
+        personas_dir.mkdir(exist_ok=True)
+
+        pack_row = None
+        pack_manifest = {}
+        if row["pack_id"] is not None:
+            pack_row = connection.execute(
+                "SELECT * FROM persona_packs WHERE id = ?", (row["pack_id"],)
+            ).fetchone()
+            if pack_row is not None:
+                loaded = store.loads(pack_row["manifest"])
+                pack_manifest = loaded if isinstance(loaded, dict) else {}
+
+        if pack_row is not None:
+            manifest_name = pack_row["name"]
+            manifest_author = pack_row["author"]
+            manifest_license = pack_row["license"]
+            manifest_version = pack_manifest.get("version")
+            manifest_tags = pack_manifest.get("tags")
+        else:
+            manifest_name = row["key"]
+            manifest_author = row["author"]
+            manifest_license = row["license"]
+            manifest_version = row["version"]
+            manifest_tags = store.loads(row["tags"])
+
+        entry = {
+            "key": row["key"],
+            "file": f"personas/{row['key']}.md",
+            "layer": row["layer"],
+            "title": row["title"],
+            "summary": row["summary"],
+            "tags": store.loads(row["tags"]),
+        }
+        card = stored_persona_card(row["metadata"])
+        if card is not None:
+            entry["card"] = f"cards/{row['key']}.card.json"
+            (out_dir / entry["card"]).parent.mkdir(parents=True, exist_ok=True)
+            card_module = load_persona_card_module()
+            (out_dir / entry["card"]).write_text(card_module.export(card))
+        assert set(entry).issubset(PERSONA_ENTRY_KEYS)
+
+        manifest = {
+            "name": manifest_name,
+            "author": manifest_author,
+            "license": manifest_license,
+            "version": manifest_version,
+            "tags": manifest_tags if isinstance(manifest_tags, list) else [],
+            "personas": [entry],
+        }
+        (out_dir / PACK_MANIFEST).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+        )
+        (out_dir / entry["file"]).parent.mkdir(parents=True, exist_ok=True)
+        (out_dir / entry["file"]).write_text(row["body"] or "")
+    except (OSError, PackError) as error:
+        raise SystemExit(f"persona export: {error}")
+    print(f"exported persona {row['key']} to {out_dir}")
     return 0
 
 
@@ -1852,6 +1993,7 @@ def main(argv):
     q = persona_sub.add_parser(
         "show", help="show one installed persona and its optional card")
     q.add_argument("key", help="the installed persona key to show")
+    q.add_argument("--author", help="card author, with or without its claim label")
     q.set_defaults(func=cmd_persona_show)
     q = persona_sub.add_parser(
         "update", help="reinstall persona packs from their recorded sources")
@@ -1863,9 +2005,16 @@ def main(argv):
     q.add_argument("role", help="the role whose seats are swapped")
     q.add_argument("persona", metavar="persona-key",
                    help="an installed persona; its own layer is the one replaced")
+    q.add_argument("--author", help="card author, with or without its claim label")
     q.add_argument("--project", help="project key (or $PM_FLOW_PROJECT)")
     q.add_argument("--topology", help="topology key (or $PM_FLOW_TOPOLOGY)")
     q.set_defaults(func=cmd_persona_swap)
+    q = persona_sub.add_parser(
+        "export", help="export one installed persona as an installable pack")
+    q.add_argument("key", help="the installed persona key to export")
+    q.add_argument("--author", help="card author, with or without its claim label")
+    q.add_argument("--out", required=True, help="output pack directory")
+    q.set_defaults(func=cmd_persona_export)
 
     p = sub.add_parser("compare", help="runs side by side, by topology")
     p.add_argument("--project")
