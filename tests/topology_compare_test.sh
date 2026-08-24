@@ -258,10 +258,25 @@ refusal_error="$(<"$REFUSAL_ERR")"
 assert_eq "$(sqlite3 "$DB" 'SELECT COUNT(*) FROM attempts')" "0" \
   "invalid compare dispatched no arm"
 
+PERSONA_REFUSAL_OUT="$TEST_ROOT/persona-refusal.out"
+PERSONA_REFUSAL_ERR="$TEST_ROOT/persona-refusal.err"
+if PATH="$STUB_BIN:$PATH" TMPDIR="$TEST_ROOT" \
+    zsh "$FLOW/pm_flow.sh" --project "$PROJECT_KEY" compare lean heavy \
+    --persona missing:pm=cpo > "$PERSONA_REFUSAL_OUT" 2> "$PERSONA_REFUSAL_ERR"; then
+  fail "compare accepted a persona swap for a topology outside its arms"
+fi
+[[ ! -s "$PERSONA_REFUSAL_OUT" ]] || \
+  fail "invalid persona swap copied or announced an arm"
+[[ "$(<"$PERSONA_REFUSAL_ERR")" == *"not one of the comparison arms"* ]] || \
+  fail "persona topology refusal omitted the arm constraint"
+assert_eq "$(sqlite3 "$DB" 'SELECT COUNT(*) FROM attempts')" "0" \
+  "invalid persona swap dispatched no arm"
+
 COMPARE_OUT="$TEST_ROOT/compare.out"
 PATH="$STUB_BIN:$PATH" TMPDIR="$TEST_ROOT" \
   zsh "$FLOW/pm_flow.sh" --project "$PROJECT_KEY" \
-  compare lean heavy --max-ticks 5 > "$COMPARE_OUT"
+  compare lean heavy --max-ticks 5 --persona lean:pm=cpo --keep-copies \
+  > "$COMPARE_OUT"
 compare_output="$(<"$COMPARE_OUT")"
 
 assert_eq "$(printf '%s\n' "$compare_output" | grep -c '^starting_commit=')" "1" \
@@ -270,7 +285,7 @@ assert_eq "$(printf '%s\n' "$compare_output" | sed -n 's/^starting_commit=//p')"
   "$ORIGIN_COMMIT" "compare records the origin starting commit"
 
 copy_paths=("${(@f)$(printf '%s\n' "$compare_output" | \
-  sed -n 's/^arm_key=[^ ]* copy_path=\(.*\) imported_run_key=[^ ]*$/\1/p')}")
+  sed -n 's/^arm_key=[^ ]* copy_path=\(.*\) imported_run_key=[^ ]* copy_status=[^ ]*$/\1/p')}")
 assert_eq "${#copy_paths[@]}" "2" "compare prints both copy paths"
 [[ "${copy_paths[1]}" != "${copy_paths[2]}" ]] || \
   fail "compare used one checkout for both arms"
@@ -280,6 +295,8 @@ assert_eq "${#copy_paths[@]}" "2" "compare prints both copy paths"
 arm_keys=("${(@f)$(printf '%s\n' "$compare_output" | \
   sed -n 's/^arm_key=\([^ ]*\) copy_path=.*$/\1/p')}")
 assert_eq "${(F)arm_keys}" $'lean\nheavy' "compare prints both arm keys in order"
+assert_eq "$(printf '%s\n' "$compare_output" | grep -c 'copy_status=retained$')" "2" \
+  "--keep-copies reports both retained arm copies"
 cmp "${copy_paths[1]}/.agentic/pm_flow/config.json" "$LEAN_OVERLAY" || \
   fail "lean copy config does not equal the lean overlay"
 cmp "${copy_paths[2]}/.agentic/pm_flow/config.json" "$HEAVY_OVERLAY" || \
@@ -295,10 +312,27 @@ assert_eq "$project_topologies" $'heavy|topology-project\nlean|topology-project'
 arm_personas="$(sqlite3 "$DB" \
   "SELECT t.key || '|' || json_extract(stack.value, '$.key') FROM attempts a JOIN runs r ON r.id=a.run_id JOIN topologies t ON t.id=r.topology_id JOIN json_each(a.persona_stack) stack WHERE a.role_key='pm' AND json_extract(stack.value, '$.layer')='base' ORDER BY t.key")"
 assert_eq "$arm_personas" $'heavy|pm\nlean|cpo' \
-  "persona swap is confined to the first arm"
+  "operator persona swap is confined to the named arm"
+
+metric_order="$(printf '%s\n' "$compare_output" | awk -F'\t' \
+  '$1 ~ /^(cost_usd|tokens|cycles_to_done|rescue_rate|abandon_rate|escalation_depth|wall_clock_s|n_runs)$/ {print $1}')"
+assert_eq "$metric_order" \
+  $'cost_usd\ntokens\ncycles_to_done\nrescue_rate\nabandon_rate\nescalation_depth\nwall_clock_s\nn_runs' \
+  "run comparison prints the metric contract in order"
+assert_eq "$(printf '%s\n' "$compare_output" | grep '^cycles_to_done' | cut -f2-3)" \
+  $'1.00\t1.00' "run comparison imports completion outcomes"
+main_arm_personas="$(printf '%s\n' "$compare_output" | awk -F'\t' \
+  '$1 == "arm" {arm=$2} $1 == "personas" {print arm "|" $2}')"
+printf '%s\n' "$main_arm_personas" | grep '^lean|.*pm=cpo' >/dev/null || \
+  fail "lean report block omits the requested pm=cpo persona"
+printf '%s\n' "$main_arm_personas" | grep '^heavy|.*pm=pm' >/dev/null || \
+  fail "heavy report block omits its base pm persona"
+assert_eq "$(printf '%s\n' "$compare_output" | tail -n 1)" \
+  "Limits: lean n=1; heavy n=1. No difference between the arms can be inferred." \
+  "one-run arms end with the inference limit"
 
 # Importing an already-seen arm store is a no-op at the run key boundary.
-rows_before_reimport="$(sqlite3 "$DB" 'SELECT (SELECT COUNT(*) FROM runs) || '\''|'\'' || (SELECT COUNT(*) FROM attempts)')"
+rows_before_reimport="$(sqlite3 "$DB" 'SELECT (SELECT COUNT(*) FROM runs) || '\''|'\'' || (SELECT COUNT(*) FROM attempts) || '\''|'\'' || (SELECT COUNT(*) FROM outcomes) || '\''|'\'' || (SELECT COUNT(*) FROM topology_edges)')"
 python3 - "$FLOW/compare.py" \
   "${copy_paths[1]}/.agentic/pm_flow/$PROJECT_KEY/runs/pm_flow.db" "$DB" <<'PY'
 import importlib.util
@@ -310,7 +344,138 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 module.import_store(Path(sys.argv[2]), Path(sys.argv[3]))
 PY
-rows_after_reimport="$(sqlite3 "$DB" 'SELECT (SELECT COUNT(*) FROM runs) || '\''|'\'' || (SELECT COUNT(*) FROM attempts)')"
+rows_after_reimport="$(sqlite3 "$DB" 'SELECT (SELECT COUNT(*) FROM runs) || '\''|'\'' || (SELECT COUNT(*) FROM attempts) || '\''|'\'' || (SELECT COUNT(*) FROM outcomes) || '\''|'\'' || (SELECT COUNT(*) FROM topology_edges)')"
 assert_eq "$rows_after_reimport" "$rows_before_reimport" "run import is idempotent"
 
-printf 'PASS: topology compare runs isolated arms and imports topology/persona provenance\n'
+# A second comparison omits --persona on purpose. Its output, then its imported
+# persona stacks, prove that the command performs no swap of its own. The
+# default retention policy is observed from the command's own status lines.
+python3 "$FLOW/catalog.py" --db "$DB" sync --flow "$FLOW" --engine "$FLOW" \
+  --project "$PROJECT_KEY" --domain generic >/dev/null
+REMOVED_OUT="$TEST_ROOT/removed.out"
+PATH="$STUB_BIN:$PATH" TMPDIR="$TEST_ROOT" \
+  zsh "$FLOW/pm_flow.sh" --project "$PROJECT_KEY" \
+  compare lean heavy --max-ticks 5 > "$REMOVED_OUT"
+removed_output="$(<"$REMOVED_OUT")"
+assert_eq "$(printf '%s\n' "$removed_output" | grep -c 'copy_status=removed$')" "2" \
+  "default compare reports both arm copies removed"
+removed_run_keys=("${(@f)$(printf '%s\n' "$removed_output" | \
+  sed -n 's/^arm_key=[^ ]* copy_path=.* imported_run_key=\([^ ]*\) copy_status=removed$/\1/p')}")
+assert_eq "${#removed_run_keys[@]}" "2" "removed comparison prints two run keys"
+unswapped_personas="$(sqlite3 "$DB" \
+  "SELECT t.key || '|' || json_extract(stack.value, '$.key') FROM attempts a JOIN runs r ON r.id=a.run_id JOIN topologies t ON t.id=r.topology_id JOIN json_each(a.persona_stack) stack WHERE r.run_key IN ('${removed_run_keys[1]}','${removed_run_keys[2]}') AND a.role_key='pm' AND json_extract(stack.value, '$.layer')='base' ORDER BY t.key")"
+assert_eq "$unswapped_personas" $'heavy|pm\nlean|pm' \
+  "compare without --persona performs no persona swap"
+
+# Seed a separate report-only project through the public telemetry commands.
+# Timestamps are normalized afterwards so wall-clock expectations are literal,
+# while attempts, prices, tokens, personas, cycles and outcomes all enter
+# through the same engine interface a live run uses.
+REPORT_PROJECT_KEY="report-project"
+REPORT_PROJECT_DIR="$FLOW/$REPORT_PROJECT_KEY"
+REPORT_DB="$REPORT_PROJECT_DIR/runs/pm_flow.db"
+mkdir -p "$REPORT_PROJECT_DIR/runs"
+printf '%s\n' '{"domain":"generic"}' > "$REPORT_PROJECT_DIR/project.json"
+printf '# Report fixture\n' > "$REPORT_PROJECT_DIR/task_contract.md"
+for topology_key in lean heavy; do
+  python3 "$FLOW/catalog.py" --db "$REPORT_DB" sync --flow "$FLOW" \
+    --engine "$FLOW" --project "$REPORT_PROJECT_KEY" --domain generic \
+    --topology "$topology_key" >/dev/null
+done
+
+TELEMETRY="$FLOW/telemetry.py"
+response_index=0
+seed_attempt() {
+  local run_key="$1" role="$2" task="$3" cycle="$4" amount="$5"
+  local input_tokens="$6" output_tokens="$7" attempt_output attempt_id response
+  response_index=$(( response_index + 1 ))
+  response="$REPORT_PROJECT_DIR/response-$response_index.json"
+  printf '{"usage":{"input_tokens":%s,"output_tokens":%s},"total_cost_usd":%s}\n' \
+    "$input_tokens" "$output_tokens" "$amount" > "$response"
+  attempt_output="$(python3 "$TELEMETRY" --db "$REPORT_DB" attempt-start \
+    --run "$run_key" --role "$role" --task "$task" --cycle "$cycle" \
+    --label "$role-$task")"
+  attempt_id="$(printf '%s\n' "$attempt_output" | sed -n 's/^attempt_id=//p')"
+  python3 "$TELEMETRY" --db "$REPORT_DB" attempt-end --attempt "$attempt_id" \
+    --response "$response" --cost-usd "$amount"
+  printf '%s\n' "$attempt_id"
+}
+
+for run_spec in 'lean-fixture-1 lean' 'lean-fixture-2 lean' 'heavy-fixture-1 heavy'; do
+  set -- ${(z)run_spec}
+  python3 "$TELEMETRY" --db "$REPORT_DB" run-start \
+    --project "$REPORT_PROJECT_KEY" --topology "$2" --run-key "$1" >/dev/null
+done
+
+alpha_attempt="$(seed_attempt lean-fixture-1 developer alpha 2 1.25 80 20)"
+seed_attempt lean-fixture-1 consultant alpha 2 0.25 15 5 >/dev/null
+seed_attempt lean-fixture-1 10x_developer alpha 3 0.50 40 10 >/dev/null
+seed_attempt lean-fixture-1 pm beta 4 0.75 20 10 >/dev/null
+seed_attempt lean-fixture-1 cpo beta 4 0.25 5 5 >/dev/null
+seed_attempt lean-fixture-2 developer delta 1 0.50 30 10 >/dev/null
+seed_attempt lean-fixture-2 consultant delta 1 0.50 40 20 >/dev/null
+seed_attempt heavy-fixture-1 developer gamma 2 2.00 160 40 >/dev/null
+seed_attempt heavy-fixture-1 consultant gamma 2 0.50 40 10 >/dev/null
+
+python3 "$TELEMETRY" --db "$REPORT_DB" outcome --run lean-fixture-1 \
+  --task alpha --attempt "$alpha_attempt" --metric section_status \
+  --text complete --source derived
+python3 "$TELEMETRY" --db "$REPORT_DB" outcome --run lean-fixture-1 \
+  --task beta --metric section_status --text abandoned --source derived
+python3 "$TELEMETRY" --db "$REPORT_DB" outcome --run lean-fixture-2 \
+  --task delta --metric section_status --text complete --source derived
+python3 "$TELEMETRY" --db "$REPORT_DB" outcome --run heavy-fixture-1 \
+  --task gamma --metric section_status --text complete --source derived
+for run_key in lean-fixture-1 lean-fixture-2 heavy-fixture-1; do
+  python3 "$TELEMETRY" --db "$REPORT_DB" run-end --run "$run_key" \
+    --status finished
+done
+sqlite3 "$REPORT_DB" <<'SQL'
+UPDATE runs SET started_at = 1000.0, ended_at = 1010.0 WHERE run_key = 'lean-fixture-1';
+UPDATE runs SET started_at = 2000.0, ended_at = 2020.0 WHERE run_key = 'lean-fixture-2';
+UPDATE runs SET started_at = 3000.0, ended_at = 3012.5 WHERE run_key = 'heavy-fixture-1';
+SQL
+
+REPORT_OUT="$TEST_ROOT/report.out"
+zsh "$FLOW/pm_flow.sh" --project "$REPORT_PROJECT_KEY" compare --report \
+  lean-fixture-1 heavy-fixture-1 > "$REPORT_OUT"
+report_output="$(<"$REPORT_OUT")"
+assert_eq "$(printf '%s\n' "$report_output" | head -n 1)" $'metric\tlean\theavy' \
+  "report header names both arms"
+printf '%s\n' "$report_output" | grep -Fx $'cost_usd\t4.0000\t2.5000' >/dev/null || \
+  fail "cost_usd metric differs from literal fixture values"
+printf '%s\n' "$report_output" | grep -Fx $'tokens\t310\t250' >/dev/null || \
+  fail "tokens metric differs from literal fixture values"
+printf '%s\n' "$report_output" | grep -Fx $'cycles_to_done\t2.00\t2.00' >/dev/null || \
+  fail "cycles_to_done metric differs from literal fixture values"
+printf '%s\n' "$report_output" | grep -Fx $'rescue_rate\t0.33\t0.00' >/dev/null || \
+  fail "rescue_rate metric differs from literal fixture values"
+printf '%s\n' "$report_output" | grep -Fx $'abandon_rate\t0.33\t0.00' >/dev/null || \
+  fail "abandon_rate metric differs from literal fixture values"
+printf '%s\n' "$report_output" | grep -Fx $'escalation_depth\t1\t1' >/dev/null || \
+  fail "escalation_depth metric differs from literal fixture values"
+printf '%s\n' "$report_output" | grep -Fx $'wall_clock_s\t30.0\t12.5' >/dev/null || \
+  fail "wall_clock_s metric differs from literal fixture values"
+printf '%s\n' "$report_output" | grep -Fx $'n_runs\t2\t1' >/dev/null || \
+  fail "n_runs metric differs from literal fixture values"
+assert_eq "$(printf '%s\n' "$report_output" | tail -n 1)" \
+  "Limits: lean n=2; heavy n=1. No difference between the arms can be inferred." \
+  "limits read differently-sized arms from the store"
+assert_eq "$(python3 "$FLOW/cost.py" total "$REPORT_PROJECT_DIR")" "6.5000" \
+  "report arm costs reconcile with cost.py total"
+
+# The cost formula's forbidden alternative is observationally equivalent on a
+# normalized store, so this source guard makes that required mutation fail.
+grep -F 'import cost' "$FLOW/compare.py" >/dev/null || \
+  fail "report does not import cost.py accounting"
+grep -F 'cost.import_legacy(project_dir)' "$FLOW/compare.py" >/dev/null || \
+  fail "report does not import legacy cost records before accounting"
+! grep -F 'topology_comparison' "$FLOW/compare.py" >/dev/null || \
+  fail "report reads cost from topology_comparison"
+driver_source="$(<"$FLOW/driver.zsh")"
+[[ "$driver_source" == *'telemetry_record_outcome "$(basename "$section_dir")" abandoned'* ]] || \
+  fail "abandonment does not emit section_status"
+[[ "$driver_source" == *'telemetry_record_outcome "$section_key" complete'* ]] || \
+  fail "completion does not emit section_status"
+
+printf 'PASS: topology compare reports literal metrics, limits, personas, and copy retention\n'

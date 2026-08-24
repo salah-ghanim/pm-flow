@@ -40,7 +40,8 @@ Usage:
   pm_flow.sh [--project <name>] status
   pm_flow.sh [--project <name>] next
   pm_flow.sh [--project <name>] cost
-  pm_flow.sh [--project <name>] compare <a> <b> [--max-ticks <n>]
+  pm_flow.sh [--project <name>] compare <a> <b> [--max-ticks <n>] [--persona <topology>:<role>=<persona>] [--keep-copies]
+  pm_flow.sh [--project <name>] compare --report <run-a> <run-b>
   pm_flow.sh [--project <name>] access [--all]
   pm_flow.sh [--project <name>] trace export [--otlp <url>|--file <path>] [--header k=v]
   pm_flow.sh [--project <name>] trace status

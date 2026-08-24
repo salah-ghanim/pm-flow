@@ -468,7 +468,19 @@ cmd_cost() {
 }
 
 cmd_compare() {
-  local topology_a="${1:-}" topology_b="${2:-}" max_ticks=100
+  if [[ "${1:-}" == "--report" ]]; then
+    shift || true
+    local run_a="${1:-}" run_b="${2:-}"
+    [[ -n "$run_a" ]] || fail "compare --report requires two run keys"
+    [[ -n "$run_b" ]] || fail "compare --report requires two run keys"
+    [[ $# -eq 2 ]] || fail "unknown compare --report argument: ${3:-}"
+    python3 "$SCRIPT_DIR/compare.py" report "$run_a" "$run_b" \
+      --flow "$FLOW_DIR" --project "$PROJECT_KEY"
+    return
+  fi
+
+  local topology_a="${1:-}" topology_b="${2:-}" max_ticks=100 keep_copies=0
+  local persona_args=()
   [[ -n "$topology_a" ]] || fail "compare requires two topology keys"
   [[ -n "$topology_b" ]] || fail "compare requires two topology keys"
   shift 2 || true
@@ -479,12 +491,21 @@ cmd_compare() {
         max_ticks="${1:-}"
         [[ "$max_ticks" == <-> ]] || fail "--max-ticks requires a positive integer"
         ;;
+      --persona)
+        shift || fail "--persona requires a value"
+        [[ -n "${1:-}" ]] || fail "--persona requires a value"
+        persona_args+=(--persona "$1")
+        ;;
+      --keep-copies) keep_copies=1 ;;
       *) fail "unknown compare argument: $1" ;;
     esac
     shift || true
   done
-  python3 "$SCRIPT_DIR/compare.py" run "$topology_a" "$topology_b" \
-    --flow "$FLOW_DIR" --project "$PROJECT_KEY" --max-ticks "$max_ticks"
+  local args=(run "$topology_a" "$topology_b" --flow "$FLOW_DIR"
+              --project "$PROJECT_KEY" --max-ticks "$max_ticks")
+  args+=("${persona_args[@]}")
+  (( keep_copies == 0 )) || args+=(--keep-copies)
+  python3 "$SCRIPT_DIR/compare.py" "${args[@]}"
 }
 
 # What the roles actually reached for.
@@ -816,6 +837,17 @@ telemetry_end_attempt() {
   python3 "$SCRIPT_DIR/telemetry.py" "${args[@]}" >/dev/null 2>&1 || true
   TELEMETRY_ATTEMPT_ID=""
   TELEMETRY_ATTEMPT_SPAN=""
+  return 0
+}
+
+telemetry_record_outcome() {
+  local section_key="$1" value="$2"
+  telemetry_enabled || return 0
+  [[ -n "$TELEMETRY_RUN_KEY" ]] || return 0
+  local args=(--db "$(telemetry_store_file)" outcome
+              --run "$TELEMETRY_RUN_KEY" --task "$section_key"
+              --metric section_status --text "$value" --source derived)
+  python3 "$SCRIPT_DIR/telemetry.py" "${args[@]}" >/dev/null 2>&1 || true
   return 0
 }
 
@@ -2084,6 +2116,7 @@ do_abandon() {
   } > "$escalation_dir/abandon_handoff.md"
   cmd_section_handoff "$(basename "$section_dir")" cancelled "$summary" \
     --file "$escalation_dir/abandon_handoff.md" >/dev/null
+  telemetry_record_outcome "$(basename "$section_dir")" abandoned
   remove_section_worktree "$(basename "$section_dir")"
   printf 'abandon -> section cancelled\n'
 }
@@ -2131,6 +2164,7 @@ $report"
 
   cmd_section_handoff "$section_key" done \
     "Section completed and validated across $newest cycle(s)" --file "$handoff" >/dev/null
+  telemetry_record_outcome "$section_key" complete
   # The section is finished, so its checkout is dead weight. The branch stays:
   # it is the history of how the section got there, and removing a worktree
   # never removes work.
