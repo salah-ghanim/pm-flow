@@ -15,7 +15,15 @@ case "$TEST_ROOT" in
   */pm-flow-agent-bindings.*) ;;
   *) printf 'unsafe test temp directory: %s\n' "$TEST_ROOT" >&2; exit 1 ;;
 esac
-trap 'rm -rf -- "$TEST_ROOT"' EXIT
+LOCK_HOLDER_PID=""
+cleanup() {
+  if [[ -n "$LOCK_HOLDER_PID" ]]; then
+    kill "$LOCK_HOLDER_PID" 2>/dev/null || true
+    wait "$LOCK_HOLDER_PID" 2>/dev/null || true
+  fi
+  rm -rf -- "$TEST_ROOT"
+}
+trap cleanup EXIT
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -453,3 +461,324 @@ run_failed_dispatch "$TEST_ROOT/rpc-response.json"
 printf 'PASS: ACP failures use the dedicated retry mapping\n'
 
 printf 'PASS: agent bindings ACP suite\n'
+
+# A second installed project is driven only through the MCP server after the
+# client starts. Setup remains outside the client, and every role uses the same
+# existing successful agent fixture.
+MCP_REPO="$TEST_ROOT/mcp repo"
+mkdir "$MCP_REPO"
+"$REPO_ROOT/install.sh" "$MCP_REPO" --name "MCP Binding Project" > "$TEST_ROOT/mcp-install.out"
+MCP_PM=(env PM_FLOW_REPO_ROOT="$MCP_REPO" PYTHONPATH="$REPO_ROOT/src" python3 -m pm_flow.cli)
+MCP_FLOW="$MCP_REPO/.agentic/pm_flow"
+MCP_PROJECT_DIR="$MCP_FLOW/mcp-repo"
+MCP_DRIVER_BIN="$TEST_ROOT/mcp-driver-bin"
+MCP_DONE_FLAG="$TEST_ROOT/mcp-complete.flag"
+mkdir "$MCP_DRIVER_BIN"
+/bin/cp "$REPO_ROOT/tests/fixtures/stub_success.zsh" "$MCP_DRIVER_BIN/claude"
+chmod +x "$MCP_DRIVER_BIN/claude"
+
+python3 - "$MCP_FLOW/config.json" <<'PYCFG'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+for role in config["roles"]:
+    config["roles"][role] = {"cli": "claude", "model": "", "difficulty": "low"}
+# Force project work to recur during the drive so the client cannot assume
+# that every tick advances its section.
+config.setdefault("governance", {})["portfolio_review_dispatches"] = 1
+path.write_text(json.dumps(config, indent=2) + "\n")
+PYCFG
+
+"${MCP_PM[@]}" init-section mcp-widget <<'SECTIONBRIEF' > "$TEST_ROOT/mcp-section.out"
+## Objective
+
+- Build the MCP widget.
+
+## Scope
+
+- The MCP widget only.
+
+## Priority
+
+- must-have: prove the MCP client can drive a section
+
+## Owned paths
+
+- `src/mcp-widget/**`
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- The MCP-driven section reaches done.
+
+## Rejection conditions
+
+- The client reads project state outside an MCP tool result.
+SECTIONBRIEF
+
+cat > "$TEST_ROOT/mcp_client.py" <<'PY'
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+
+
+repo_root, project_key, section_key, mode = sys.argv[1:]
+environment = dict(os.environ)
+environment["PM_FLOW_REPO_ROOT"] = repo_root
+server = subprocess.Popen(
+    [sys.executable, "-m", "pm_flow.mcp_server"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+    env=environment,
+)
+request_id = 0
+
+
+def send(frame):
+    server.stdin.write(json.dumps(frame, separators=(",", ":")) + "\n")
+    server.stdin.flush()
+
+
+def request(method, params=None):
+    global request_id
+    request_id += 1
+    frame = {"jsonrpc": "2.0", "id": request_id, "method": method}
+    if params is not None:
+        frame["params"] = params
+    send(frame)
+    line = server.stdout.readline()
+    assert line, f"MCP server exited while answering {method}"
+    response = json.loads(line)
+    assert response.get("jsonrpc") == "2.0", response
+    assert response.get("id") == request_id, response
+    return response
+
+
+def call(name, arguments=None):
+    response = request(
+        "tools/call", {"name": name, "arguments": arguments or {}}
+    )
+    assert "error" not in response, response
+    return response["result"]
+
+
+def text(result):
+    return "\n".join(item["text"] for item in result["content"] if item["type"] == "text")
+
+
+def section_is_done(index):
+    for line in index.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) >= 3 and cells[0] == section_key and cells[2] == "done":
+            return True
+    return False
+
+
+try:
+    initialized = request(
+        "initialize",
+        {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "pm-flow-test", "version": "1"},
+        },
+    )
+    assert initialized["result"]["capabilities"] == {"tools": {}}
+    send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    listed = request("tools/list", {})["result"]["tools"]
+    names = {tool["name"] for tool in listed}
+    expected = {"status", "next", "tick", "list_sections", "cost"}
+    assert names == expected, names
+    for tool in listed:
+        schema = tool["inputSchema"]
+        assert schema["additionalProperties"] is False
+        expected_properties = {"project", "section"} if tool["name"] == "tick" else {"project"}
+        assert set(schema["properties"]) == expected_properties
+
+    bad_arguments = request(
+        "tools/call",
+        {"name": "status", "arguments": {"section": section_key}},
+    )
+    assert bad_arguments["error"]["code"] == -32602
+    bad_tool = request("tools/call", {"name": "run", "arguments": {}})
+    assert bad_tool["error"]["code"] == -32602
+
+    project = {"project": project_key}
+    targeted = {"project": project_key, "section": section_key}
+    if mode == "lock":
+        before = text(call("list_sections", project))
+        refused = call("tick", project)
+        after = text(call("list_sections", project))
+        refused_text = text(refused)
+        assert refused["isError"] is True
+        assert "another pm_flow driver is already running" in refused_text, refused_text
+        assert before == after
+        report = {"tools": sorted(names), "lock": refused_text.strip()}
+    elif mode == "budget":
+        before = text(call("cost", project))
+        refused = call("tick", targeted)
+        after = text(call("cost", project))
+        refused_text = text(refused)
+        assert refused["isError"] is True
+        assert "project budget exhausted" in refused_text
+        assert before == after, "a dispatch was recorded behind the budget guard"
+        report = {"tools": sorted(names), "budget": refused_text.strip()}
+    else:
+        assert call("status", project)["isError"] is False
+        assert call("next", project)["isError"] is False
+        final_index = ""
+        ticks = 0
+        for ticks in range(1, 33):
+            tick_result = call("tick", project)
+            assert tick_result["isError"] is False, text(tick_result)
+            final_index = text(call("list_sections", project))
+            if section_is_done(final_index):
+                break
+        else:
+            raise AssertionError("MCP tick loop did not converge in 32 ticks")
+        assert call("cost", project)["isError"] is False
+        report = {"tools": sorted(names), "ticks": ticks, "terminal": final_index}
+    print(json.dumps(report, separators=(",", ":")))
+finally:
+    server.stdin.close()
+    returncode = server.wait(timeout=5)
+    diagnostics = server.stderr.read()
+    assert returncode == 0, diagnostics
+PY
+chmod +x "$TEST_ROOT/mcp_client.py"
+
+# Prove mechanically that the client has exactly one process-spawning call and
+# no alternate shell/process API. That one Popen is the MCP server above.
+python3 - "$TEST_ROOT/mcp_client.py" <<'PY'
+import ast
+import sys
+from pathlib import Path
+
+tree = ast.parse(Path(sys.argv[1]).read_text())
+process_calls = []
+for node in ast.walk(tree):
+    if not isinstance(node, ast.Call):
+        continue
+    function = node.func
+    if isinstance(function, ast.Attribute) and isinstance(function.value, ast.Name):
+        if function.value.id in {"subprocess", "os"}:
+            process_calls.append((function.value.id, function.attr))
+assert process_calls == [("subprocess", "Popen")], process_calls
+PY
+printf 'PASS: MCP client has no shell or state-reading escape hatch\n'
+
+cat > "$TEST_ROOT/lock_holder.py" <<'PY'
+import fcntl
+import signal
+import sys
+
+lock_path, ready_path = sys.argv[1:]
+with open(lock_path, "a+") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    with open(ready_path, "w") as ready:
+        ready.write("ready\n")
+    while True:
+        signal.pause()
+PY
+
+MCP_LOCK_READY="$TEST_ROOT/mcp-lock.ready"
+/usr/bin/python3 "$TEST_ROOT/lock_holder.py" \
+  "$MCP_PROJECT_DIR/.driver.lock" "$MCP_LOCK_READY" &
+LOCK_HOLDER_PID=$!
+for _ in {1..100}; do
+  [[ -f "$MCP_LOCK_READY" ]] && break
+  sleep 0.01
+done
+[[ -f "$MCP_LOCK_READY" ]] || fail "MCP driver lock holder did not become ready"
+lock_result="$(PM_DONE_FLAG="$MCP_DONE_FLAG" PATH="$MCP_DRIVER_BIN:/usr/bin:/bin" \
+  PYTHONPATH="$REPO_ROOT/src" /usr/bin/python3 "$TEST_ROOT/mcp_client.py" \
+  "$MCP_REPO" mcp-repo mcp-widget lock)"
+kill "$LOCK_HOLDER_PID" 2>/dev/null || true
+wait "$LOCK_HOLDER_PID" 2>/dev/null || true
+LOCK_HOLDER_PID=""
+assert_contains "$lock_result" "another pm_flow driver is already running" \
+  "MCP lock tool error"
+printf 'PASS: MCP tick reports the driver lock as a tool error without advancing\n'
+
+drive_result="$(PM_DONE_FLAG="$MCP_DONE_FLAG" PATH="$MCP_DRIVER_BIN:/usr/bin:/bin" \
+  PYTHONPATH="$REPO_ROOT/src" /usr/bin/python3 "$TEST_ROOT/mcp_client.py" \
+  "$MCP_REPO" mcp-repo mcp-widget drive)"
+[[ "$(printf '%s' "$drive_result" | field tools)" == \
+  "['cost', 'list_sections', 'next', 'status', 'tick']" ]] || fail "MCP tool set"
+assert_contains "$(printf '%s' "$drive_result" | field terminal)" \
+  "| mcp-widget | must-have | done |" "MCP terminal section reading"
+printf 'PASS: MCP lists exactly five tools and drives a section to done\n'
+
+# Leave a second section actionable, record prior spend, and put the ceiling
+# below it. The budget-mode client compares cost tool output across the refused
+# tick, proving that no attempt was recorded.
+"${MCP_PM[@]}" init-section budget-widget <<'SECTIONBRIEF' > "$TEST_ROOT/mcp-budget-section.out"
+## Objective
+
+- Exercise the project budget guard.
+
+## Scope
+
+- The budget guard only.
+
+## Priority
+
+- must-have: exhausted projects do not dispatch
+
+## Owned paths
+
+- `src/budget-widget/**`
+
+## Dependencies
+
+- None.
+
+## Acceptance
+
+- Tick refuses before dispatch.
+
+## Rejection conditions
+
+- Any dispatch is recorded.
+SECTIONBRIEF
+
+budget_run="$(python3 "$REPO_ROOT/template/.agentic/pm_flow/telemetry.py" \
+  --db "$MCP_PROJECT_DIR/runs/pm_flow.db" \
+  run-start --project mcp-repo --run-key mcp-budget-seed)"
+budget_run_id="$(printf '%s\n' "$budget_run" | sed -n 's/^run_id=//p')"
+budget_attempt="$(python3 "$REPO_ROOT/template/.agentic/pm_flow/telemetry.py" \
+  --db "$MCP_PROJECT_DIR/runs/pm_flow.db" \
+  attempt-start --run "$budget_run_id" --role developer --task budget-widget --label seed)"
+budget_attempt_id="$(printf '%s\n' "$budget_attempt" | sed -n 's/^attempt_id=//p')"
+python3 "$REPO_ROOT/template/.agentic/pm_flow/telemetry.py" \
+  --db "$MCP_PROJECT_DIR/runs/pm_flow.db" \
+  attempt-end --attempt "$budget_attempt_id" --cost-usd 1 >/dev/null
+python3 - "$MCP_FLOW/config.json" <<'PYCFG'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+config.setdefault("budget", {})["max_usd"] = 0.01
+path.write_text(json.dumps(config, indent=2) + "\n")
+PYCFG
+
+budget_result="$(PM_DONE_FLAG="$MCP_DONE_FLAG" PATH="$MCP_DRIVER_BIN:/usr/bin:/bin" \
+  PYTHONPATH="$REPO_ROOT/src" /usr/bin/python3 "$TEST_ROOT/mcp_client.py" \
+  "$MCP_REPO" mcp-repo budget-widget budget)"
+assert_contains "$budget_result" "project budget exhausted" "MCP budget tool error"
+printf 'PASS: MCP tick reports budget exhaustion as a tool error without dispatching\n'
+
+printf 'PASS: agent bindings MCP suite\n'
