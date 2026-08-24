@@ -4,6 +4,35 @@ Newest first. Read this before anything else: one review cannot see a
 section that has been nearly done for four of them, or a shortest path that
 has not moved in three. Older entries are compacted to their summary line.
 
+## Review 004 - 2026-08-24T01:57:39Z - $209.2742 spent
+
+- Summary: 2 of 7 criteria met; verdicts CONTINUE 7, RESCOPE 1; shortest path: `store-ledger` T4 (driver off the TSV, fixtures on the store) then T5 to done; `topology-compare` T1 next. `trace-commands` and `otel-semconv` get ticks only...
+
+### Completion criteria
+
+- Finished run opens in Phoenix/Langfuse/Jaeger with every role, prompt, retry, stall, tokens, dollars — `git grep -inE 'otlp_endpoint|"trace"|compare|\bacp\b|\bmcp\b' -- src/pm_flow/cli.py` empty; `git ls-files src/pm_flow` = `__init__ cli paths` — **NOT MET**
+- `cost_ledger.tsv` gone, host absorbs no per-dispatch writes — `git grep -n cost_ledger -- template` hits `driver.zsh:441-467,839`, `cost.py:185,192`, seven fixture lines, `README.md:168`; `ls runs/` shows `cost_ledger.tsv` rewritten 03:35 today beside `pm_flow.db` — **NOT MET**
+- Sections run in isolated worktrees — `git worktree list` shows the `store-ledger` checkout under `../.pm-flow-worktrees/` — **MET**
+- Persona installed from elsewhere, dropped on a seat, measured against the one it replaced — `git grep -inE 'compare|measure' -- template/pm_flow/catalog.py` empty — **NOT MET**
+- Two topologies compared in one command — `git ls-files src/pm_flow` has no `compare.py`; `cli.py` grep above empty — **NOT MET**
+- Drivable over MCP, binds any ACP agent — `git grep -inE 'otlp_endpoint|\bacp\b|\bmcp\b' -- '*config.json' '*agent_exec.sh' '*pm_flow.sh'` empty — **NOT MET**
+- Test suite runs to completion — `zsh tests/pm_flow_test.sh` exit 0 (10 PASS); `zsh tests/prompt_quality_test.sh` exit 0 (57 prompts); `zsh tests/store_ledger_test.sh` exit 0; `zsh template/.agentic/pm_flow/tests/run.zsh` `all suites passed` (35/41/32/58/74) on `main` at `0665841` — **MET**
+
+### Verdicts
+
+- agent-bindings: CONTINUE
+- artifact-quality: CONTINUE
+- otel-semconv: CONTINUE
+- persona-cards: CONTINUE
+- run-detach: CONTINUE
+- store-ledger: RESCOPE acceptance unchanged; Owned paths now include `template/.agentic/pm_flow/tests/transitions.zsh`, `on_demand.zsh`, `governance.zsh` and `template/.agentic/pm_flow/README.md`, edits limited to what the ledger's removal forces, and the reviewer may not reject T4 for editing them within that limit; section reopened, next scope re-runs `cycles/004/scope_probe.zsh` and assigns T4
+- topology-compare: CONTINUE
+- trace-commands: CONTINUE
+
+### Shortest path
+
+`store-ledger` T4 (driver off the TSV, fixtures on the store) then T5 to done; `topology-compare` T1 next. `trace-commands` and `otel-semconv` get ticks only while `store-ledger` is not actionable; once it closes, the four must-haves interleave by least-recent dispatch. Nothing is in flight; the next tick is `store-ledger` cycle 005 scope, which is on the path. Committed as `beac141` (driver's blocked record) and `ec8e4dc chore(plan): portfolio review 004`, pushed to `origin/main`.
+
 ## Review 003 - 2026-08-24T00:37:49Z - $181.0513 spent
 
 - Summary: 2 of 7 criteria met; verdicts CONTINUE 8; shortest path: `store-ledger` A1/A2/A4 — `cost.py totals` from `attempts`, the five driver functions off the TSV — then `topology-compare` T1. `trace-commands` T1 and `otel...

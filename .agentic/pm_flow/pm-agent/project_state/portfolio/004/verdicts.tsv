@@ -1,0 +1,8 @@
+agent-bindings	CONTINUE	
+artifact-quality	CONTINUE	
+otel-semconv	CONTINUE	
+persona-cards	CONTINUE	
+run-detach	CONTINUE	
+store-ledger	RESCOPE	acceptance unchanged; Owned paths now include `template/.agentic/pm_flow/tests/transitions.zsh`, `on_demand.zsh`, `governance.zsh` and `template/.agentic/pm_flow/README.md`, edits limited to what the ledger's removal forces, and the reviewer may not reject T4 for editing them within that limit; section reopened, next scope re-runs `cycles/004/scope_probe.zsh` and assigns T4
+topology-compare	CONTINUE	
+trace-commands	CONTINUE	

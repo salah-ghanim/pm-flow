@@ -1,0 +1,4 @@
+UNSTARTED_DEPENDENCY	CLEAR	
+UNREACHABLE_SECTION	FOUND	store-ledger` A4/A5 required editing `template/.agentic/pm_flow/tests/{transitions,on_demand,governance}.zsh` and `README.md`, owned by no live section; closed by adding them to its Owned paths (`brief.md` `## Boundary extended, authorized 2026-08-24`, `owned_paths.txt`, no overlap).
+MUST_HAVE_INFLATION	CLEAR	
+LINEAR_CHAIN_RISK	FOUND	depth two, but the head (`store-ledger`) blocked and both dependents — `topology-compare` and `agent-bindings`, the objective — stalled for a full review interval while the dependents-first sort starved the two independent trace sections; cured by the reopen, nothing structural changed.

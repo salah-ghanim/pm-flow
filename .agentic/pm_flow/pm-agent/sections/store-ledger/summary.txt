@@ -1,1 +1,1 @@
-Reopened by a portfolio review: the three engine fixtures and README line that touch the TSV are in Owned paths; acceptance unchanged; next is T4.
+Cycle 004; last action scope.
