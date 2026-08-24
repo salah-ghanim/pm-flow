@@ -1,1 +1,1 @@
-Not started; waits on store-ledger for cost totals.
+Cycle 002; last action review.
