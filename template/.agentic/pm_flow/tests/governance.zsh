@@ -289,6 +289,14 @@ if [[ ! -f "$FLOW/demo/sections/delta/portfolio_rescope.txt" ]]; then
   ok "C2 and it is consumed rather than riding along forever"
 else bad "C2 and it is consumed rather than riding along forever" "still present"; fi
 
+printf '\n===== C2: a rescope outranks a stale COMPLETE =====\n'
+mkdir -p "$FLOW/demo/sections/delta/cycles/009"
+printf 'COMPLETE\n' > "$FLOW/demo/sections/delta/cycles/009/decision.txt"
+printf 'reopened: the suite is red\n' > "$FLOW/demo/sections/delta/portfolio_rescope.txt"
+eq  "C2 a reopened section scopes again instead of re-completing" \
+    "$("$FLOWSH" status | awk '$1 == "delta" {print $4}')" "scope"
+rm -rf "$FLOW/demo/sections/delta/cycles/009" "$FLOW/demo/sections/delta/portfolio_rescope.txt"
+
 printf '\n===== C2: the review is not re-convened until the baseline moves =====\n'
 absent "C2 the baseline advanced with the review" "$("$FLOWSH" next)" "portfolio-review"
 

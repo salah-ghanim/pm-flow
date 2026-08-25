@@ -197,6 +197,11 @@ section_next_action() {
   cycle_dir="$(cycle_dir_for "$section_dir" "$newest")"
   if [[ ! -f "$cycle_dir/assignment.md" ]]; then
     if [[ "$(cycle_decision "$cycle_dir")" == "COMPLETE" ]]; then
+      # A rescope note outranks a stale COMPLETE: a section reopened by the
+      # officer used to sail straight back through `complete`, unchanged.
+      if [[ -f "$section_dir/portfolio_rescope.txt" ]]; then
+        printf 'scope\n'; return
+      fi
       printf 'complete\n'; return
     fi
     printf 'scope\n'; return
