@@ -66,7 +66,7 @@
 ## Task T1 — a detached run that outlives its launcher, and a status that reads it
 
 - Status: done — A1, A2, A4 and A6 (`start`) met, and A8's new-suite leg met.
-  A8's `packaged_layout_test.sh` leg is carried to T1a: registering a new engine
+  A8's `packaged_layout_test.sh` leg is carried to T4: registering a new engine
   file with `install.sh` was never in T1's writable paths.
 - Outcome: `zsh <engine>/run_detach.zsh start` returns within seconds having
   printed `pid=` and `log=`; the supervisor and the agent child it dispatched
@@ -116,64 +116,10 @@
   `zsh tests/packaged_layout_test.sh` still exit 0.
 - Depends on: None.
 
-## Task T1a — the new engine file survives a migration
-
-- Status: pending, waiting on an owned-path authorization, and now the only
-  unfinished task in this workplan. While T2 and T3 were open it was held
-  rather than blocking — it touches `install.sh` and nothing else, so the
-  section worked around it instead of idling behind a permission it cannot
-  grant itself. That room is gone: T1, T2 and T3 are accepted, so from cycle
-  004 the section has no executable task and reports `BLOCKED_EXTERNAL` until
-  the extension is granted or refused. Re-probed at the cycle-004 scope rather
-  than carried: `install.sh:47-67` still names none of the three stranded
-  entries, and `brief.md` still carries only the `pm_flow.sh` extension of
-  2026-08-24.
-- Scope corrected 2026-08-25, from a run of the suite on main rather than from
-  cycle 002's carried claim: `run_detach.zsh` is no longer the only unregistered
-  engine file. Observed
-  `FAIL: the migrated flow directory holds project data only: expected
-  '.gitignore .project-key config.json local_env.sh.example projects.md
-  salvage-legacy ', got '.gitignore .project-key artifact_quality.md cards
-  config.json local_env.sh.example projects.md run_detach.zsh salvage-legacy '`.
-  `artifact_quality.md` is the artifact-quality section's and `cards` is the
-  persona-cards section's — and `cards` is a directory, so it belongs in
-  `COPIED_ENGINE_DIRS`, not `COPIED_ENGINE_FILES`. Neither is this section's to
-  register. So T1a's one line no longer makes the suite exit 0, and no task in
-  this workplan can: the suite's exit 0 is now a portfolio-level outcome. T1a's
-  outcome is narrowed to removing this section's own entry from that list.
-- Why it exists: `install.sh` removes a copied engine file from a migrated flow
-  directory only if the file is named in `COPIED_ENGINE_FILES`
-  (`install.sh:47-67`, `remove_copied_engine` at `install.sh:350-355`).
-  `packaged_layout_test.sh:905` builds its legacy fixture by copying the whole
-  of `template/.agentic/pm_flow/` in, so every new engine file must be
-  registered or migration strands it. `run_detach.zsh` is the first new engine
-  file this section adds, so shipping T1 turns
-  `packaged_layout_test.sh:1017-1020` red until this lands.
-- Outcome: a migrated flow directory has no `run_detach.zsh` left behind — the
-  migration group's `got` list no longer names it. The group still fails while
-  `artifact_quality.md` and `cards` are unregistered; that is the other
-  sections' work, escalated in `handoff.md`, not a defect of this task.
-- Paths: `install.sh` — one line, `run_detach.zsh` added to
-  `COPIED_ENGINE_FILES`, and nothing else.
-- Authorization required: `install.sh` is not in `brief.md`'s Owned paths, and
-  "any file outside Owned paths is modified" is one of its rejection
-  conditions. The next portfolio review has to extend the boundary the way it
-  extended it for `pm_flow.sh` on 2026-08-24 before this is assignable.
-- Behaviour: insert `run_detach.zsh` into the `COPIED_ENGINE_FILES` array. No
-  other install, migration or packaging change; `pyproject.toml:47-51` already
-  force-includes the file into the wheel.
-- Acceptance IDs: this section's share of A8's `packaged_layout_test.sh` leg.
-- Validation: `zsh tests/packaged_layout_test.sh`; the migration group's `got`
-  list no longer contains `run_detach.zsh`. Exit 0 is no longer the expected
-  observation and was not when cycle 002's review recorded it — the scratch-copy
-  run that produced 13 passing groups predates `artifact_quality.md` and
-  `cards`. That claim is superseded, not carried.
-- Depends on: T1.
-
 ## Task T2 — graceful stop, and a resume that repeats nothing
 
 - Status: done — A3, A5 and A6 (`stop` and the second `start`) met, accepted
-  cycle 002. A8's `packaged_layout_test.sh` leg still sits with T1a.
+  cycle 002. A8's `packaged_layout_test.sh` leg still sits with T4.
 - Outcome: `stop` issued while a dispatch is in flight prints that the run will
   stop after the current dispatch and exits 0; the in-flight dispatch is never
   signalled, finishes, and is recorded; no further tick starts; the log's last
@@ -215,14 +161,16 @@
 
 - T3 is that task: it puts the command where the operator types it and drives
   all four user-visible scenarios of `brief.md` end to end through
-  `pm-flow run-detach`.
+  `pm-flow run-detach`. It is the last task by behaviour; T4 follows it in the
+  order only because the owned-path authorization it needed arrived after T3 was
+  accepted, and T4 adds no behaviour — three registry list lines that keep the
+  engine file T1 shipped from stranding a migration.
 
 ## Task T3 — the command reaches the operator, and the doc says how
 
 - Status: done — A7 (its reachable clauses), A6 and A8 (the two suites this
   section can turn green) met, accepted cycle 003. A7's and A8's
-  `packaged_layout_test.sh` legs remain portfolio-level; T1a still holds this
-  section's share.
+  `packaged_layout_test.sh` legs are T4's.
 - Outcome: `pm-flow run-detach start|stop|status` reaches the supervisor
   through the routing arm; `pm-flow help` lists the command; `docs/run-detach.md`
   tells an operator how to start a run, find its log, stop it and resume, and
@@ -265,13 +213,12 @@
   only that group, with a `got` list unchanged by this task; the engine `help`
   output contains `run-detach`; the fixture repository's
   `git status --porcelain` is empty after the full scenario.
-- What this task cannot deliver, and why it is not a defect of it: A7's
-  "`packaged_layout_test.sh` still exits 0" and A8's third suite are not
-  reachable from this section's owned paths. `artifact_quality.md` and `cards`
-  strand migration too, and both belong to other sections. Escalated in
-  `handoff.md`; the review should accept T3 on the two suites plus an unchanged
-  migration `got` list, and must not accept a T3 that fixes the other sections'
-  entries.
+- What this task could not deliver, and why it was not a defect of it: A7's
+  "`packaged_layout_test.sh` still exits 0" and A8's third suite were not
+  reachable from this section's owned paths at cycle 003. `artifact_quality.md`
+  and `cards` strand migration too, and both belong to other sections. Escalated
+  in `handoff.md` and answered by `brief.md`'s 2026-08-25 extension, which hands
+  all three entries to this section; T4 carries them.
 - Carried from T2's review: `start`'s stale-stop clearing
   (`run_detach.zsh:221`) is shipped but unproven — a gracefully stopped loop
   always removes its own stop file, so no test manufactures a stale one.
@@ -279,6 +226,66 @@
   writes a stray `run-detach.stop`, runs `start --max-ticks 2`, and asserts the
   run reaches tick 2.
 - Depends on: T2.
+
+## Task T4 — every new engine name survives a migration
+
+- Status: done — A7's `packaged_layout_test.sh` clause and A8's third suite met,
+  accepted cycle 005. `zsh tests/packaged_layout_test.sh` exits 0 with all 13
+  groups PASS. This was the last unfinished task in the workplan; every brief
+  acceptance ID now has current evidence.
+- It was scoped as `T1a` earlier in cycle 005 and returned on the ID alone — the
+  workplan task line must name a `T<number>`. Renamed here; nothing about the
+  outcome, paths or acceptance changed. The owned-path authorization it waited
+  on through cycles 001-004 arrived as `brief.md`'s "Boundary extended,
+  authorized 2026-08-25": `install.sh` joins Owned paths for registry entries
+  only, and the extension names all three stranded entries rather than this
+  section's alone. The `BLOCKED_EXTERNAL` of cycle 004 is answered and
+  superseded.
+- Scope, as authorized: three entries, not one. Cycle 004 measured the failure
+  on main —
+  `FAIL: the migrated flow directory holds project data only: expected
+  '.gitignore .project-key config.json local_env.sh.example projects.md
+  salvage-legacy ', got '.gitignore .project-key artifact_quality.md cards
+  config.json local_env.sh.example projects.md run_detach.zsh salvage-legacy '`
+  — and the three names strand together. `artifact_quality.md` ships from the
+  artifact-quality section and `cards/` from persona-cards; both sections are
+  terminal, so no live section can register them. The 2026-08-25 extension hands
+  all three to this section on the ground that the entries are list lines in
+  `install.sh` and nothing more. With that, the suite's exit 0 is reachable here
+  again and A7's and A8's third legs stop being portfolio-level.
+- Why it exists: `remove_copied_engine` (`install.sh:331-371`) deletes a copied
+  engine file from a migrated flow directory only if the name is in
+  `COPIED_ENGINE_FILES` (`install.sh:47-67`), and a directory only if it is in
+  `COPIED_ENGINE_DIRS` (`install.sh:72-81`). `packaged_layout_test.sh:905` builds
+  its legacy fixture by copying the whole of `template/.agentic/pm_flow/` in, so
+  any unregistered engine name is left behind by design and the positive
+  assertion at `packaged_layout_test.sh:1018-1020` names it.
+- Outcome: `zsh tests/packaged_layout_test.sh` exits 0. The migrated flow
+  directory holds `.gitignore .project-key config.json local_env.sh.example
+  projects.md salvage-legacy` and nothing else — none of `run_detach.zsh`,
+  `artifact_quality.md`, `cards`.
+- Paths: `install.sh` — three registry entries and nothing else.
+- Behaviour: add `run_detach.zsh` and `artifact_quality.md` to
+  `COPIED_ENGINE_FILES` and `cards` to `COPIED_ENGINE_DIRS`. `cards` is a
+  directory, so the files array would not remove it: `remove_copied_engine`
+  tests `-f`/`-L` for the file loop (`install.sh:350-355`) and `-d` for the
+  directory loop (`:356-366`). No other install, migration or packaging change.
+  `pyproject.toml:44-51` force-includes the whole of
+  `template/.agentic/pm_flow`, so all three already ship in the wheel and no
+  packaging edit is due.
+- The test carries its own copy of both arrays (`packaged_layout_test.sh:670-675`)
+  for `assert_data_only`, and that copy is deliberately shorter than
+  `install.sh`'s. It is not this section's to edit, it is not in Owned paths, and
+  the failing assertion is the positive `ls -A` one at `:1018`, which reads the
+  directory rather than the array. Registering in `install.sh` alone is what
+  turns the group green.
+- Acceptance IDs: A8's `packaged_layout_test.sh` leg, and A7's
+  "`zsh tests/packaged_layout_test.sh` still exits 0" clause.
+- Validation: `zsh tests/packaged_layout_test.sh` exits 0, every group PASS;
+  `zsh tests/run_detach_test.sh` and `zsh tests/pm_flow_test.sh` still exit 0;
+  `git diff --stat` names `install.sh` and nothing else, and `git diff
+  install.sh` is exactly three added lines.
+- Depends on: T1.
 
 ## Risks and rollback
 
@@ -303,5 +310,5 @@
 | A3 | T2 | in-flight dispatch recorded, no further tick, final log line names the tick, `status` reads `stopping` then `idle` |
 | A5 | T2 | `pm-flow next` before the stop matches the action taken after the restart; tick numbering shows no repeat |
 | A6 | T1, T2, T3 | `git status --porcelain` empty in the fixture repo after start, stop, start; every runtime file under `<project>/runs/` |
-| A7 | T3 | `run-detach status` reaches the script through the routing arm, `help` lists the command. Its `packaged_layout_test.sh` clause is **not reachable from this section**: `artifact_quality.md` and `cards` strand migration alongside `run_detach.zsh` and belong to other sections. T3 proves the arm adds no new failure; T1a removes this section's entry |
-| A8 | T1, T1a, T2, T3 | `run_detach_test.sh` and `pm_flow_test.sh` exit 0 and the new suite opens with the `PM_FLOW_*` unset guard — T1, T2, T3. The `packaged_layout_test.sh` leg is portfolio-level: T1a takes `run_detach.zsh` off the stranded list, the other two entries are other sections' |
+| A7 | T3, T4 | `run-detach status` reaches the script through the routing arm and `help` lists the command — T3. Its `packaged_layout_test.sh` clause is T4's: T3 proved the arm strands nothing new, T4 registers all three stranded entries and the suite exits 0 |
+| A8 | T1, T2, T3, T4 | `run_detach_test.sh` and `pm_flow_test.sh` exit 0 and the new suite opens with the `PM_FLOW_*` unset guard — T1, T2, T3. `packaged_layout_test.sh` exits 0 — T4, via the three registry entries the 2026-08-25 boundary extension authorizes |

@@ -1,1 +1,1 @@
-Reopened by portfolio review 007: install.sh joined Owned paths for three registry entries; T1a is assignable and packaged_layout_test.sh is the gate.
+Cycle 005; last action review.
