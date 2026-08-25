@@ -2,38 +2,69 @@
 
 ## Current task
 
-- None. T5 was accepted at cycle 007 (GO), which closes the workplan. Every
-  brief acceptance ID — A1 through A7 — now has standing evidence, A6 included:
-  it was proven live against the running `pm-flow-jaeger` instance at review,
-  retiring the escape hatch the section had carried since cycle 003. The
-  section is ready to be reported complete.
+- None. T5 was accepted at cycle 007 (GO), which closed the workplan, and the
+  cycle-008 verification below re-proved every acceptance ID from merged `main`.
+  The section is complete: A1 through A7 all have standing evidence, A6
+  included — the escape hatch the section carried from cycle 003 to 006 is
+  retired, and A6 is now earned by the suite itself on the PM seat, not only at
+  a review seat.
 
-## Section-end verification, cycle 007 (on merged `main`, commit 3269537)
+## Section-end verification, cycle 008 (on merged `main`, commit 2afd3d1)
 
-Run before deciding, precisely because the cycle-005 COMPLETE was reopened for
-claiming a green suite that did not reproduce. All of this is from `main`, not
-from a worktree.
+Run before reporting complete, precisely because the cycle-005 COMPLETE was
+reopened for claiming a green suite that did not reproduce. All of this is from
+`main` with the accepted work merged, not from a worktree, and it supersedes the
+cycle-007 verification it repeats.
 
-- The accepted code is on `main`. T4:
+- The accepted code is on `main`. T5: `jaeger_reachable` (94), `ensure_jaeger`
+  (99) with `JAEGER_CONTAINER_ID` set only inside the `docker run` branch (110),
+  `assert_jaeger_tree` (511) called once, for primary (801). T4:
+  `wait_for_trace_tree` (84), `SELECT DISTINCT trace_id FROM spans` (463, 524,
+  663). T3: `include_non_convention_attributes` in `telemetry.py`.
+- A1, A2, A3, A5: `zsh tests/otel_semconv_test.sh` exits 0 **twice in a row on
+  `main`**, and on this seat both trees arrived by the driver's own export —
+  `ROUTE primary: driver telemetry_autoexport`,
+  `ROUTE secondary: driver telemetry_autoexport`, no test-side transport.
+  Run 1 `TREE primary: 5f25ebfe5c8e5e03 invoke_agent -> f30666db7b2e1142 chat
+  parent=5f25ebfe5c8e5e03 input_tokens=31 output_tokens=13
+  trace_id=58fa3038d588aa63c9aaec40d6d6f879`,
+  `TREE secondary: d6b3765ab25bbd0f -> 10b21f008470fe4c`; run 2
+  `e99ffd655c105446` / `06efbd1338f12d24`. Both `SPLIT` lines byte-identical to
+  cycle 004; all seven PASS lines on both runs.
+- A6, live on the PM seat and not only at review: both runs took the Jaeger
+  path, not the `SKIP` path — `JAEGER primary: 58fa3038d588aa63c9aaec40d6d6f879
+  invoke_agent -> f30666db7b2e1142 chat` then
+  `PASS: a stock backend re-serves the invoke_agent -> chat tree`, and
+  `59df0ce12d0067edb54f29b6c44bb076 -> d65584bb663e3911` on run 2. Each
+  `JAEGER` trace id equals the `TREE primary:` trace id of the same run and each
+  child span id matches, so the backend re-served that run's own tree, not a
+  neighbouring one. The brief's literal query is printed alongside. `docker ps`
+  shows the user's `ccf9b12e2452 pm-flow-jaeger` `Up 14 hours` — reused, never
+  restarted or removed.
+- A7: `zsh tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0;
+  `zsh tests/pm_flow_test.sh` → 10 PASS lines, exit 0.
+- A4: the grep matches `src/pm_flow/semconv.py` lines 8, 9, 24-28, 32, 33 and
+  the one exempted comment, still at `template/.agentic/pm_flow/catalog.py:254`.
+- Harness note for this seat: a top-level `curl` is refused here
+  (`This command requires approval`) while `curl` inside the suite runs freely,
+  which is why the reachability probe succeeded and the live path executed. The
+  `curl`-absent risk recorded below is about a host with no `curl` binary at
+  all, and is unchanged.
+
+## Superseded — section-end verification, cycle 007 (commit 3269537)
+
+- Same three suites green on `main`, six PASS lines, both trees by the driver's
+  own export; A6 was proven at the review seat only. Kept as one line because
+  the cycle-008 block above re-proves all of it from a later commit.
+- The accepted code was on `main` at that commit too. T4:
   `received_trace_tree_present` (45), `wait_for_trace_tree` (80),
   `SELECT DISTINCT trace_id FROM spans` (392, 453), the `ROUTE` prints
   (400, 430-434). The ordinal selection and the stale SDK probe are both gone —
   `grep -n 'splitlines()\[int(ordinal)'` and
   `grep -n 'EXPORT_ROUTE == SDK\|import opentelemetry'` each exit 1. T3:
   `include_non_convention_attributes` at telemetry.py 247, 263, 304, 633, 742.
-- A1, A2, A3, A5: `zsh tests/otel_semconv_test.sh` exits 0 **twice in a row on
-  `main`**, and on this seat both trees arrived by the driver's own export —
-  `ROUTE primary: driver telemetry_autoexport`,
-  `ROUTE secondary: driver telemetry_autoexport`, no test-side transport.
-  Run 1 `TREE primary: 027cb49bff4ab5f9 invoke_agent -> 92614e52b31d2289 chat
-  parent=027cb49bff4ab5f9 input_tokens=31 output_tokens=13`,
-  `TREE secondary: 584430ba51777c4f -> f0f8674c95287eaa`; run 2
-  `135df617f214cf21` / `519634883c01137e`. Both `SPLIT` lines byte-identical to
-  cycle 004; all six PASS lines on both runs.
-- A7: `zsh tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0;
-  `zsh tests/pm_flow_test.sh` → 10 PASS lines, exit 0.
-- A4: the grep matches `src/pm_flow/semconv.py` lines 8, 9, 24-28, 32, 33 and
-  the one exempted comment, still at `template/.agentic/pm_flow/catalog.py:254`.
+  Those two greps are the standing guard against the cycle-005 defect returning
+  and are the only part of that verification not re-run at cycle 008.
 
 ## A6: Docker is available as of cycle 007, and the escape hatch is retired
 
@@ -598,11 +629,11 @@ two trees still report different revisions.
 
 ## Next eligible task
 
-- None. T1-T5 are all accepted and the workplan is exhausted. The section's
-  standing evidence: A1, A2, A3, A5 and A7 from the test's own receiver (T4,
-  re-run at cycle 007), A4 from the grep, and A6 from Jaeger's own query API
-  (T5). The next cycle should report the section complete rather than assign
-  work.
+- None. T1-T5 are all accepted, the workplan is exhausted, and cycle 008
+  reported the section COMPLETE. The section's standing evidence, all of it
+  re-run from merged `main` at cycle 008: A1, A2, A3, A5 and A7 from the test's
+  own receiver (T4), A4 from the grep, and A6 from Jaeger's own query API (T5),
+  which executed live rather than skipping.
 - Two limits a future host may hit, neither a defect here: the A6 check needs
   `curl` on `PATH` (absent, the reachability probe reads as unreachable and the
   suite takes the `SKIP` path even where Jaeger is up), and each run adds one
