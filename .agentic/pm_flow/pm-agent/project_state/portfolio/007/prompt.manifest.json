@@ -1,0 +1,64 @@
+{
+  "context": [
+    {
+      "bytes": 6585,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/plan.md",
+      "words": 1000
+    },
+    {
+      "bytes": 39977,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/portfolio_log.md",
+      "words": 5685
+    },
+    {
+      "bytes": 19097,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/task_contract.md",
+      "words": 2960
+    },
+    {
+      "bytes": 5470,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/sections.md",
+      "words": 611
+    },
+    {
+      "bytes": 1653,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/portfolio/007/facts.md",
+      "words": 195
+    },
+    {
+      "bytes": 1043,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/run-detach/handoff.md",
+      "words": 148
+    }
+  ],
+  "findings": [
+    {
+      "code": "context-budget",
+      "message": "listed context contains approximately 10599 words",
+      "severity": "warning"
+    }
+  ],
+  "metrics": {
+    "bytes": 6458,
+    "context_files": 6,
+    "context_words": 10599,
+    "duplicate_ratio": 0.0,
+    "task_ratio": 0.703,
+    "task_words": 670,
+    "words": 953
+  },
+  "path": "/Users/salah/code/personal/pm-flow/.agentic/pm_flow/pm-agent/project_state/portfolio/007/prompt.md",
+  "runtime": {
+    "commit_owner": "product-officer",
+    "phase": "portfolio_review",
+    "role": "cpo",
+    "version": "2"
+  },
+  "schema_version": 1
+}

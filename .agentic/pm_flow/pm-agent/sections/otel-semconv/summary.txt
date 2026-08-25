@@ -1,1 +1,1 @@
-Section completed and validated across 005 cycle(s)
+Reopened by portfolio review 007: tests/otel_semconv_test.sh exits 1 on main (secondary span reports v1.37.0 against the test's v1.36.0 pin); acceptance unchanged.

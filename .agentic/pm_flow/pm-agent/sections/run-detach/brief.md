@@ -92,3 +92,20 @@
 - Edits are limited to one `run-detach` case arm and one `help` line; A7 is
   now assignable. Anything beyond that arm and line remains a rejection
   condition.
+
+## Boundary extended, authorized 2026-08-25
+
+- `install.sh` joins Owned paths. No live section owns it (`packaging` is
+  terminal). Edits are limited to registry entries: `run_detach.zsh` and
+  `artifact_quality.md` in `COPIED_ENGINE_FILES`, `cards` in
+  `COPIED_ENGINE_DIRS`, and nothing else.
+- This section registers all three names, not only its own:
+  `zsh tests/packaged_layout_test.sh` — the gate A7 and A8 already cite —
+  fails on `main` naming exactly `artifact_quality.md cards run_detach.zsh`
+  as migration leftovers, their shipping sections are terminal, and no other
+  live section exists to own the two orphaned names. The reviewer may not
+  reject work for touching `install.sh` within this limit, and may not
+  reject it for editing files shipped by other terminal sections, because
+  the entries are list lines in `install.sh` only.
+- Anything in `install.sh` beyond those three entries remains a rejection
+  condition.

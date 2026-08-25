@@ -70,22 +70,26 @@ Everything below serves that sentence.
 
 ## Current position
 
-- Every must-have section is done. Six of the seven completion criteria are
-  met by the officer's own probes on `main`: worktree isolation; the suites
-  (`pm_flow_test.sh`, `prompt_quality_test.sh`, `store_ledger_test.sh`,
-  `tests/run.zsh`, plus `topology_compare_test.sh`, `agent_bindings_test.sh`
-  and `trace_commands_test.sh`, all exit 0); `cost_ledger.tsv` gone;
-  `pm-flow compare` with `--persona` swaps measured in the report; persona
-  add/list/swap in `catalog.py`; `python -m pm_flow.mcp_server` (five tools)
-  and the `acp` binding arm.
-- The one open criterion is the backend render: no Phoenix, Langfuse or
-  Jaeger has ever displayed a run. Everything up to the backend is proven -
-  OTLP/JSON accepted by a schema-validated loopback receiver, GenAI
-  semconv parent/child spans, exact span ids re-fetched. Docker is absent
-  on this host, so the settling observation is an operator action:
-  `docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one`,
-  `pm-flow trace export --otlp http://localhost:4318/v1/traces`, then
-  `curl 'http://localhost:16686/api/traces?service=pm-flow'`.
+- The backend render is settled: a Jaeger all-in-one (container
+  `pm-flow-jaeger`, operator-started) displays pm-flow runs hours after they
+  finished. `pm-flow trace export --otlp http://localhost:4318/v1/traces`
+  exits 0 and is idempotent (`exported 0 span(s)` on re-run);
+  `curl :16686/api/traces?service=pm-flow` returns role spans (`cpo:
+  portfolio review 6`, `pm: handoff topology-compare (attempt 1)` and
+  `(attempt 2)`, developer model spans) with token counts, `pm_flow.cost_usd`
+  and `input.value` payloads.
+- The one open criterion is the suite. Two section suites exit 1 on `main`,
+  each reopened with an owner at review 007: `packaged_layout_test.sh`
+  (migration leaves `artifact_quality.md`, `cards` and `run_detach.zsh` in
+  the flow dir because none is registered in `install.sh`'s copied-engine
+  lists; `run-detach` owns the three entries) and `otel_semconv_test.sh`
+  (the secondary tree's exported span reports revision v1.37.0 against the
+  test's own v1.36.0 sed pin; `otel-semconv` reopened, acceptance
+  unchanged). Everything else is green from the officer's own runs:
+  `pm_flow_test.sh`, `prompt_quality_test.sh`, `store_ledger_test.sh`,
+  `tests/run.zsh` (35/41/32/58/74), `topology_compare_test.sh`,
+  `agent_bindings_test.sh`, `trace_commands_test.sh`, `run_detach_test.sh`,
+  `persona_cards_test.sh`, `artifact_quality_test.sh`, `codex_usage_test.sh`.
 - The TSV was retired after its gate ran: `cost.py import` on `pm-agent`
   printed `imported=0` twice (every TSV row already had a store row, reruns
   are no-ops), and the file is archived as
@@ -99,10 +103,18 @@ Everything below serves that sentence.
   `runs.ended_at` stays NULL); `spent_usd` fails open on a broken reader.
   Fixing the last two means reopening `driver.zsh` ownership - deferred
   until capped-arm measurement matters.
-- Live sections, all nice-to-have: `artifact-quality`, `persona-cards`
-  (also owes the `catalog.py:250` rewording that lets `otel-semconv`'s A4
-  grep exemption be deleted), and `run-detach`, whose `pm_flow.sh` routing
-  arm is released (one case arm and one help line).
+- Known test defects without a live owner, tolerated: `trace_commands_test.sh`
+  has an order-sensitive assertion over an unordered span-id set (one fail,
+  green on re-run; deflake when `trace-commands` can be reopened without
+  overlapping `run-detach`'s `pm_flow.sh` ownership);
+  `maintenance_accounting_test.sh` requires an installed driver at
+  `.agentic/pm_flow`, a layout this repository deliberately does not have;
+  `persona-cards` closed without the `catalog.py` rewording, so
+  `otel-semconv`'s A4 comment exemption stays.
+- Live sections: `run-detach` (nice-to-have, reopened for the three
+  `install.sh` registry entries; its `pm_flow.sh` routing arm and
+  `run_detach_test.sh` are green on `main`) and `otel-semconv` (must-have,
+  reopened for its red suite).
 - Cut: `a2a-binding` and `repo-hooks`. The product does not guarantee an A2A
   seat, a commit-message hook, or an install registry.
 

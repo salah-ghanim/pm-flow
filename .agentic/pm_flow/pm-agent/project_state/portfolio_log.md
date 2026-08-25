@@ -4,6 +4,118 @@ Newest first. Read this before anything else: one review cannot see a
 section that has been nearly done for four of them, or a shortest path that
 has not moved in three. Older entries are compacted to their summary line.
 
+## Review 007 - 2026-08-24T23:33:49Z - $59.1508 / 42 dispatches since 006
+
+- Summary: 6 of 7 criteria met; backend render settled MET (operator started
+  Jaeger; traces read back with roles, retries, tokens, dollars); the suite
+  criterion regressed to NOT MET (packaged_layout and otel_semconv red);
+  both cures now have owners: run-detach boundary-extended to `install.sh`'s
+  three registry entries and reopened, otel-semconv reopened.
+
+### Completion criteria
+
+- Backend render (Phoenix/Langfuse/Jaeger) — `docker ps` shows
+  `pm-flow-jaeger` (all-in-one, up 4h, ports 4318/16686, operator-started);
+  `pm-flow trace export --otlp http://localhost:4318/v1/traces` exit 0,
+  `exported 0 span(s)` (idempotent; the operator had already exported);
+  `/api/services` lists `pm-flow`; `/api/traces?service=pm-flow` returns 5
+  traces with role spans (`cpo: portfolio review 6` cost 8.914, `pm: handoff
+  topology-compare (attempt 1)`/`(attempt 2)`, developer model spans,
+  input_tokens up to 1211275) and `input.value` payloads — **MET**
+- `cost_ledger.tsv` gone, no per-dispatch host writes — `ls
+  .agentic/pm_flow/pm-agent/runs` shows only
+  `cost_ledger.tsv.imported-20260824` beside `pm_flow.db` — **MET**
+- Sections run in isolated worktrees — `git worktree list`: main plus the
+  `run-detach` section checkout under `../.pm-flow-worktrees/`;
+  `pm_flow_test.sh` worktree group PASS — **MET**
+- Persona installed elsewhere, dropped on a seat, measured —
+  `persona_cards_test.sh` exit 0 ("real comparison attempts resolve through
+  catalog.py to distinct cards"; "compare report records pm=reviewer on both
+  arms while cards differ") — **MET**
+- Two topologies compared in one command — `topology_compare_test.sh` exit 0
+  ("literal metrics, limits, personas, and copy retention") — **MET**
+- Drivable over MCP, binds any ACP agent — `agent_bindings_test.sh` exit 0
+  ("MCP lists exactly five tools and drives a section to done"; "ACP
+  developer completes a public driver cycle to GO") — **MET**
+- Test suite runs to completion — `packaged_layout_test.sh` exit 1 (migrated
+  flow dir keeps `artifact_quality.md cards run_detach.zsh`, none registered
+  in `install.sh:47` `COPIED_ENGINE_FILES` or `:72` `COPIED_ENGINE_DIRS`);
+  `otel_semconv_test.sh` exit 1 twice (secondary span revision v1.37.0
+  against the test's v1.36.0 pin at `tests/otel_semconv_test.sh:553-557`);
+  the other eleven suites exit 0 from this tier — **NOT MET**
+
+### Findings
+
+- The backend criterion closed by operator action exactly as review 006
+  prescribed; the export was already idempotent when this review re-ran it.
+- Integration gap, same class as review 006's unmerged MCP surface:
+  `artifact-quality` and `persona-cards` shipped flow-dir names
+  (`artifact_quality.md`, `cards`) and closed without registering them in
+  `install.sh`, which no live section owned; migration therefore strands
+  them and `packaged_layout_test.sh` is red. Third name is `run_detach.zsh`,
+  run-detach's own T1a, blocked on exactly this ownership.
+- run-detach's `BLOCKED_EXTERNAL` was an officer dependency, not an external
+  one, and is cured here: `install.sh` joined its Owned paths
+  (`## Boundary extended, authorized 2026-08-25`, entries for
+  `run_detach.zsh`, `artifact_quality.md`, `cards` and nothing else);
+  reopened via `pm-flow section-handoff run-detach active`.
+- `otel_semconv_test.sh` red is deterministic (two runs) and nothing touched
+  `semconv.py` or the test since the section closed (`git log`: last commit
+  `06f9dbc`, cycle 004) — environmental. Suspected: the secondary dispatch
+  resolves `pm_flow.semconv` via the editable venv (`src/pm_flow/semconv.py`
+  REVISION v1.37.0) rather than the sed-edited secondary copy. Reopened via
+  `pm-flow section-handoff otel-semconv active`, acceptance unchanged.
+- `trace_commands_test.sh` flake: "packaged OTLP export carries the tick's
+  span ids" failed on ordering (`83872c…,f73bfe…` vs `f73bfe…,83872c…`, same
+  three ids), exit 0 on re-run. Not reopened: `trace-commands` owns
+  `pm_flow.sh`, which the live `run-detach` also owns; deflake at the first
+  review where that overlap is gone.
+- `maintenance_accounting_test.sh` exit 1: "no installed driver at
+  <repo>/.agentic/pm_flow" — the owner's own file (one commit, `6978ca2`),
+  written for a pre-migration layout; no section owns it; recorded, not
+  routed.
+- `persona-cards` closed without the `catalog.py` rewording review 006's
+  plan noted; A4 still passes because the surviving `gen_ai.` match at
+  `catalog.py:254` is a comment and the exemption covers it. Leftover, not
+  a defect.
+- Refused in this tier: bare `pm-flow trace export` (approval; ran via
+  `portfolio/007/trace_render_probe.zsh`, the established route). `pgrep -lf
+  driver.zsh` exit 1: no driver was running during the suite probes.
+
+### Plan structure
+
+- Unstarted dependency: CLEAR — both live sections wait on nothing.
+- Unreachable section: FOUND — at review open, `install.sh` registration for
+  `artifact_quality.md` and `cards` had no owner (shipping sections
+  terminal) and the red `otel_semconv_test.sh` had none either; both cured
+  this review by the run-detach extension and the otel-semconv reopen.
+- Must-have inflation: CLEAR — `otel-semconv` is must-have only for as long
+  as its suite guards the pinned GenAI names; `run-detach` stays
+  nice-to-have.
+- Linear-chain risk: CLEAR — two live sections, independent, no chain.
+
+### Verdicts
+
+- run-detach: CONTINUE — blocker resolved by the 2026-08-25 boundary
+  extension; T1a (three registry entries) closes `packaged_layout_test.sh`.
+- otel-semconv: CONTINUE — reopened this review to make its own suite exit 0
+  from this host; acceptance unchanged.
+
+### Shortest path
+
+Two one-cycle fixes, both in flight after the reopens: run-detach T1a (three
+list lines in `install.sh`; settle `zsh tests/packaged_layout_test.sh` exit
+0) and otel-semconv's isolation fix (settle `zsh tests/otel_semconv_test.sh`
+exit 0). Then the suite criterion re-probes MET and all seven plan criteria
+are met. The product-level increment after that is unchanged from 006:
+run `compare` on a real multi-section project rather than stubs.
+
+### Decision
+
+ON_TRACK - the last operator-gated criterion (backend render) settled MET;
+the suite criterion regressed through an ownership gap, and both red suites
+now have owners with one-cycle fixes.
+
 ## Review 006 - 2026-08-24T19:34:37Z - $330.1008 spent
 
 - Summary: 6 of 7 criteria met; verdicts CONTINUE 3; shortest path: The one open criterion needs the host, not a section: start Docker, run the Jaeger all-in-one, `pm-flow trace export --otlp http://localhost:4318/v1/traces`,...

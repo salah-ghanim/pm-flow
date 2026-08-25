@@ -3,3 +3,4 @@ tests/run_detach_test.sh
 tests/fixtures/stub_detach*.zsh
 docs/run-detach.md
 template/.agentic/pm_flow/pm_flow.sh
+install.sh
