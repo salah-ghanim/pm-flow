@@ -1,0 +1,1 @@
+CUT — the plan's objective and its deferred `runs.ended_at` limit both need this; store probes show only derived `section_status` rows and 126 of 132 runs never closed, and no live or done section records decisions.

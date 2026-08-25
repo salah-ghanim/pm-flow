@@ -1,0 +1,112 @@
+{
+  "is_error": false,
+  "duration_api_ms": 188065,
+  "num_turns": 24,
+  "stop_reason": "end_turn",
+  "session_id": "1ccb7d33-b511-415f-b640-ea0b4d0392a8",
+  "total_cost_usd": 1.6822500000000002,
+  "usage": {
+    "input_tokens": 20,
+    "cache_creation_input_tokens": 30224,
+    "cache_read_input_tokens": 344769,
+    "output_tokens": 14608,
+    "output_tokens_details": {
+      "thinking_tokens": 8279
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 30224,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 6789,
+        "cache_read_input_tokens": 43030,
+        "cache_creation_input_tokens": 3232,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 3232
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 2301,
+      "outputTokens": 20,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.002401,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty"
+    },
+    "claude-fable-5": {
+      "inputTokens": 20,
+      "outputTokens": 14608,
+      "cacheReadInputTokens": 344769,
+      "cacheCreationInputTokens": 30224,
+      "webSearchRequests": 0,
+      "costUSD": 1.679849,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "canonicalModel": "claude-fable-5",
+      "provider": "firstParty"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "## Assessment\n\nThe request asks for a validated structured projection at the flow's boundary: JSON Schemas for the boundary artifacts (brief, handoff, verdict record, config.json), a schema-validated JSON export of project state, and one shared definition of the accepted CLI set \u2014 while markdown stays the source of truth.\n\n**Plan fit.** Outcome 3 serves the completion criterion \"pm-flow is drivable over MCP and can bind any ACP-compatible agent.\" Probes confirm the three-way disagreement the owner claims: `agent_exec.sh:199` accepts `{claude, codex, copilot, acp}`, `pm_flow.sh:539` (`pm-flow config` validation) rejects `acp` as an unsupported cli, and `topology.py:17-24`'s registry lists only claude/codex/copilot. An ACP seat declared in `config.json` therefore fails the product's own configuration path, so the ACP-binding criterion is not met in the running system. Outcomes 1\u20132 serve the same boundary capability and the plan's adopt-before-building and definitions-are-markdown principles; the ticket-tracker consumers themselves are future work and stay out.\n\n**Coverage check.** Nothing covers it. The only machine projection today is `list-sections` (`pm_flow.sh:1994`), which regenerates the markdown table in `sections.md` \u2014 not validated JSON. No `schemas/` directory exists in the engine (`ls template/.agentic/pm_flow`). The validators are defined once in `pm_flow.sh` (`markdown_verdict_parse:929`, `validate_section_brief:1149`, `validate_handoff:1452`); `driver.zsh` only calls them, so it needs no ownership. `agent-bindings` (done) delivered the ACP client, not its config validation; `a2a-binding` was cancelled over A2A, a different protocol. `trace_export.py` already contains a self-contained stdlib validator, confirming the requested style has precedent. No live sections exist, so no path conflicts.\n\n## Section: boundary-schema\n\n### Objective\n- Every boundary artifact (section brief, handoff, verdict record, config.json) has one schema-backed definition that all consumers agree with, and the current project exports as validated JSON in one command.\n\n### Current baseline\n- Validators defined once in `template/.agentic/pm_flow/pm_flow.sh`: `markdown_verdict_parse` (line 929), `validate_section_brief` (1149), `validate_handoff` (1452); `driver.zsh` calls them at 1227, 3593, 3700 but defines nothing.\n- Accepted-CLI disagreement: `agent_exec.sh:199` accepts `acp`, `pm_flow.sh:539` rejects it, `topology.py:17-24` registry omits it.\n- Only machine projection is `pm-flow list-sections` (`pm_flow.sh:1994`), emitting the markdown table in `project_state/sections.md`.\n- Stdlib self-contained validator precedent: `template/.agentic/pm_flow/trace_export.py`.\n- No `schemas/` directory in the engine.\n\n### Deliverables\n- JSON Schema files for section brief, handoff, cycle verdict/decision record, `config.json`, and the export envelope, under `template/.agentic/pm_flow/schemas/`.\n- A stdlib-only schema checker in the style of `trace_export.py`'s validator.\n- An export subcommand (name at implementer's discretion, recorded in the brief) emitting the current project as schema-validated JSON: per section key, status, priority, owned paths, dependencies, acceptance IDs and state, and parsed handoff fields (Outcome / Decisions / Interfaces / Risks / What is unproven / Next action).\n- One definition of the accepted CLI set that `pm_flow.sh` config validation, `topology.py` binding checks, and `agent_exec.sh` all derive from or provably agree with; `acp` valid in all three.\n- Shell validators updated to agree with the schemas without changing their names or call signatures.\n- New engine files registered in `install.sh`'s copied-engine lists.\n- A new suite `tests/boundary_schema_test.sh`.\n\n### User-visible scenarios\n1. In an installed flow, run the export subcommand \u2192 JSON on stdout containing every section in `sections.md` with status, priority, and acceptance state; `python3 -m json.tool` accepts it.\n2. Give a role in `config.json` a seat with `\"cli\": \"acp\"`, run `pm-flow config` \u2192 validation passes and reports the seat; today it exits `unsupported cli: 'acp'`.\n3. Remove a required heading from a fixture handoff, run the export against it \u2192 command exits non-zero naming the section and the missing field; it never emits invalid JSON.\n4. Run `zsh tests/boundary_schema_test.sh` \u2192 exits 0.\n\n### Interfaces produced\n- `template/.agentic/pm_flow/schemas/*.json` \u2014 schema per boundary artifact; the future ticket-integration section consumes these.\n- The export subcommand and its stable JSON field names.\n- The single accepted-CLI definition consumed by `pm_flow.sh`, `topology.py`, `agent_exec.sh`.\n\n### Interfaces consumed\n- `project_state/` layout: `sections.md`, per-section `brief.md` and `handoff.md`, verdict records.\n- `template/.agentic/pm_flow/config.json` shape.\n- `trace_export.py` as style precedent only; not modified.\n\n### Scope\n- In: the schemas, the stdlib checker, the export command, the CLI-set unification, validator call sites in `pm_flow.sh`, `topology.py` binding checks, `agent_exec.sh`'s accepted set, `install.sh` registration of new files, the new suite.\n- Out: any ticket-tracker integration (Jira, GitHub Issues, Plane, Linear); any write-back or import from JSON; `driver.zsh`; SQLite state migration.\n\n### Non-goals\n- Exposing the export over MCP.\n- Fixing the deferred capped-arm `wall_clock_s` / `spent_usd` defects; those reopen `driver.zsh` ownership and stay deferred.\n- Schema-validating anything beyond the four boundary artifacts and the export envelope (no schemas for run dirs, transcripts, or store rows).\n\n### Priority\n- must-have: without it an ACP seat in `config.json` fails `pm-flow config` validation and cannot be named in a topology, so the plan's \"can bind any ACP-compatible agent\" criterion is not met through the product's own configuration path.\n\n### Owned paths\n- template/.agentic/pm_flow/schemas/**\n- template/.agentic/pm_flow/export.py\n- template/.agentic/pm_flow/pm_flow.sh\n- template/.agentic/pm_flow/topology.py\n- template/.agentic/pm_flow/agent_exec.sh\n- install.sh\n- tests/boundary_schema_test.sh\n\n### Dependencies\n- None.\n\n### Constraints and fixed decisions\n- Markdown boundary files remain the source of truth; JSON is a one-way projection. Settled by the owner; do not reopen.\n- Stdlib only; no jsonschema or any third-party dependency.\n- Resolution direction for the CLI disagreement is settled: `acp` becomes valid in all three consumers, not removed from `agent_exec.sh`.\n- `validate_section_brief`, `validate_handoff`, `markdown_verdict_parse` keep their names and call signatures; `driver.zsh` is not owned and its call sites at 1227/3593/3700 must keep working.\n- `topology.py`'s empty-list-means-unconstrained model registry semantics are preserved.\n- New engine files must be registered in `install.sh`'s copied-engine lists (the exact omission that reopened `run-detach`).\n\n### Acceptance\n- A1: `template/.agentic/pm_flow/schemas/` holds schemas for brief, handoff, verdict record, config, and export envelope; `tests/boundary_schema_test.sh` proves a known-good fixture passes and a known-bad fixture fails per schema, and exits 0.\n- A2: the export subcommand run on the `pm-agent` project exits 0, its output validates against the export schema, and it contains every section key present in `project_state/sections.md` \u2014 checkable from scenario 1 without reading the diff.\n- A3: a `config.json` seat with `\"cli\": \"acp\"` passes `pm-flow config`, passes `topology.py`'s binding check, and is accepted by `agent_exec.sh` \u2014 checkable from scenario 2.\n- A4: a boundary artifact rejected by its schema is rejected by the corresponding shell validator, and vice versa, demonstrated on the suite's fixtures \u2014 no third definition survives.\n- A5: existing suites stay green on `main`: `pm_flow_test.sh`, `topology_compare_test.sh`, `agent_bindings_test.sh`, `packaged_layout_test.sh`, `tests/run.zsh`.\n- A6: re-running the export with unchanged project state produces byte-identical output.\n\n### Rejection conditions\n- JSON becomes writable state or the markdown files stop being authoritative.\n- Schemas exist but a shell validator enforces a different rule \u2014 the drift this section exists to end.\n- The export parses cycle transcripts, assignments, or run directories instead of the boundary artifacts.\n- New engine files land unregistered in `install.sh`, breaking the packaged layout.\n- Any new runtime dependency.\n\n### Open questions\n- None.\n\n## Decision\n\nCUT \u2014 the accepted-CLI disagreement (`agent_exec.sh:199` vs `pm_flow.sh:539` vs `topology.py:17-24`) leaves the ACP-binding completion criterion unmet through the product's own config path, nothing live or done covers a validated JSON boundary, and the owned paths conflict with no live section.",
+  "ttft_ms": 3253,
+  "ttft_stream_ms": 1585,
+  "time_to_request_ms": 33,
+  "type": "result",
+  "duration_ms": 191716,
+  "uuid": "3218a864-b498-430a-aaeb-18f5e5d73147",
+  "queued_turn_count": 0,
+  "failure_reason": "none",
+  "role": "cpo",
+  "pm_backend": "claude",
+  "model": "claude-fable-5",
+  "difficulty": "xhigh",
+  "attempts": 1,
+  "session_resumable": false
+}

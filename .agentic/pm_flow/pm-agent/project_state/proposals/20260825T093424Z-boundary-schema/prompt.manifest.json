@@ -1,0 +1,40 @@
+{
+  "context": [
+    {
+      "bytes": 7367,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/plan.md",
+      "words": 1088
+    },
+    {
+      "bytes": 5318,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/sections.md",
+      "words": 590
+    },
+    {
+      "bytes": 2097,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/proposals/20260825T093424Z-boundary-schema/request.md",
+      "words": 300
+    }
+  ],
+  "findings": [],
+  "metrics": {
+    "bytes": 5712,
+    "context_files": 3,
+    "context_words": 1978,
+    "duplicate_ratio": 0.0,
+    "task_ratio": 0.6574,
+    "task_words": 543,
+    "words": 826
+  },
+  "path": "/Users/salah/code/personal/pm-flow/.agentic/pm_flow/pm-agent/project_state/proposals/20260825T093424Z-boundary-schema/prompt.md",
+  "runtime": {
+    "commit_owner": "product-officer",
+    "phase": "section_proposal",
+    "role": "cpo",
+    "version": "2"
+  },
+  "schema_version": 1
+}

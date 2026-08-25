@@ -1,16 +1,16 @@
 {
   "context": [
     {
-      "bytes": 6585,
+      "bytes": 7367,
       "exists": true,
       "path": ".agentic/pm_flow/pm-agent/project_state/plan.md",
-      "words": 1000
+      "words": 1088
     },
     {
-      "bytes": 39977,
+      "bytes": 46388,
       "exists": true,
       "path": ".agentic/pm_flow/pm-agent/project_state/portfolio_log.md",
-      "words": 5685
+      "words": 6548
     },
     {
       "bytes": 19097,
@@ -19,39 +19,45 @@
       "words": 2960
     },
     {
-      "bytes": 5470,
+      "bytes": 5820,
       "exists": true,
       "path": ".agentic/pm_flow/pm-agent/project_state/sections.md",
-      "words": 611
+      "words": 642
     },
     {
-      "bytes": 1653,
+      "bytes": 1776,
       "exists": true,
       "path": ".agentic/pm_flow/pm-agent/project_state/portfolio/007/facts.md",
-      "words": 195
+      "words": 209
     },
     {
-      "bytes": 1043,
+      "bytes": 356,
       "exists": true,
-      "path": ".agentic/pm_flow/pm-agent/sections/run-detach/handoff.md",
-      "words": 148
+      "path": ".agentic/pm_flow/pm-agent/sections/outcome-record/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 354,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/real-install/handoff.md",
+      "words": 42
     }
   ],
   "findings": [
     {
       "code": "context-budget",
-      "message": "listed context contains approximately 10599 words",
+      "message": "listed context contains approximately 11531 words",
       "severity": "warning"
     }
   ],
   "metrics": {
-    "bytes": 6458,
-    "context_files": 6,
-    "context_words": 10599,
+    "bytes": 6522,
+    "context_files": 7,
+    "context_words": 11531,
     "duplicate_ratio": 0.0,
-    "task_ratio": 0.703,
-    "task_words": 670,
-    "words": 953
+    "task_ratio": 0.7052,
+    "task_words": 677,
+    "words": 960
   },
   "path": "/Users/salah/code/personal/pm-flow/.agentic/pm_flow/pm-agent/project_state/portfolio/007/prompt.md",
   "runtime": {

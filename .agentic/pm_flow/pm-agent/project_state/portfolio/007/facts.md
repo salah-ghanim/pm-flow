@@ -12,12 +12,14 @@ in a handoff as unverified until a probe of your own says otherwise.
 | codex-usage | must-have | done | 008 | 42.4205 | green-suite (cycles 0, done)  |
 | green-suite | must-have | done | 0 | 0.0000 | nothing |
 | installer | must-have | done | 0 | 0.0000 | green-suite (cycles 0, done)  |
-| otel-semconv | must-have | done | 005 | 17.0310 | nothing |
+| otel-semconv | must-have | done | 008 | 32.3689 | nothing |
+| outcome-record | must-have | planned | 0 | 0.0000 | nothing |
 | packaging | must-have | done | 010 | 58.6223 | green-suite (cycles 0, done) worktree-isolation (cycles 0, done)  |
 | persona-cards | nice-to-have | done | 005 | 25.8599 | persona-packs (cycles 012, done)  |
 | persona-packs | must-have | done | 012 | 42.1941 | installer (cycles 0, done)  |
+| real-install | must-have | planned | 0 | 0.0000 | nothing |
 | repo-hooks | nice-to-have | cancelled | 0 | 0.0000 | packaging (cycles 010, done)  |
-| run-detach | nice-to-have | blocked | 004 | 16.0604 | nothing |
+| run-detach | nice-to-have | done | 006 | 22.0430 | nothing |
 | store-ledger | must-have | done | 007 | 46.3075 | nothing |
 | topology-compare | must-have | done | 007 | 31.1338 | store-ledger (cycles 007, done)  |
 | trace-commands | must-have | done | 004 | 15.2107 | nothing |
