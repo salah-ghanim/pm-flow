@@ -16,10 +16,14 @@ case "$TEST_ROOT" in
 esac
 
 RECEIVER_PID=""
+JAEGER_CONTAINER_ID=""
 cleanup() {
   if [[ -n "${RECEIVER_PID:-}" ]]; then
     kill "$RECEIVER_PID" >/dev/null 2>&1 || true
     wait "$RECEIVER_PID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${JAEGER_CONTAINER_ID:-}" ]]; then
+    docker rm -f "$JAEGER_CONTAINER_ID" >/dev/null 2>&1 || true
   fi
   if [[ -n "${TEST_ROOT:-}" && -d "$TEST_ROOT" && \
         "$(basename "$TEST_ROOT")" == otel-semconv-test.* ]]; then
@@ -85,6 +89,73 @@ wait_for_trace_tree() {
       fail "receiver never got trace $trace_id with invoke_agent parent and chat child"
     sleep 0.05
   done
+}
+
+jaeger_reachable() {
+  [[ "$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' \
+    http://localhost:16686/api/services || true)" == 200 ]]
+}
+
+ensure_jaeger() {
+  if jaeger_reachable; then
+    return 0
+  fi
+
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    printf '%s\n' \
+      'SKIP: A6 requires docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one'
+    return 1
+  fi
+
+  JAEGER_CONTAINER_ID="$(docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one)" || \
+    fail "could not start Jaeger with the brief's docker command"
+  [[ -n "$JAEGER_CONTAINER_ID" ]] || fail "Jaeger docker run returned no container id"
+
+  local tries=0
+  while ! jaeger_reachable; do
+    (( tries += 1 ))
+    (( tries <= 300 )) || fail "Jaeger container $JAEGER_CONTAINER_ID did not become reachable"
+    sleep 0.1
+  done
+}
+
+jaeger_trace_tree_present() {
+  local response="$1" trace_id="$2"
+  python3 - "$response" "$trace_id" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+response, trace_id = sys.argv[1:]
+try:
+    payload = json.loads(Path(response).read_text())
+except (json.JSONDecodeError, OSError):
+    raise SystemExit(1)
+
+spans = [
+    span
+    for trace in payload.get("data", [])
+    if trace.get("traceID") == trace_id
+    for span in trace.get("spans", [])
+]
+operation_key = "gen" + "_ai.operation.name"
+
+def tags(span):
+    return {
+        tag.get("key"): tag.get("value")
+        for tag in span.get("tags", [])
+        if tag.get("key")
+    }
+
+parents = [span for span in spans if tags(span).get(operation_key) == "invoke_agent"]
+children = [span for span in spans if tags(span).get(operation_key) == "chat"]
+present = len(parents) == 1 and len(children) == 1 and any(
+    reference.get("refType") == "CHILD_OF"
+    and reference.get("spanID") == parents[0].get("spanID")
+    for reference in children[0].get("references", [])
+)
+raise SystemExit(0 if present else 1)
+PY
 }
 
 copy_checkout_layout() {
@@ -437,6 +508,145 @@ PY
   wait_for_trace_tree "$trace_id"
 }
 
+assert_jaeger_tree() {
+  local tree="$1" db="$2" semconv="$3" label="$4"
+  if ! ensure_jaeger; then
+    return 0
+  fi
+
+  local exporter="$tree/template/.agentic/pm_flow/trace_export.py"
+  local trace_id response next_response http_code tries=0 ready=0
+  trace_id="$(python3 - "$db" <<'PY'
+import sqlite3
+import sys
+
+connection = sqlite3.connect(sys.argv[1])
+rows = connection.execute("SELECT DISTINCT trace_id FROM spans").fetchall()
+if len(rows) != 1 or not rows[0][0]:
+    raise SystemExit(f"expected exactly one store trace id, got {rows!r}")
+print(rows[0][0])
+PY
+)"
+
+  printf "%s\n" "JAEGER brief query: curl -s 'http://localhost:16686/api/traces?service=pm-flow'"
+  python3 "$exporter" --db "$db" --otlp http://localhost:4318 --replay >/dev/null
+
+  response="$TEST_ROOT/jaeger-$trace_id.json"
+  next_response="$response.next"
+  while (( tries < 200 )); do
+    (( tries += 1 ))
+    http_code="$(curl -s --max-time 2 -o "$next_response" -w '%{http_code}' \
+      "http://localhost:16686/api/traces/$trace_id" || true)"
+    if [[ "$http_code" == 200 ]]; then
+      mv "$next_response" "$response"
+      if jaeger_trace_tree_present "$response" "$trace_id"; then
+        ready=1
+        break
+      fi
+    else
+      rm -f -- "$next_response"
+    fi
+    sleep 0.1
+  done
+  (( ready == 1 )) || \
+    fail "Jaeger never re-served trace $trace_id with invoke_agent parent and chat child"
+
+  python3 - "$response" "$db" "$semconv" "$label" "$trace_id" <<'PY'
+import importlib.util
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+response, db, semconv_path, label, trace_id = sys.argv[1:]
+payload = json.loads(Path(response).read_text())
+traces = [trace for trace in payload.get("data", []) if trace.get("traceID") == trace_id]
+if len(traces) != 1:
+    raise SystemExit(
+        f"{label}: Jaeger returned {len(traces)} records for trace {trace_id}"
+    )
+spans = traces[0].get("spans", [])
+if not spans:
+    raise SystemExit(f"{label}: Jaeger returned no spans for trace {trace_id}")
+
+prefix = "gen" + "_ai."
+operation_key = prefix + "operation.name"
+input_key = prefix + "usage.input_tokens"
+output_key = prefix + "usage.output_tokens"
+revision_key = "pm_flow.semconv.revision"
+
+def tags(span):
+    return {
+        tag.get("key"): tag.get("value")
+        for tag in span.get("tags", [])
+        if tag.get("key")
+    }
+
+parents = [span for span in spans if tags(span).get(operation_key) == "invoke_agent"]
+if len(parents) != 1:
+    raise SystemExit(
+        f"{label}: trace {trace_id} has {len(parents)} invoke_agent spans in Jaeger"
+    )
+parent = parents[0]
+children = [span for span in spans if tags(span).get(operation_key) == "chat"]
+if len(children) != 1:
+    raise SystemExit(
+        f"{label}: trace {trace_id} has {len(children)} chat spans in Jaeger"
+    )
+child = children[0]
+child_of_parent = any(
+    reference.get("refType") == "CHILD_OF"
+    and reference.get("spanID") == parent.get("spanID")
+    for reference in child.get("references", [])
+)
+if not child_of_parent:
+    raise SystemExit(
+        f"{label}: trace {trace_id} chat span {child.get('spanID')} "
+        f"is not CHILD_OF invoke_agent span {parent.get('spanID')}"
+    )
+
+spec = importlib.util.spec_from_file_location("otel_semconv_jaeger_pin", semconv_path)
+semconv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(semconv)
+for span in spans:
+    revision = tags(span).get(revision_key)
+    if revision != semconv.REVISION:
+        raise SystemExit(
+            f"{label}: Jaeger span {span.get('spanID')} in trace {trace_id} "
+            f"has revision {revision!r}, expected {semconv.REVISION!r}"
+        )
+
+connection = sqlite3.connect(db)
+connection.row_factory = sqlite3.Row
+attempt = connection.execute(
+    "SELECT a.input_tokens, a.output_tokens FROM spans child "
+    "JOIN attempts a ON child.parent_span_id = a.span_id "
+    "WHERE child.span_id = ?",
+    (child.get("spanID"),),
+).fetchone()
+if attempt is None:
+    raise SystemExit(
+        f"{label}: Jaeger chat span {child.get('spanID')} in trace {trace_id} "
+        "did not join to its attempts row"
+    )
+child_tags = tags(child)
+for key, column in ((input_key, "input_tokens"), (output_key, "output_tokens")):
+    actual = child_tags.get(key)
+    expected = attempt[column]
+    if actual != expected and str(actual) != str(expected):
+        raise SystemExit(
+            f"{label}: Jaeger {key} on trace {trace_id} is {actual!r}, "
+            f"attempt has {expected!r}"
+        )
+
+print(
+    f"JAEGER {label}: {trace_id} invoke_agent -> "
+    f"{child['spanID']} chat"
+)
+PY
+  printf 'PASS: a stock backend re-serves the invoke_agent -> chat tree\n'
+}
+
 assert_received_tree() {
   local db="$1" semconv="$2" provider_suffix="$3"
   local forbidden_provider_suffix="$4" label="$5"
@@ -564,7 +774,8 @@ if parent["attributes"].get("llm.token_count.completion") != expected_output:
 print(
     f"TREE {label}: {parent['spanId']} invoke_agent -> "
     f"{child['spanId']} chat parent={child['parentSpanId']} "
-    f"input_tokens={expected_input} output_tokens={expected_output}"
+    f"input_tokens={expected_input} output_tokens={expected_output} "
+    f"trace_id={trace_id}"
 )
 print(
     f"SPLIT {label}: parent_only={','.join(produced_parent_only)} "
@@ -587,6 +798,7 @@ PRIMARY_DB="$(drive_dispatch "$PRIMARY_TREE" "$TEST_ROOT/primary-repo" "Semconv 
 export_tree "$PRIMARY_TREE" "$PRIMARY_DB" "primary"
 assert_received_tree "$PRIMARY_DB" "$PRIMARY_SEMCONV" \
   "provider.name" "system" "primary"
+assert_jaeger_tree "$PRIMARY_TREE" "$PRIMARY_DB" "$PRIMARY_SEMCONV" "primary"
 
 SECONDARY_SEMCONV="$SECONDARY_TREE/src/pm_flow/semconv.py"
 SECONDARY_TELEMETRY="$SECONDARY_TREE/template/.agentic/pm_flow/telemetry.py"
