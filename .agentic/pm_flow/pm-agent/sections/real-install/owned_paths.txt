@@ -1,0 +1,5 @@
+install.sh
+tests/real_install_test.sh
+tests/fixtures/real_install/**
+docs/real-install.md
+README.md

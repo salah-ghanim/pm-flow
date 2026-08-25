@@ -1,0 +1,2 @@
+must-have
+without recorded outcomes and closed runs, "two topologies compared in one command" compares arms with no outcome and no wall clock, and the objective's "know whether it helped" cannot be answered.

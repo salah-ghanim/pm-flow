@@ -1,0 +1,2 @@
+must-have
+the completion criterion "`cost_ledger.tsv` is gone and the host repository absorbs no per-dispatch writes" cannot be claimed while the product's only real install still runs a copied engine over legacy TSVs, and the advertised migration path remains unproven on any real layout.
