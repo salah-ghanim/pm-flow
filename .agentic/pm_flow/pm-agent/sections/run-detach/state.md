@@ -179,6 +179,21 @@
     `ERROR: status takes no arguments`, exit 1. That is the rejection condition
     about appending `--section` to `stop`/`status`, measured rather than assumed.
 
+- Post-merge verification, cycle 006. Every acceptance leg above was measured in
+  a section worktree; re-measured on the merged tree at `9afcf0f` so `COMPLETE`
+  rests on what `main` actually holds. `zsh tests/packaged_layout_test.sh` exits
+  0, 13/13 PASS including `a copied-engine repository migrates losslessly and
+  keeps running`; `zsh tests/run_detach_test.sh` exits 0, 9/9 PASS including
+  `launcher process-group SIGHUP leaves supervisor and dispatch alive` and
+  `routed run-detach covers help, start, status, stop, refusal, and stale-stop
+  restart`; `zsh tests/pm_flow_test.sh` exits 0, 10/10 PASS. The deliverables are
+  tracked on `main` — `git ls-files` lists `docs/run-detach.md`,
+  `template/.agentic/pm_flow/run_detach.zsh`, `tests/run_detach_test.sh`,
+  `tests/fixtures/stub_detach.zsh`, `tests/fixtures/stub_detach_stop.zsh`; the
+  routing arm and help line are at `pm_flow.sh:1932` and `:50`; the three
+  registry entries at `install.sh:67,68,83`. `git diff --stat HEAD` over those
+  paths is empty, so the accepted tree is the merged tree.
+
 ## Superseded
 
 - The 2026-08-24 claim that "`pyproject.toml:47-51` force-includes all of
