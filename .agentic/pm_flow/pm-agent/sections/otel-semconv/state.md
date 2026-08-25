@@ -2,8 +2,74 @@
 
 ## Current task
 
-- None. T4 was the last unfinished task and was accepted at cycle 006. The
-  section's own suite is the section-end gate and it passes from this host.
+- None. T5 was accepted at cycle 007 (GO), which closes the workplan. Every
+  brief acceptance ID — A1 through A7 — now has standing evidence, A6 included:
+  it was proven live against the running `pm-flow-jaeger` instance at review,
+  retiring the escape hatch the section had carried since cycle 003. The
+  section is ready to be reported complete.
+
+## Section-end verification, cycle 007 (on merged `main`, commit 3269537)
+
+Run before deciding, precisely because the cycle-005 COMPLETE was reopened for
+claiming a green suite that did not reproduce. All of this is from `main`, not
+from a worktree.
+
+- The accepted code is on `main`. T4:
+  `received_trace_tree_present` (45), `wait_for_trace_tree` (80),
+  `SELECT DISTINCT trace_id FROM spans` (392, 453), the `ROUTE` prints
+  (400, 430-434). The ordinal selection and the stale SDK probe are both gone —
+  `grep -n 'splitlines()\[int(ordinal)'` and
+  `grep -n 'EXPORT_ROUTE == SDK\|import opentelemetry'` each exit 1. T3:
+  `include_non_convention_attributes` at telemetry.py 247, 263, 304, 633, 742.
+- A1, A2, A3, A5: `zsh tests/otel_semconv_test.sh` exits 0 **twice in a row on
+  `main`**, and on this seat both trees arrived by the driver's own export —
+  `ROUTE primary: driver telemetry_autoexport`,
+  `ROUTE secondary: driver telemetry_autoexport`, no test-side transport.
+  Run 1 `TREE primary: 027cb49bff4ab5f9 invoke_agent -> 92614e52b31d2289 chat
+  parent=027cb49bff4ab5f9 input_tokens=31 output_tokens=13`,
+  `TREE secondary: 584430ba51777c4f -> f0f8674c95287eaa`; run 2
+  `135df617f214cf21` / `519634883c01137e`. Both `SPLIT` lines byte-identical to
+  cycle 004; all six PASS lines on both runs.
+- A7: `zsh tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0;
+  `zsh tests/pm_flow_test.sh` → 10 PASS lines, exit 0.
+- A4: the grep matches `src/pm_flow/semconv.py` lines 8, 9, 24-28, 32, 33 and
+  the one exempted comment, still at `template/.agentic/pm_flow/catalog.py:254`.
+
+## A6: Docker is available as of cycle 007, and the escape hatch is retired
+
+- `docker ps` exits 0 (it exited 1 at every cycle from 003 to 006) and shows
+  `ccf9b12e2452  jaegertracing/all-in-one  Up 13 hours  pm-flow-jaeger`,
+  publishing `0.0.0.0:4318->4318/tcp` and `0.0.0.0:16686->16686/tcp`.
+- The brief's own query already answers:
+  `curl -s 'http://localhost:16686/api/services'` →
+  `{"data":["jaeger-all-in-one","pm-flow"],...}`, and
+  `/api/traces?service=pm-flow&limit=50` returns 50 traces / 208 spans with
+  `gen_ai.operation.name` histogram `{invoke_agent: 103, chat: 100, <none>: 5}`,
+  **100 `invoke_agent` → `chat` parent/child pairs**, and
+  `pm_flow.semconv.revision` = `v1.37.0` on all 208. So the section's deliverable
+  is visibly working in a stock backend on real runs. That is ambient evidence
+  from the real install, not the section's own repeatable check, which is what
+  T5 adds.
+- The convention names in that live data are clean at the pin: across those
+  spans `gen_ai.system` count is **0**, and the keys present are exactly
+  `gen_ai.agent.name`, `gen_ai.operation.name`, `gen_ai.provider.name`,
+  `gen_ai.request.model`, `gen_ai.usage.input_tokens`,
+  `gen_ai.usage.output_tokens`. An older span sampled first
+  (`developer: develop store-ledger 002`, 2026-08-24T00:44Z) does carry
+  `gen_ai.system`, `gen_ai.provider.name` and `gen_ai.request.reasoning_effort`
+  together — it predates the fix landing; the oldest clean span is
+  2026-08-24T10:12Z and the newest is 2026-08-25T08:33Z. Not a defect in the
+  current engine: `grep -rn 'reasoning_effort' template/ src/` shows it only
+  inside `llm.invocation_parameters` (telemetry.py:270), never as a `gen_ai.`
+  key, and the A4 grep is clean.
+- The mechanism T5 needs is probed and works: `GET /api/traces/<traceID>`
+  returns HTTP 200 with the whole tree — 15 spans, `refType: "CHILD_OF"` giving
+  each `chat` span's `invoke_agent` parent, usage on the children
+  (`in=44 out=14266`, `in=6 out=2796`, …) and `rev=v1.37.0` on every span.
+- Instance handling is constrained by what is there: `pm-flow-jaeger` already
+  binds 4318 and 16686, so the brief's `docker run -d -p 4318:4318 -p 16686:16686`
+  would fail against it. The test reuses a reachable instance and never removes
+  one it did not start.
 
 ## Reopened by portfolio review 007 — closed by T4, cycle 006
 
@@ -24,39 +90,95 @@ through the host editable venv — was disproved by the cycle-006 probe and stay
 disproved: each tree's dispatch loads its own copied module, which is why the
 two trees still report different revisions.
 
-## Section-end verification, cycle 005 (on merged `main`) — superseded
-
-The claim below that `zsh tests/otel_semconv_test.sh` exits 0 on `main` did not
-reproduce at cycle 006 and is superseded by T4's evidence, which does. Everything
-else in it — the T3 code being on `main`, the A4 grep, the A6 docker probe,
-`pm_flow_test.sh` — still stands.
-
-- The accepted T3 code is on `main`:
-  `grep -n 'include_non_convention_attributes' template/.agentic/pm_flow/telemetry.py`
-  → `247` (the keyword-only default), `263` and `304` (the two gated blocks),
-  `633` and `742` (the two child call sites passing `False`).
-- A1, A2, A3, A5: `zsh tests/otel_semconv_test.sh` exits 0 on `main` and prints
-  `ROUTE: stdlib OTLP/JSON fallback via trace_export.py --file --replay` with no
-  `bind prohibited` suffix, so the receiver bound a real TCP socket;
-  `TREE primary: 61e56eb0442d29d7 invoke_agent -> b37abcf1cb062168 chat
-  parent=61e56eb0442d29d7 input_tokens=31 output_tokens=13`, the same tree for
-  the secondary pin, both `SPLIT` lines identical to cycle 004, and all six PASS
-  lines.
-- A4: the grep matches `src/pm_flow/semconv.py` lines 8, 9, 24-28, 32, 33 and
-  the one exempted comment at `template/.agentic/pm_flow/catalog.py:250`.
-  The reword has not landed yet, so the exemption stays.
-- A6 remains unproven, and the probe was re-run this cycle rather than carried
-  over: `docker ps` → exit 1,
-  `failed to connect to the docker API at unix:///Users/salah/.docker/run/docker.sock
-  … dial unix … connect: no such file or directory`. The brief's escape hatch
-  applies; `docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one`
-  plus `curl -s 'http://localhost:16686/api/traces?service=pm-flow'` is what
-  settles it.
-- A7: `zsh tests/pm_flow_test.sh` exits 0 on `main` with 10 PASS lines, after
-  the other sections' merges, so nothing merged since cycle 004 has regressed
-  this section.
-
 ## Completed tasks and evidence
+
+- T5 — accepted cycle 007 (GO). Acceptance IDs A6 (primary), with A1, A2, A3
+  re-asserted through the backend and A4, A7 held.
+  - Reviewed at
+    `/Users/salah/code/personal/.pm-flow-worktrees/pm-flow/pm-agent/otel-semconv`.
+    `git status --porcelain` there shows exactly ` M tests/otel_semconv_test.sh`;
+    `git diff --stat` is `1 file changed, 213 insertions(+), 1 deletion(-)`.
+    `telemetry.py`, `semconv.py`, `trace_export.py` and `driver.zsh` untouched,
+    as the assignment required. The one-line deletion is the existing
+    `TREE <label>:` printf, re-emitted with `trace_id=<id>` appended so the
+    `JAEGER` line can be correlated against it.
+  - The addition: `jaeger_reachable` (HTTP 200 on
+    `/api/services`), `ensure_jaeger` (reuse a reachable instance; else, only if
+    `docker info` succeeds, start one with the brief's exact command and record
+    the id; else print one `SKIP:` line and return 1), `jaeger_trace_tree_present`
+    (poll predicate) and `assert_jaeger_tree`, called for the **primary tree
+    only**. Cleanup runs `docker rm -f` on `$JAEGER_CONTAINER_ID`, which is set
+    in exactly one place — the `docker run` branch — so an instance the test did
+    not start cannot be torn down.
+  - A6: `zsh tests/otel_semconv_test.sh` exits 0 on the review seat, where
+    Jaeger is reachable (`/api/services` → HTTP 200,
+    `{"data":["jaeger-all-in-one","pm-flow"]}`). It printed
+    `ROUTE primary: driver telemetry_autoexport`,
+    `TREE primary: 8a90385ed7e70334 invoke_agent -> cfdd6f1cb88aae73 chat
+    parent=8a90385ed7e70334 input_tokens=31 output_tokens=13
+    trace_id=7af0b1d5c9be7269d8725c8f823805e0`,
+    `JAEGER brief query: curl -s 'http://localhost:16686/api/traces?service=pm-flow'`,
+    `JAEGER primary: 7af0b1d5c9be7269d8725c8f823805e0 invoke_agent ->
+    cfdd6f1cb88aae73 chat` and
+    `PASS: a stock backend re-serves the invoke_agent -> chat tree`, then all six
+    pre-existing PASS lines. The trace id on the `JAEGER` line is the one on the
+    `TREE primary:` line of the same run, and the child span id matches too.
+  - A6, confirmed independently of the test. `GET /api/traces?service=pm-flow`
+    (the brief's literal query) returns 100 traces and
+    `7af0b1d5c9be7269d8725c8f823805e0` is among them;
+    `GET /api/traces/7af0b1d5c9be7269d8725c8f823805e0` re-serves three spans —
+    `d9599b3fff34ae0b pm_flow.tick` (rev `v1.37.0`, no operation),
+    `8a90385ed7e70334 pm: scope receiver-proof 001` (`invoke_agent`, rev
+    `v1.37.0`, `CHILD_OF d9599b3fff34ae0b`) and
+    `cfdd6f1cb88aae73 pm: model` (`chat`, rev `v1.37.0`, `in=31 out=13`,
+    `CHILD_OF 8a90385ed7e70334`). So the tree, the usage and the revision are all
+    read back out of a stock backend's own store, not out of the test's receiver.
+  - Selection is trace-scoped, so the 100 unrelated `pm-flow` traces in that
+    instance cannot satisfy the assertion — proven, not asserted: with one hex
+    digit of the trace id flipped after export
+    (`cycles/007/patch_mutant.py wrong-trace-id`, copy deleted after), the suite
+    exits 1 with
+    `FAIL: Jaeger never re-served trace 719100d6d0bb9643c4e0ded175de6970 with
+    invoke_agent parent and chat child`. Jaeger answers 404 for that id, so the
+    empty-response path fails rather than passing vacuously.
+  - A2 through the backend is a live comparison, not a formality: moving the
+    attempts row by one in the Jaeger block's join
+    (`a.input_tokens + 1`, mode `usage-off-by-one`) → exit 1,
+    `primary: Jaeger gen_ai.usage.input_tokens on trace
+    d148e04bb6da46047fa0cb2379f6c7a3 is 31, attempt has 32`.
+  - A3 through the backend covers every span, and a missing tag fails rather
+    than being read as success: looking the revision up under an absent key
+    (mode `revision-tag-absent`) → exit 1,
+    `primary: Jaeger span 4e060733e98eabe4 in trace
+    b0b35ddbe11104ea83a98370e09b9d37 has revision None, expected 'v1.37.0'`.
+    The span it names is the `pm_flow.tick` root, so the loop really does run
+    over all three spans of the trace and not just the pair.
+  - A6, skip path: with the reachability probe pointed at a dead port and the
+    docker probe pointed at a nonexistent binary (mode `unreachable`), the suite
+    exits 0 having printed exactly one
+    `SKIP: A6 requires docker run -d -p 4318:4318 -p 16686:16686
+    jaegertracing/all-in-one` line, and every other assertion still passed. A
+    host without Docker still gets a green suite; a host with Jaeger does not
+    get the skip.
+  - The user's instance was not disturbed. `docker ps` before, between and after
+    all five runs shows the same container, `ccf9b12e2452 pm-flow-jaeger`, `Up 14
+    hours` — never restarted, never removed. The test's only effect on it is the
+    traces it exports, which is what A6 asks for.
+  - A7: `zsh tests/pm_flow_test.sh` exits 0 with 10 PASS lines;
+    `zsh tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0.
+  - A4 still holds: the grep over `template/` and `src/` matches
+    `src/pm_flow/semconv.py` lines 8, 9, 24-28, 32, 33 and the one exempted
+    comment at `template/.agentic/pm_flow/catalog.py:254`. The new test code uses
+    the `"gen" + "_ai."` splitting convention throughout; no `gen_ai.` literal
+    was introduced.
+  - Harness fact worth carrying: the developer's seat could not reach the Docker
+    daemon or Jaeger (`jaeger_http=000`, `curl_exit=7`, `docker_info_exit=1`) and
+    so returned PARTIAL with the `SKIP:` line, having built the live path without
+    ever executing it. The review seat has both. The developer did not substitute
+    a Jaeger stub or dress the skip up as a pass, which is why the code was
+    reviewable at all; but A6's live evidence above is the review's, not the
+    developer's. Assignments that depend on host services need to state which
+    seat can reach them.
 
 - T4 — accepted cycle 006 (GO_WITH_CHANGES). Acceptance IDs A1, A2, A3, A5, A7.
   - Reviewed at
@@ -440,13 +562,19 @@ else in it — the T3 code being on `main`, the A4 grep, the A6 docker probe,
   no dispatch stores its prompt and result twice.
 - The T1 `git status --porcelain` gate is gone, confirmed this cycle: the grep
   for it is empty and the suite exits 0 with an untracked probe file present.
-- Docker availability for A6 is still unsettled, now on both seats: the
-  developer's `docker run …` returned `connect: no such file or directory` for
-  `/Users/salah/.docker/run/docker.sock`, and this review seat's shell refused
-  both `docker info` and a stat of that socket. A6's own escape hatch covers
-  it; the Jaeger command plus `curl -s
-  'http://localhost:16686/api/traces?service=pm-flow'` is what settles it, and
-  the handoff carries it as unproven.
+- A6 is no longer open. Docker availability flipped to **available** at cycle
+  007 (`docker ps` exits 0, `jaegertracing/all-in-one` up on 4318/16686),
+  superseding every prior cycle's `connect: no such file or directory` on
+  `/Users/salah/.docker/run/docker.sock`; that retired the escape hatch, and T5
+  then earned the acceptance ID outright at cycle 007. The section carries no
+  unproven acceptance ID.
+- One seat-dependency, recorded because it will recur: the developer sandbox has
+  no route to the Docker daemon or to `localhost:16686` while the review seat
+  does, so a task whose acceptance needs a host service can only be evidenced at
+  review. Observed cycle 007 (`jaeger_http=000`, `curl_exit=7`,
+  `docker_info_exit=1` from the developer; HTTP 200 and `docker ps` exit 0 from
+  the review). Not an external blocker — the work was assignable, buildable and
+  correct; only its execution was one-sided.
 - One cross-section request is open, not a blocker: A4's grep matches a
   prose comment at `template/.agentic/pm_flow/catalog.py:250`, a file owned by
   `persona-cards`. The test exempts that one file for comment lines only; the
@@ -470,13 +598,16 @@ else in it — the T3 code being on `main`, the A4 grep, the A6 docker probe,
 
 ## Next eligible task
 
-- None. Every workplan task is done and every brief acceptance ID except A6 has
-  standing evidence from this host, recorded above. A6 keeps the brief's own
-  escape hatch: Docker is absent here, so it is carried as unproven with the
-  Jaeger command as what settles it.
-- Two follow-ups belong to whoever picks them up, and neither reopens this
-  section on its own:
-  - `persona-cards` rewording the `gen_ai.*` mention in
-    `template/.agentic/pm_flow/catalog.py` (line 254 as of cycle 006), at which
-    point the test's one-file A4 exemption is deleted.
-  - A host with Docker settling A6 by running the brief's Jaeger command.
+- None. T1-T5 are all accepted and the workplan is exhausted. The section's
+  standing evidence: A1, A2, A3, A5 and A7 from the test's own receiver (T4,
+  re-run at cycle 007), A4 from the grep, and A6 from Jaeger's own query API
+  (T5). The next cycle should report the section complete rather than assign
+  work.
+- Two limits a future host may hit, neither a defect here: the A6 check needs
+  `curl` on `PATH` (absent, the reachability probe reads as unreachable and the
+  suite takes the `SKIP` path even where Jaeger is up), and each run adds one
+  trace to whatever Jaeger instance is reachable, by design.
+- One follow-up belongs to whoever picks it up and does not reopen this section:
+  `persona-cards` rewording the `gen_ai.*` mention in
+  `template/.agentic/pm_flow/catalog.py` (line 254 as of cycle 006), at which
+  point the test's one-file A4 exemption is deleted.

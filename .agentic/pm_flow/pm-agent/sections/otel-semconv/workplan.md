@@ -243,13 +243,71 @@ suite does today, is exactly the defect T4 fixes.
   the correct observation.
 - Depends on: T3.
 
+## Task T5 — Prove A6 against a stock backend's own query API
+
+- Status: done — accepted cycle 007 (GO). A6 proven live against `pm-flow-jaeger`
+  on the review seat, with A1, A2, A3 re-asserted through the backend and A7
+  held. Four review-side negatives fire (wrong trace id, absent revision tag,
+  attempts row off by one, forced-unreachable skip path). The developer's own
+  seat had no Docker socket and took the `SKIP:` path, so the live evidence is
+  the review's — see `state.md`. This closes the last acceptance ID; every ID in
+  the brief now has standing evidence.
+- Why now: A6 says a Jaeger instance "queried at `/api/traces?service=pm-flow`
+  returns the exported trace with the A1 span tree", and allows the handoff to
+  record it unproven *only* "if Docker is not available on the host". At cycles
+  003-006 it was not: `docker ps` exited 1 with
+  `dial unix /Users/salah/.docker/run/docker.sock: connect: no such file or
+  directory`. Probed again at cycle 007 and the condition has flipped —
+  `docker ps` exits 0 and shows `jaegertracing/all-in-one` up 13 hours as
+  `pm-flow-jaeger`, publishing 4318 and 16686. The escape hatch no longer
+  applies, so A6 has to be earned.
+- Outcome: `tests/otel_semconv_test.sh` exports the primary tree's real
+  recorded run to a Jaeger instance over OTLP and asserts the A1 tree back out
+  of Jaeger's **own query API**, not out of the test's receiver. Every
+  assertion is made against what a stock backend decoded, stored and re-served:
+  one `invoke_agent` span, exactly one `chat` child whose `CHILD_OF` reference
+  points at it, the child's `gen_ai.usage.*` equal to the `attempts` row, and
+  `pm_flow.semconv.revision` on every span of the trace. Where no Jaeger and no
+  Docker exist, the check prints one explicit `SKIP` line naming what would
+  settle it and the suite stays green.
+- Paths: `tests/otel_semconv_test.sh`. No implementation file is expected to
+  change; the engine already emits what A6 wants, as the live instance shows.
+- Reuse: `export_tree`'s exporter invocation — `trace_export.py --otlp <url>
+  --replay` is the brief's own documented usage (trace_export.py:10) and
+  appends `/v1/traces` itself (trace_export.py:223-224), so the stdlib route
+  needs no SDK, exactly as T4 established. The tree's trace id is the
+  `SELECT DISTINCT trace_id FROM spans` the test already computes. The
+  `attempts` join is the one `assert_received_tree` already runs.
+- Selection: by this run's own trace id via `/api/traces/<traceID>`, for the
+  same reason T4 stopped indexing by ordinal — the live Jaeger already holds
+  203 unrelated `pm-flow` spans from the real install, so
+  `/api/traces?service=pm-flow` unfiltered would assert on someone else's run.
+  Probed at cycle 007: `/api/traces/<traceID>` returns HTTP 200 with the full
+  tree, `references[].refType == "CHILD_OF"` giving the parent, and the usage
+  and revision tags present.
+- Instance handling: reuse a Jaeger already answering on 16686 and never tear
+  it down — `pm-flow-jaeger` is the user's, it predates the test, and both
+  ports are already bound so the brief's `docker run` would fail against it.
+  Only if nothing answers may the test start its own with the brief's command,
+  and then it removes only the container id it started.
+- Acceptance IDs: A6 (primary), with A1, A2, A3 re-asserted through the backend
+  and A7 held.
+- Validation: `zsh tests/otel_semconv_test.sh` exits 0 and prints a
+  `JAEGER primary: <traceID> invoke_agent -> <spanID> chat` line plus
+  `PASS: a stock backend re-serves the invoke_agent -> chat tree`; pointing the
+  Jaeger query at a trace id that was never exported fails with that id named;
+  `zsh tests/pm_flow_test.sh` and `zsh tests/store_ledger_test.sh` exit 0.
+- Depends on: T4.
+
 ## Integration and end-to-end validation
 
 - T2 is the end-to-end gate and carries the viewer confirmation the brief names:
   it proves scenario 1 through the real record-then-export path. T3 refined what
-  each span of the pair carries. T4 is the last task: it re-runs that same gate
-  and is what makes it pass from this host, so the end-to-end proof standing at
-  section end is T4's.
+  each span of the pair carries. T4 made that gate pass from this host by
+  selecting each tree's payload by trace id. T5 is the last task: it closes the
+  one acceptance ID the section has never proven, by asserting the same tree
+  through a stock backend's query API rather than through the test's own
+  receiver. The end-to-end proof standing at section end is T4's plus T5's.
 
 ## Known conflict outside owned paths
 
@@ -284,5 +342,5 @@ suite does today, is exactly the defect T4 fixes.
 | A3 | T1, T2, T4 | Revision attribute on every span |
 | A4 | T1 | Grep matches only `semconv.py` |
 | A5 | T1, T2, T4 | Revision switch changes names in a copy, then in the receiver |
-| A6 | T2 | Jaeger API returns the tree, or recorded unproven |
-| A7 | T2, T4 | Both suites exit 0 |
+| A6 | T5 | Jaeger's own query API re-serves the exported trace with the A1 tree. Docker is available as of cycle 007, so the brief's unproven escape hatch no longer applies |
+| A7 | T2, T4, T5 | Both suites exit 0 |
