@@ -42,20 +42,47 @@ wait_for_file() {
   done
 }
 
-wait_for_payload_count() {
-  local wanted="$1" tries=0 count
-  while true; do
-    count="$(python3 - "$RECEIVED" <<'PY'
+received_trace_tree_present() {
+  local trace_id="$1"
+  python3 - "$RECEIVED" "$trace_id" <<'PY'
+import json
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
-print(len(path.read_text().splitlines()) if path.exists() else 0)
+trace_id = sys.argv[2]
+spans_by_id = {}
+if path.exists():
+    for line in path.read_text().splitlines():
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        for span in payload.get("spans", []):
+            if span.get("traceId") == trace_id and span.get("spanId"):
+                spans_by_id[span["spanId"]] = span
+
+operation_key = "gen" + "_ai.operation.name"
+parents = [
+    span for span in spans_by_id.values()
+    if span.get("attributes", {}).get(operation_key) == "invoke_agent"
+]
+present = any(
+    span.get("parentSpanId") == parent["spanId"]
+    and span.get("attributes", {}).get(operation_key) == "chat"
+    for parent in parents
+    for span in spans_by_id.values()
+)
+raise SystemExit(0 if present else 1)
 PY
-)"
-    (( count >= wanted )) && return 0
+}
+
+wait_for_trace_tree() {
+  local trace_id="$1" tries=0
+  while ! received_trace_tree_present "$trace_id"; do
     (( tries += 1 ))
-    (( tries <= 100 )) || fail "receiver got $count payloads, expected $wanted"
+    (( tries <= 100 )) || \
+      fail "receiver never got trace $trace_id with invoke_agent parent and chat child"
     sleep 0.05
   done
 }
@@ -240,26 +267,6 @@ case "$RECEIVER_ADDRESS" in
   *) fail "receiver reported an unknown address: $RECEIVER_ADDRESS" ;;
 esac
 
-if python3 - <<'PY' >/dev/null 2>&1
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
-from opentelemetry.sdk.trace import ReadableSpan
-PY
-then
-  [[ "$RECEIVER_ADDRESS" == tcp:* ]] || \
-    fail "SDK imports are available but this host prohibited the OTLP TCP receiver"
-  EXPORT_ROUTE="SDK OTLP/HTTP via trace_export.py"
-else
-  if [[ "$RECEIVER_ADDRESS" == unix:* ]]; then
-    EXPORT_ROUTE="stdlib OTLP/JSON fallback via trace_export.py --file --replay (HTTP over Unix socket)"
-  elif [[ "$RECEIVER_ADDRESS" == pipe:* ]]; then
-    EXPORT_ROUTE="stdlib OTLP/JSON fallback via trace_export.py --file --replay (HTTP request stream; bind prohibited)"
-  else
-    EXPORT_ROUTE="stdlib OTLP/JSON fallback via trace_export.py --file --replay"
-  fi
-fi
-printf 'ROUTE: %s\n' "$EXPORT_ROUTE"
-
 write_stub() {
   local target="$1"
   cat > "$target" <<'ZSH'
@@ -374,10 +381,23 @@ BRIEF
 }
 
 export_tree() {
-  local tree="$1" db="$2" ordinal="$3"
+  local tree="$1" db="$2" label="$3"
   local exporter="$tree/template/.agentic/pm_flow/trace_export.py"
-  if [[ "$EXPORT_ROUTE" == SDK* ]]; then
-    python3 "$exporter" --db "$db" --otlp "$ENDPOINT" --replay >/dev/null
+  local trace_id
+  trace_id="$(python3 - "$db" <<'PY'
+import sqlite3
+import sys
+
+connection = sqlite3.connect(sys.argv[1])
+rows = connection.execute("SELECT DISTINCT trace_id FROM spans").fetchall()
+if len(rows) != 1 or not rows[0][0]:
+    raise SystemExit(f"expected exactly one store trace id, got {rows!r}")
+print(rows[0][0])
+PY
+)"
+
+  if received_trace_tree_present "$trace_id"; then
+    printf 'ROUTE %s: driver telemetry_autoexport\n' "$label"
   else
     local payloads="$tree/trace.otlp.jsonl"
     python3 "$exporter" --db "$db" --file "$payloads" --replay >/dev/null
@@ -405,14 +425,22 @@ PY
           "$ENDPOINT/v1/traces" >/dev/null
       fi
     done < "$payloads"
+
+    if [[ "$RECEIVER_ADDRESS" == unix:* ]]; then
+      printf 'ROUTE %s: test replay POST (OTLP/JSON over Unix socket)\n' "$label"
+    elif [[ "$RECEIVER_ADDRESS" == pipe:* ]]; then
+      printf 'ROUTE %s: test replay POST (OTLP/JSON request stream; bind prohibited)\n' "$label"
+    else
+      printf 'ROUTE %s: test replay POST (OTLP/JSON over TCP)\n' "$label"
+    fi
   fi
-  wait_for_payload_count "$ordinal"
+  wait_for_trace_tree "$trace_id"
 }
 
 assert_received_tree() {
-  local ordinal="$1" db="$2" semconv="$3" provider_suffix="$4"
-  local forbidden_provider_suffix="$5" label="$6"
-  python3 - "$RECEIVED" "$ordinal" "$db" "$semconv" "$provider_suffix" \
+  local db="$1" semconv="$2" provider_suffix="$3"
+  local forbidden_provider_suffix="$4" label="$5"
+  python3 - "$RECEIVED" "$db" "$semconv" "$provider_suffix" \
     "$forbidden_provider_suffix" "$label" <<'PY'
 import importlib.util
 import json
@@ -420,9 +448,22 @@ import sqlite3
 import sys
 from pathlib import Path
 
-received, ordinal, db, semconv_path, provider_suffix, forbidden_suffix, label = sys.argv[1:]
-payload = json.loads(Path(received).read_text().splitlines()[int(ordinal) - 1])
-spans = payload["spans"]
+received, db, semconv_path, provider_suffix, forbidden_suffix, label = sys.argv[1:]
+connection = sqlite3.connect(db)
+trace_rows = connection.execute("SELECT DISTINCT trace_id FROM spans").fetchall()
+if len(trace_rows) != 1 or not trace_rows[0][0]:
+    raise SystemExit(
+        f"{label}: expected exactly one store trace id, got {trace_rows!r}"
+    )
+trace_id = trace_rows[0][0]
+
+spans_by_id = {}
+for line in Path(received).read_text().splitlines():
+    payload = json.loads(line)
+    for span in payload.get("spans", []):
+        if span.get("traceId") == trace_id:
+            spans_by_id[span["spanId"]] = span
+spans = list(spans_by_id.values())
 prefix = "gen" + "_ai."
 operation_key = prefix + "operation.name"
 revision_key = "pm_flow.semconv.revision"
@@ -465,7 +506,6 @@ output_key = prefix + "usage.output_tokens"
 if input_key in parent["attributes"] or output_key in parent["attributes"]:
     raise SystemExit(f"{label}: convention usage remained on invoke_agent parent")
 
-connection = sqlite3.connect(db)
 connection.row_factory = sqlite3.Row
 attempt = connection.execute(
     "SELECT a.input_tokens, a.output_tokens FROM spans child "
@@ -544,8 +584,8 @@ primary_resolved="$(resolved_semconv_path "$PRIMARY_TELEMETRY")"
 [[ "$primary_resolved" == "$(cd -P "${PRIMARY_SEMCONV:h}" && pwd -P)/semconv.py" ]] || \
   fail "primary telemetry resolved the wrong semantic-convention module: $primary_resolved"
 PRIMARY_DB="$(drive_dispatch "$PRIMARY_TREE" "$TEST_ROOT/primary-repo" "Semconv Primary")"
-export_tree "$PRIMARY_TREE" "$PRIMARY_DB" 1
-assert_received_tree 1 "$PRIMARY_DB" "$PRIMARY_SEMCONV" \
+export_tree "$PRIMARY_TREE" "$PRIMARY_DB" "primary"
+assert_received_tree "$PRIMARY_DB" "$PRIMARY_SEMCONV" \
   "provider.name" "system" "primary"
 
 SECONDARY_SEMCONV="$SECONDARY_TREE/src/pm_flow/semconv.py"
@@ -560,8 +600,8 @@ secondary_resolved="$(resolved_semconv_path "$SECONDARY_TELEMETRY")"
   fail "secondary telemetry resolved the wrong semantic-convention module: $secondary_resolved"
 printf 'resolved semconv.py: %s\n' "$secondary_resolved"
 SECONDARY_DB="$(drive_dispatch "$SECONDARY_TREE" "$TEST_ROOT/secondary-repo" "Semconv Secondary")"
-export_tree "$SECONDARY_TREE" "$SECONDARY_DB" 2
-assert_received_tree 2 "$SECONDARY_DB" "$SECONDARY_SEMCONV" \
+export_tree "$SECONDARY_TREE" "$SECONDARY_DB" "secondary"
+assert_received_tree "$SECONDARY_DB" "$SECONDARY_SEMCONV" \
   "system" "provider.name" "secondary"
 
 GEN_AI_PREFIX='gen''_ai\.'
