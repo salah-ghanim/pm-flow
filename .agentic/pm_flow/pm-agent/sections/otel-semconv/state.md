@@ -2,10 +2,34 @@
 
 ## Current task
 
-- None. T3 was accepted in cycle 004 and was the last workplan task. Cycle 005
-  re-verified every acceptance ID on merged `main` rather than on a worktree.
+- None. T4 was the last unfinished task and was accepted at cycle 006. The
+  section's own suite is the section-end gate and it passes from this host.
 
-## Section-end verification, cycle 005 (on merged `main`)
+## Reopened by portfolio review 007 — closed by T4, cycle 006
+
+The section was marked COMPLETE at cycle 005 while `zsh
+tests/otel_semconv_test.sh` exited 1 here with `secondary: span … revision is
+'v1.37.0', expected 'v1.36.0'`. The cause was in the test, never in the
+section's code: the receiver got four payloads, two per tree, and
+`assert_received_tree 2` read the primary's second copy. The duplicate came from
+running both export routes unconditionally — `telemetry_autoexport` ships a full
+payload over stdlib `urllib` on its own (see the corrected active decision
+below), and `export_tree` shipped the same spans again.
+
+T4 fixed both halves: the test now selects by the tree's own trace id and runs
+its replay POST only when the driver's export did not arrive. The suite exits 0
+here, twice in a row, and both routes have now been observed delivering. The
+portfolio note's separate suspicion — the dispatch resolving `pm_flow.semconv`
+through the host editable venv — was disproved by the cycle-006 probe and stays
+disproved: each tree's dispatch loads its own copied module, which is why the
+two trees still report different revisions.
+
+## Section-end verification, cycle 005 (on merged `main`) — superseded
+
+The claim below that `zsh tests/otel_semconv_test.sh` exits 0 on `main` did not
+reproduce at cycle 006 and is superseded by T4's evidence, which does. Everything
+else in it — the T3 code being on `main`, the A4 grep, the A6 docker probe,
+`pm_flow_test.sh` — still stands.
 
 - The accepted T3 code is on `main`:
   `grep -n 'include_non_convention_attributes' template/.agentic/pm_flow/telemetry.py`
@@ -33,6 +57,71 @@
   this section.
 
 ## Completed tasks and evidence
+
+- T4 — accepted cycle 006 (GO_WITH_CHANGES). Acceptance IDs A1, A2, A3, A5, A7.
+  - Reviewed at
+    `/Users/salah/code/personal/.pm-flow-worktrees/pm-flow/pm-agent/otel-semconv`.
+    `git status --porcelain` there shows exactly ` M tests/otel_semconv_test.sh`;
+    `git diff --stat HEAD` is `1 file changed, 83 insertions(+), 43 deletions(-)`.
+    `telemetry.py`, `semconv.py`, `trace_export.py` and `driver.zsh` untouched,
+    as the assignment required.
+  - The fix: `assert_received_tree` reads `SELECT DISTINCT trace_id FROM spans`
+    off the store it is already handed, fails if that is not exactly one row,
+    then folds every line of `received.jsonl` into `spans_by_id` keyed on
+    `spanId` for spans whose `traceId` matches. `wait_for_payload_count` is
+    replaced by `wait_for_trace_tree`, which polls the same predicate
+    (`received_trace_tree_present`) for an `invoke_agent` parent with a `chat`
+    child on that trace, same 100-try / 0.05s budget, and fails naming the
+    trace id. `export_tree` runs its `--file --replay` POST only when that
+    predicate is already false, and prints which route delivered. The
+    `opentelemetry` import probe and the `EXPORT_ROUTE == SDK*` branch are gone.
+  - A1, A2, A3, A5, A7: `zsh tests/otel_semconv_test.sh` exits 0 twice in a row
+    on this seat. Both runs print `ROUTE primary: driver telemetry_autoexport`
+    and `ROUTE secondary: driver telemetry_autoexport` — the receiver bound TCP
+    here, so the payload arrived from the driver's own export with **no
+    test-side transport at all**, the strongest evidence the section has for
+    scenario 1. Run 1: `TREE primary: b0f09aa1761e9936 invoke_agent ->
+    0f28bdc3a05d099a chat parent=b0f09aa1761e9936 input_tokens=31
+    output_tokens=13`, `TREE secondary: fbdee39840c6c0e5 invoke_agent ->
+    9cf4092c035609fc chat parent=fbdee39840c6c0e5 …`. Run 2: `4a626ca7929f9e9e`
+    / `57e20b337a4d510c`. Both `SPLIT` lines byte-identical to cycle 004, and
+    all six PASS lines, including
+    `PASS: changing only the pin changes the receiver provider attribute` —
+    which is where the two revisions being different is asserted, each tree
+    against its own loaded `semconv.py`.
+  - The by-trace selection is proven necessary, not just present. The
+    assignment's prescribed negative — revert to `splitlines()[ordinal-1]` —
+    cannot fail on its own, because the same task removed the duplicate export
+    that made the ordinals wrong; the developer reported this honestly rather
+    than manufacturing the message. Reviewed with the precondition restored, in
+    a copy of the whole tree (`cycles/006/review/`, deleted after):
+    - Duplicate arrival alone, selection intact: after `export_tree … primary`,
+      append the primary's payload to `received.jsonl` a second time
+      (`REVIEW: received.jsonl now has 2 payloads`) → exit 0, all six PASS
+      lines. The selection is robust to however many payloads a tree delivers.
+    - Duplicate arrival plus the ordinal revert → exit 1 with exactly the
+      prescribed message, `secondary: span a942e17fd6b2691e revision is
+      'v1.37.0', expected 'v1.36.0'`. Same fixture, same duplicate, one line of
+      selection different: that line is what closes the defect.
+  - A1, negative: the `chat` child's `insert_span` replaced by `_ = (…)` in a
+    copy of `telemetry.py` → exit 1,
+    `FAIL: receiver never got trace fe8e2aa1445c13762936664ede39dcb3 with
+    invoke_agent parent and chat child`. It fails at the wait, not at
+    `expected exactly one chat child, got 0`, because the wait is now itself the
+    tree assertion — the suite still fails and names the trace, so the new
+    selection did not turn the assertions into no-ops. That run also printed
+    `ROUTE primary: test replay POST (OTLP/JSON over TCP)`, so the fallback
+    branch is exercised on the same host that takes the driver route when the
+    tree is intact.
+  - A7: `zsh tests/pm_flow_test.sh` exits 0 with 10 PASS lines;
+    `zsh tests/store_ledger_test.sh` → `store ledger tests passed`, exit 0.
+  - A4 still holds: the grep over `template/` and `src/` matches
+    `src/pm_flow/semconv.py` lines 8, 9, 24-28, 32, 33 and the one exempted
+    comment, which is now at `template/.agentic/pm_flow/catalog.py:254` — the
+    file has shifted by four lines since it was recorded as 250 elsewhere in
+    this file. The test exempts by file name, not by line, so the shift is
+    cosmetic. No `gen_ai.` literal was introduced in the test's own strings; the
+    new code uses the `"gen" + "_ai."` splitting convention throughout.
 
 - T3 — accepted cycle 004 (GO). Acceptance IDs A1, A2, A3, A7.
   - Reviewed at
@@ -219,16 +308,35 @@
   convention-defined structure, and the copied-engine layout has no convention
   module; inventing a child there would put a bare span in the tree the degrade
   path is meant to keep out.
-- The export route was settled by probe, not assumption. `trace_export.py
-  --otlp` imports the OpenTelemetry SDK (`trace_export.py:183-194`);
-  `ls .venv/lib/python3*/site-packages` shows only `pm_flow` and its dist-info,
-  and `ls tests/packaging-build-wheelhouse` shows hatchling, packaging,
-  pathspec, pluggy, tomlkit, trove_classifiers - no OTel. `pm_flow_test.sh`
-  installs `--no-index` from that wheelhouse, so the wire route cannot be
-  assumed and a network install must not be added to the suite. T2 therefore
-  feeds one receiver by two routes with identical assertions: the driver's own
-  `telemetry_autoexport` when the SDK is importable, and
-  `trace_export.py --file --replay` POSTed by the test when it is not.
+- **Corrected cycle 006.** T2's export route rested on "`trace_export.py --otlp`
+  imports the OpenTelemetry SDK (`trace_export.py:183-194`)". That is false of
+  the file: the SDK is imported only by the `grpc` branch
+  (trace_export.py:259-274), `--protocol` defaults to `http`
+  (trace_export.py:475), and the `http` branch posts OTLP/JSON with stdlib
+  `urllib` alone (trace_export.py:218-256). trace_export.py:24 says so outright
+  — "Only `--protocol grpc` imports the SDK" — and
+  `git log -S'args.protocol == "http"'` attributes that route to
+  `54da8ab chore(trace-commands): accepted cycle 002`.
+  Still true: the SDK is absent here (`import opentelemetry` →
+  `ModuleNotFoundError` under `/Users/salah/code/personal/pm-flow/.venv/bin/python3`),
+  `ls tests/packaging-build-wheelhouse` shows hatchling, packaging, pathspec,
+  pluggy, tomlkit, trove_classifiers and no OTel, and `pm_flow_test.sh` installs
+  `--no-index` from it, so no network install may be added to the suite.
+  Changed: the wire route does not need the SDK, so the driver's own
+  `telemetry_autoexport` (driver.zsh:775-781) is the primary route and
+  `trace_export.py --file --replay` POSTed by the test is the fallback for a
+  receiver that could not bind TCP. Running both unconditionally is what
+  produces the duplicate payloads T4 fixes.
+- **Confirmed cycle 006, both branches observed.** The route is no longer
+  inferred from what is installed; the test asks the receiver whether the tree's
+  trace already arrived and prints the answer. On the review seat the driver's
+  own export delivered both trees (`ROUTE …: driver telemetry_autoexport`) with
+  no test-side transport. On the developer's seat TCP and Unix binds were both
+  refused, the receiver fell back to a FIFO, the driver's POST to
+  `http://localhost` reached nothing, and the test's replay POST delivered
+  (`ROUTE …: test replay POST (OTLP/JSON request stream; bind prohibited)`).
+  Same assertions, same serialiser, both green. A tree that arrives by neither
+  route now fails with its trace id named rather than being read past.
 - The receiver is fed without editing anything outside owned paths.
   `telemetry_autoexport` (driver.zsh:728-735) reads
   `config_setting telemetry otlp_endpoint` and fires at run end, and the stock
@@ -321,7 +429,11 @@
 
 ## Blockers
 
-- None. The cycle-003 duplication defect is closed by T3, accepted cycle 004:
+- None external, and none open. The ordinal-indexing defect that reopened the
+  section is closed by T4, accepted cycle 006: the suite exits 0 here twice in a
+  row, stays correct under a deliberately duplicated arrival, and still fails
+  when the `chat` child is removed.
+- The cycle-003 duplication defect is closed by T3, accepted cycle 004:
   the receiver now shows each of the eleven non-convention keys on the
   `invoke_agent` parent only, and reverting either child call site fails the
   test. No stock backend double-counts token totals or cost over a trace, and
@@ -358,12 +470,13 @@
 
 ## Next eligible task
 
-- None. T3 was the last task and is accepted, every workplan task is done, and
-  cycle 005 re-verified the whole acceptance set on merged `main`. A6 is
-  recorded unproven with the probe re-run this cycle, as the brief allows. The
-  section is COMPLETE as of cycle 005.
+- None. Every workplan task is done and every brief acceptance ID except A6 has
+  standing evidence from this host, recorded above. A6 keeps the brief's own
+  escape hatch: Docker is absent here, so it is carried as unproven with the
+  Jaeger command as what settles it.
 - Two follow-ups belong to whoever picks them up, and neither reopens this
   section on its own:
-  - `persona-cards` rewording `template/.agentic/pm_flow/catalog.py:250`, at
-    which point the test's one-file A4 exemption is deleted.
+  - `persona-cards` rewording the `gen_ai.*` mention in
+    `template/.agentic/pm_flow/catalog.py` (line 254 as of cycle 006), at which
+    point the test's one-file A4 exemption is deleted.
   - A host with Docker settling A6 by running the brief's Jaeger command.

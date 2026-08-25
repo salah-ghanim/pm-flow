@@ -98,28 +98,40 @@
   absent.
 - Depends on: T1.
 
-### Export route, decided by probe
+### Export route — T2's premise was wrong, corrected by the cycle 006 probe
 
-`trace_export.py --otlp` imports the OpenTelemetry SDK and exits with
-instructions when it is missing (`trace_export.py:183-194`). The SDK is not
-installed: `.venv/lib/python3*/site-packages` holds only `pm_flow`, and
-`tests/packaging-build-wheelhouse` - the pinned, hashed, `--no-index`
-wheelhouse `pm_flow_test.sh:167-182` builds from - carries hatchling and its
-build deps and nothing else. So the test cannot assume the wire route works and
-must not add a network install to a suite that is deliberately offline.
+T2 decided the route on the premise that `trace_export.py --otlp` imports the
+OpenTelemetry SDK. That is false of the file as it stands: the SDK is imported
+only by the `grpc` branch (trace_export.py:259-274), `--protocol` defaults to
+`http` (trace_export.py:475), and the `http` branch posts OTLP/JSON with stdlib
+`urllib` alone (trace_export.py:218-256). The module says so itself at
+trace_export.py:24 - "Only `--protocol grpc` imports the SDK".
+`git log -S'args.protocol == "http"'` attributes the stdlib route to
+`54da8ab chore(trace-commands): accepted cycle 002`, a section that owns the
+file.
+
+What is still true: the SDK is not installed on this host
+(`import opentelemetry` → `ModuleNotFoundError` under
+`/Users/salah/code/personal/pm-flow/.venv/bin/python3`), and a network install
+must not be added to a deliberately offline suite. What changes is the
+conclusion - the wire route works without the SDK, so the driver's own
+`telemetry_autoexport` (driver.zsh:775-781) already delivers a complete payload
+by itself.
 
 Two routes into one receiver, the assertions identical:
 
-- SDK importable: the driver's own `telemetry_autoexport` POSTs protobuf to the
-  receiver; the test decodes it with `opentelemetry.proto`, which is present
-  whenever the exporter is.
-- SDK absent: after the same driver run, `trace_export.py --file … --replay`
-  writes OTLP/JSON from the real serialiser and the test POSTs those lines to
-  the same receiver at `/v1/traces`.
+- The driver's `telemetry_autoexport` POSTs OTLP/JSON at run end to the endpoint
+  the disposable project's `config.json` names. No test-side transport;
+  preferred whenever it arrives.
+- The receiver could not bind TCP, so nothing reached it: after the same driver
+  run, `trace_export.py --file … --replay` writes OTLP/JSON from the real
+  serialiser and the test POSTs those lines to the same receiver at
+  `/v1/traces`.
 
-The test prints which route ran. The fallback is a stated limit - the HTTP hop
-is the test's, the payload is pm-flow's - and it is not to be preferred when
-the SDK is there.
+The test prints which route delivered. The fallback is a stated limit - the HTTP
+hop is the test's, the payload is pm-flow's - and it is not to be preferred when
+the driver's own export lands. Running both unconditionally, which is what the
+suite does today, is exactly the defect T4 fixes.
 
 ## Task T3 — Stop the non-convention attributes being written twice per dispatch
 
@@ -162,12 +174,82 @@ the SDK is there.
   `zsh tests/pm_flow_test.sh` and `zsh tests/store_ledger_test.sh` exit 0.
 - Depends on: T2.
 
+## Task T4 — Select the receiver's payloads by trace, not by arrival ordinal
+
+- Status: done — accepted cycle 006 (GO_WITH_CHANGES). A1, A2, A3, A5, A7 met
+  on this host, twice in a row. Both routes observed on one host: the driver's
+  `telemetry_autoexport` delivered on the review seat, the test's replay POST on
+  the developer's (bind prohibited) and in the missing-child negative.
+- Outcome: `zsh tests/otel_semconv_test.sh` exits 0 on this host, and stays
+  correct however many payloads a tree delivers. The test stops indexing
+  `received.jsonl` by ordinal and instead selects, for each tree, the spans
+  whose `traceId` is the one that tree's own store recorded, deduplicated by
+  `spanId`; a tree whose trace never arrives fails with that trace id named.
+  The stale SDK-based route probe is replaced by what actually happened: the
+  driver's own `telemetry_autoexport` is the primary route and the test's
+  `--file --replay` POST is the fallback for a receiver that could not bind
+  TCP. The printed `ROUTE` line names which route delivered.
+- Why: probed this cycle, see `cycles/006/probe_findings.md`. The receiver
+  gets **four** payloads, two per tree, byte-identical within a tree.
+  `assert_received_tree 2` therefore reads the primary's second payload and
+  reports `secondary: span … revision is 'v1.37.0', expected 'v1.36.0'`. The
+  section's code is correct: the secondary store holds `v1.36.0` on all three
+  rows and its `trace.otlp.jsonl` carries `v1.36.0`. The duplicate exists
+  because `trace_export.py --otlp` needs the SDK only for `--protocol grpc`
+  (trace_export.py:24, 218-256, 475), so `telemetry_autoexport`
+  (driver.zsh:775-781) already ships a full payload over stdlib `urllib`, and
+  `export_tree` ships the same spans again.
+- Paths: `tests/otel_semconv_test.sh`. `telemetry.py` and `semconv.py` are not
+  expected to change; if they do, the change needs its own justification
+  because no evidence so far points at them.
+- Reuse: `assert_received_tree` (otel_semconv_test.sh:412-533) keeps every
+  assertion it makes today — only how it picks `spans` changes. The tree's
+  trace id comes from the store the function is already handed:
+  `SELECT DISTINCT trace_id FROM spans` on `$db`, which must return exactly one
+  row for a single-run fixture. `wait_for_payload_count`
+  (otel_semconv_test.sh:45-61) becomes a wait for that trace id to appear with
+  its `invoke_agent` parent and `chat` child, keeping the same 100-try, 0.05s
+  budget and the same `fail` on timeout. The receiver already records
+  `traceId` per span (otel_semconv_test.sh:117, 152), so no receiver change is
+  needed.
+- Route probe: delete the `opentelemetry` import test at
+  otel_semconv_test.sh:243-260 and the `EXPORT_ROUTE == SDK*` branch at 379-380
+  — both rest on the false premise. `export_tree` runs the `--file --replay`
+  POST only when the tree's trace has not already arrived from the driver, and
+  prints `ROUTE <label>: driver telemetry_autoexport` or
+  `ROUTE <label>: test replay POST (…)` accordingly. Both routes are the real
+  serialiser; the driver's needs no test-side transport at all, so it is the
+  one to prefer, and the brief's rejection condition about feeding the receiver
+  from the mapping module stays satisfied either way.
+- Acceptance IDs: A1, A2, A3, A5, A7 (all regressions — the suite must prove
+  them again from this host).
+- Validation: `zsh tests/otel_semconv_test.sh` exits 0 twice in a row and
+  prints both `TREE primary:` and `TREE secondary:` lines with different
+  revisions; a mutation that reverts the selection to `splitlines()[ordinal-1]`
+  reproduces `secondary: span … revision is 'v1.37.0', expected 'v1.36.0'`; a
+  mutation that drops the `chat` child from `telemetry.py` still fails the
+  suite, so the new selection did not turn the assertions into no-ops;
+  `zsh tests/pm_flow_test.sh` and `zsh tests/store_ledger_test.sh` exit 0.
+- Validation, corrected at review of cycle 006: the ordinal-revert negative
+  above is unsound *on its own*, because the same task removes the duplicate
+  export that made the ordinals wrong. With one payload per tree,
+  `splitlines()[ordinal-1]` is accidentally correct again and the mutation
+  passes. The negative must restore the precondition as well as the defect:
+  inject a second copy of the primary tree's payload into `received.jsonl`
+  after `export_tree … primary`, then revert the selection. Both halves proven
+  at review — see `state.md`. The missing-child negative now fails at
+  `wait_for_trace_tree` rather than at `expected exactly one chat child, got 0`;
+  the wait is itself the tree assertion, so exit 1 with the trace id named is
+  the correct observation.
+- Depends on: T3.
+
 ## Integration and end-to-end validation
 
 - T2 is the end-to-end gate and carries the viewer confirmation the brief names:
-  it proves scenario 1 through the real record-then-export path. T3 is the last
-  task and re-runs that same gate, so the end-to-end proof is the one that
-  stands at section end.
+  it proves scenario 1 through the real record-then-export path. T3 refined what
+  each span of the pair carries. T4 is the last task: it re-runs that same gate
+  and is what makes it pass from this host, so the end-to-end proof standing at
+  section end is T4's.
 
 ## Known conflict outside owned paths
 
@@ -198,9 +280,9 @@ the SDK is there.
 
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
-| A1, A2 | T2, T3 | Receiver shows the tree; usage equals the store, and each aggregatable key is on exactly one span of the pair |
-| A3 | T1, T2 | Revision attribute on every span |
+| A1, A2 | T2, T3, T4 | Receiver shows the tree; usage equals the store, and each aggregatable key is on exactly one span of the pair |
+| A3 | T1, T2, T4 | Revision attribute on every span |
 | A4 | T1 | Grep matches only `semconv.py` |
-| A5 | T1, T2 | Revision switch changes names in a copy, then in the receiver |
+| A5 | T1, T2, T4 | Revision switch changes names in a copy, then in the receiver |
 | A6 | T2 | Jaeger API returns the tree, or recorded unproven |
-| A7 | T2 | Both suites exit 0 |
+| A7 | T2, T4 | Both suites exit 0 |
