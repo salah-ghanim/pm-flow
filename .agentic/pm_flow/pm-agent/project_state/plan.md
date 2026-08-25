@@ -66,6 +66,14 @@ Everything below serves that sentence.
   measured against the one it replaced.
 - Two topologies can be run over the same project and compared in one command.
 - pm-flow is drivable over MCP and can bind any ACP-compatible agent.
+- Section state - brief, acceptance, handoff - is exportable as validated JSON
+  in one command, so an external system consumes the flow without parsing
+  markdown, and one schema settles what the flow's own validators accept.
+- A section is visible in an external ticket tracker, GitHub Issues first:
+  created with its objective, updated on every accepted cycle, closed on
+  completion. The tracker is a view; the files stay the truth.
+- A plan-level request made while a run holds the driver lock is queued and
+  applied at the next safe point, never refused and lost.
 - The test suite runs to completion.
 
 ## Current position
