@@ -64,6 +64,8 @@ COPIED_ENGINE_FILES=(
   upgrade.py
   requirements-telemetry.txt
   README.md
+  run_detach.zsh
+  artifact_quality.md
 )
 
 # Packaged defaults and the install record. `roles`, `domains` and `tasks` here
@@ -78,6 +80,7 @@ COPIED_ENGINE_DIRS=(
   tests
   __pycache__
   .pm-flow
+  cards
 )
 
 usage() {
