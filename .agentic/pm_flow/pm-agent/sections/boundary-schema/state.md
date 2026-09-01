@@ -2,10 +2,68 @@
 
 ## Current task
 
-- T4 — `pm-flow export --json`. T3 accepted at cycle 003; T1, T2 and T3 are all
-  done, so T4's dependencies are satisfied and it is the last task.
+- None. T4 was accepted at cycle 004 and it was the last task in the workplan. All
+  four tasks are done and all five brief acceptance criteria (A1-A5) are met, so the
+  section is ready to be marked `done` once the driver has merged cycle 004.
 
 ## Completed tasks and evidence
+
+- T4 — `pm-flow export --json`, the end-to-end scenario. Acceptance A1, A2, A5.
+  Accepted cycle 004.
+  - Delivered: `schemas/project_export.schema.json`; `export.py`'s `emit`
+    subcommand plus `_resolve_reference`/`SchemaReferenceError`; the `export)` arm
+    (`pm_flow.sh:2031`) calling `python3 "$SCRIPT_DIR/export.py" emit "$@"
+    "$FLOW_DIR" "$PROJECT_KEY"` and the `usage()` line at `:48`; eight new suite
+    cases and four fixture sections under
+    `tests/fixtures/boundary_schema/project_export{,_invalid}/`.
+  - A1, all 22 live sections. With the engine root pointed at the developer
+    checkout and the flow directory at the live project,
+    `zsh <checkout>/template/.agentic/pm_flow/pm_flow.sh export --json` exits 0,
+    `python3 -m json.tool` parses it, and two consecutive runs are byte-identical.
+    `export count = 22 / dir count = 22 / identical = True` against the directory
+    listing under `.../pm-agent/sections/`.
+  - A1, `otel-semconv` compared field by field against its own files, PM's own
+    re-derivation in `review_004_spot.zsh`: `status done`, `priority must-have`
+    (line 1 of a two-line `priority.txt`), `owned_paths` the three lines of
+    `owned_paths.txt`, `dependencies []`, `acceptance` seven bare IDs `A1`-`A7`,
+    and all six handoff fields MATCH the corresponding `## ` sections of
+    `handoff.md` character for character (1023/700/335/421/588/164 chars), plus
+    `word_count=465 byte_count=3346`.
+  - A1, the command writes nothing. `git status --porcelain` on the live repo is
+    byte-identical before and after. Stronger, `review_004_nowrite.zsh`: a shasum of
+    all 4216 files under a copied flow directory is identical before and after a
+    75 082-byte export, so nothing is written that git merely ignores either.
+  - A2, three refusal paths, each with an empty stdout (`review_004_a2.zsh`):
+    a section whose `handoff.md` lacks `## What is unproven`, injected into a copy
+    of the live project, exits 1 with
+    `export failed: export.sections[corrupt-handoff].handoff.What is unproven is
+    required` — section and field both named;
+    `export.py check --kind export project_export_illegal_state.json` exits 1 with
+    `export.sections[illegal-state].acceptance[0].state must be one of ['met',
+    'open'], got 'unknown'`;
+    deleting `schemas/project_export.schema.json` exits 1 with
+    `cannot load export schema at <path>`.
+  - A2/A3, one-definition proof, PM's own (`review_004_mutation.zsh`): the suite is
+    green on a disposable copy, then renaming `unproven`'s `title` in
+    `handoff.schema.json` from `What is unproven` to `Loose ends` turns it red
+    (exit 1). The suite's own `handoff title mutation` case does the same inside the
+    export path. Grep confirms the mechanism rather than the symptom: none of the
+    six handoff field names occur in `project_export.schema.json` or in `export.py`,
+    and the acceptance-ID pattern is written exactly once, at
+    `section_brief.schema.json:81`.
+  - A2, the suite asserts values, not key presence. PM's own three reversible
+    mutations of `export.py` (`review_004_negcheck.zsh`), each turning the suite
+    red: keying acceptance state on the `completed tasks and evidence` heading →
+    `AssertionError` on the `freeform` fixture; dropping the
+    `Blockers`/`Next eligible task` exclusion → `AssertionError` on `complete`,
+    whose `A2` is mentioned only under `Blockers`; keeping blank lines in
+    `dependency_handoffs.txt` →
+    `export failed: export.sections[empty-dependencies].dependencies[0] must match
+    pattern '\S'`.
+  - A5: in the developer checkout `boundary_schema_test.sh`,
+    `agent_bindings_test.sh`, `pm_flow_test.sh`,
+    `template/.agentic/pm_flow/tests/verdict_parser.zsh` (`pass=35 fail=0`) and
+    `topology_compare_test.sh` all exit 0.
 
 - T3 — one cli definition across the three config consumers. Acceptance A4, A5.
   Accepted cycle 003.
@@ -51,8 +109,8 @@
     `role {role!r} has an unsupported cli: {cli!r}` at `agent_exec.sh:214`.
   - A5: `boundary_schema_test.sh`, `agent_bindings_test.sh`, `pm_flow_test.sh` and
     `template/.agentic/pm_flow/tests/verdict_parser.zsh` (`pass=35 fail=0`) exit 0
-    in the developer worktree. `topology_compare_test.sh` exits 1 — not caused by
-    this cycle; see Blockers.
+    in the developer worktree. `topology_compare_test.sh` exited 1 at the time,
+    from another section's breakage; it has since been fixed and exits 0 (cycle 004).
 
 - T2 — shell validators derive from the schemas. Acceptance A3, A5.
   Accepted cycle 002.
@@ -138,9 +196,13 @@
   `sections[] {key, name, status, priority, owned_paths, dependencies,
   acceptance[] {id, state}, handoff {outcome, decisions, interfaces, risks,
   unproven, next_action}}`.
-- Acceptance state is derived, not stored: an ID from `brief.md`'s Acceptance
-  bullets is `met` when it appears under `state.md`'s completed-evidence heading,
-  otherwise `open`. The schema pins that enum so no consumer invents a third value.
+- Acceptance state is derived, not stored, and the derivation may not key on a
+  heading name. Revised at cycle 004 after probing all 22 sections: an ID from
+  `brief.md`'s Acceptance bullets is `met` when its bare token appears anywhere in
+  `state.md` except under `Blockers` and `Next eligible task`, otherwise `open`. The
+  earlier rule — "appears under the completed-evidence heading" — is wrong on this
+  project, because `## Completed tasks and evidence` exists in only 18 of 22
+  sections. The schema pins the two-value enum so no consumer invents a third.
 - `acp` is valid everywhere (fixed by the brief), and cli legality is a schema
   question, not a registry question. `config.schema.json`'s `$defs.seat` enum decides
   which clis are legal; `FALLBACK_MODELS`/the store's `clis` table constrain models
@@ -153,28 +215,25 @@
 
 ## Blockers
 
-- `tests/topology_compare_test.sh` fails, and it is **not ours to fix**. Observed at
-  cycle 003 review: `zsh tests/topology_compare_test.sh` exits 1 with the single line
-  `FAIL: abandonment does not emit section_status`. The identical failure reproduces
-  on the `main` checkout with none of this section's changes present
-  (`zsh /Users/salah/code/personal/pm-flow/tests/topology_compare_test.sh`, exit 1,
-  same line), so it predates cycle 003 and is not a regression from T3.
-  The cause: `topology_compare_test.sh:917` is a source guard requiring the literal
-  `telemetry_record_outcome "$(basename "$section_dir")" abandoned` in `driver.zsh`,
-  but `outcome-record` cycle 001 changed the helper's signature to
-  `(metric, value, section)`, so `driver.zsh:2152` now reads
-  `telemetry_record_outcome section_status abandoned "$(basename "$section_dir")"`.
-  `driver.zsh` and `telemetry.py` belong to `outcome-record`; the fix — updating the
-  guard to the new argument order, or the guard's owner reconciling it — is theirs.
-  The observation that unblocks A5 here: that one grep in
-  `topology_compare_test.sh:916-918` matching `driver.zsh:2152` again.
-  Escalate through `handoff.md`; do not edit either file from this section.
-- Correction to the cycle-002 entry this replaces: the developer's reported
-  `sync: cannot find pm_flow.persona_card` failure still does not reproduce, at any
-  of the three cycles. The developer reported it again at cycle 003 and diagnosed it
-  as a `catalog.py` packaging fault; what actually fails here is the unrelated
-  `driver.zsh` source guard above. Keep asking for the exact command, cwd and full
-  output — the reported output has now been wrong three times running.
+- None. The section's only long-standing blocker is closed.
+- Closed at cycle 004 review: `tests/topology_compare_test.sh` **passes**. The
+  `FAIL: abandonment does not emit section_status` entry that stood here through
+  cycles 002-004 scoping is no longer true and has been deleted. Observed by the PM
+  in `review_004_topology.zsh`, which runs the suite twice — once against a pristine
+  `git archive main` at `6b81584` and once in the developer checkout — and gets
+  `main-exit=0` and `wt-exit=0`, the single line
+  `PASS: topology compare reports literal metrics, limits, personas, and copy
+  retention` from both, with `diff` of the two runs empty on stdout and stderr.
+  `outcome-record` reconciled the guard with `driver.zsh`'s new
+  `telemetry_record_outcome` signature and it has since merged to `main`.
+- The developer's `sync: cannot find pm_flow.persona_card to validate persona card`
+  account did not reproduce for a **fourth** consecutive cycle. This cycle the PM
+  also tested and ruled out the obvious environmental explanation: the suite scrubs
+  its own environment (`topology_compare_test.sh:5-10` unsets every `PM_FLOW_*` and
+  hard-fails if one survives), and re-running it with the full dispatch env exported
+  still gives exit 0 (`review_004_topology_env.zsh`). Whatever produces that message
+  is local to the developer's shell, not to either tree. Keep demanding the exact
+  command, cwd and full output before acting on it.
 
 ## Carried into T3 and T4
 
@@ -235,7 +294,7 @@ Scoping probe `probe_cli_003.zsh`; review probes `probe_mutate_003.zsh` and
 - `driver.zsh:1227` calls `markdown_verdict_parse` but the function itself lives in
   `pm_flow.sh:929`, so the verdict work needs no edit to another section's file.
 - `schemas/`, `export.py`, the suite and the fixtures exist (T1) and the shell
-  validators now read them (T2). The export verb does not exist; that is T4.
+  validators now read them (T2). The export verb landed at T4, cycle 004.
 - After T2 the only heading-shaped literal left in `pm_flow.sh` is
   `extract_assignment_sections`' `WANTED`/`TITLES` list (`:975-977`), which describes
   the assignment prompt, not a boundary artifact, and has no schema. Out of scope
@@ -248,19 +307,76 @@ Scoping probe `probe_cli_003.zsh`; review probes `probe_mutate_003.zsh` and
   complete against `driver.zsh`: the twelve CSV literals there reduce to exactly
   those nine distinct sets.
 
+## Baseline observed at cycle 004 scoping
+
+Probe `sections/boundary-schema/probe_export_004.zsh`, run against the `main`
+checkout with T3 merged.
+
+- The live project is already exportable. All 22 sections pass both
+  `export.py check --kind brief` and `export.py check --kind handoff`
+  (`totals: brief ok=22 bad=0 | handoff ok=22 bad=0 | state.md=22`), and each of
+  `name.txt`, `status.txt`, `priority.txt`, `summary.txt`, `owned_paths.txt`,
+  `dependency_handoffs.txt`, `run_path.txt`, `updated_at.txt` exists in 22/22
+  directories. A1's "exits 0 on the pm-agent project" needs no markdown repair; a
+  failure there would be the emit path's fault, not the data's.
+- `parse_brief`'s `acceptance_ids` are whole bullet lines, not identifiers. For
+  `otel-semconv` the first is
+  `A1: On a run recorded after this change, an OTLP receiver independent of` and
+  `n_ids: 7`. The export's `acceptance[].id` has to be the bare `A1`.
+- `parse_handoff` already returns exactly the six stable fields plus the two counts:
+  `['byte_count', 'decisions', 'interfaces', 'next_action', 'outcome', 'risks',
+  'unproven', 'word_count']`. The handoff half of the export needs no new parser.
+- `## Completed tasks and evidence` appears in 18 of 22 `state.md` files. The four
+  exceptions — `agents-md`, `green-suite`, `installer`, `worktree-isolation` — use
+  free-form headings (`Evidence, re-verified against the current main`,
+  `Decisions and evidence`, `Completion review`, `Result`). Hence the revised
+  acceptance-state rule under Active decisions.
+- `priority.txt` holds the token on line 1 and the loss text on the lines after
+  (`otel-semconv`: `must-have` then `Without it the measurement layer speaks a
+  private dialect…`). Read line 1 only.
+- `dependency_handoffs.txt` is empty for a section with no dependencies, so the
+  export's `dependencies` must be `[]`, not `[""]`.
+- `pm_flow.sh` line numbers have moved since the brief was written:
+  `usage()` is at `:35`, `refresh_sections_index` at `:627` with `first_line` at
+  `:668`, and `main`'s dispatch case block at `:1983-2084`.
+- `src/pm_flow/cli.py:81-87` forwards any unrecognised verb to the engine with
+  `PM_FLOW_*` exported and `cwd` set to the repo root, so `export` needs no Python
+  change — confirmed by reading the file, not assumed from the brief.
+
+## Observed at cycle 004 review
+
+- The `$ref` blind spot carried from cycle 003 is closed. `SchemaReferenceError`
+  now escapes the `oneOf` arm loop (`export.py:141-142`). PM probe
+  (`review_004_ref.zsh`): a schema whose arm 0 matches and whose arm 1 holds
+  `#/$defs/typo-that-does-not-exist` raises
+  `unresolvable schema pointer '#/$defs/typo-that-does-not-exist'`; a missing
+  referenced file raises `cannot load referenced schema at …`; and
+  `{"$ref": "handoff.schema.json#"}` still resolves against a real handoff object.
+  `_resolve_reference` also refuses absolute paths and any `..` component.
+- Correction to the cycle-004 scoping note about free-form `state.md` headings.
+  The prediction was that `agents-md`, `green-suite`, `installer` and
+  `worktree-isolation` would report every acceptance ID `open`. In the live export
+  they report **no acceptance IDs at all** — `acceptance: []`, alongside
+  `packaging`, five sections in total. The cause is upstream of the state rule:
+  their briefs are legacy-shape, and their Acceptance bullets carry no `A<n>` token
+  (`agents-md/brief.md:36` is `- A fresh install writes AGENTS.md carrying the role
+  router and invariants.`), so `_bare_acceptance_id` matches nothing to derive a
+  state for. The emitted `[]` is faithful to the source. The heading-independent
+  rule is therefore proven only by the `freeform` fixture and by the PM's mutation
+  check, not by live data — which is sufficient, but a consumer reading the export
+  sees five sections with no criteria. Adding IDs to those five briefs belongs to
+  their owners, not here.
+- The verb resolves the engine from `PM_FLOW_ENGINE_ROOT`
+  (`pm_flow.sh:16`, set by `src/pm_flow/paths.py:244`), which on this machine is the
+  source tree's `template/.agentic/pm_flow`. So `pm-flow export --json` typed in the
+  repo answers `unknown command: export` until the driver merges cycle 004, and
+  works the moment it does. That is the editable install dogfooding the template,
+  not a gap in the work; the PM verified the verb end to end against the live
+  project by pointing `PM_FLOW_ENGINE_ROOT` at the checkout.
+
 ## Next eligible task
 
-- T4 — `pm-flow export --json`, the last task and the end-to-end scenario (A1, A2,
-  A5). Depends on T1, T2, T3, all now done.
-- Carried into T4 from the cycle-003 review, a latent weakness in the new `$ref`
-  resolver: inside `oneOf`, an unresolvable pointer in one arm is swallowed when
-  another arm matches. Shown by `probe_msgs_003.zsh` — breaking arm 0 to
-  `#/$defs/nosuch` and validating a panel binding prints `ACCEPTED a document whose
-  oneOf arm 0 holds an unresolvable pointer`. Harmless as shipped, because both arms
-  reference `$defs.seat`, so deleting or renaming it fails both arms and the whole
-  document is rejected (`unresolvable schema pointer '#/$defs/nosuch';
-  unresolvable schema pointer '#/$defs/seat'`). It becomes real the moment
-  `project_export.schema.json` gives two `oneOf` arms different `$ref`s — a typo in
-  one would then degrade silently. If T4 adds such a schema, resolve pointers before
-  the `oneOf` arms are tried, or let an unresolvable-pointer error escape the arm
-  loop rather than joining the collected messages.
+- None in this workplan; T1-T4 are all done. The section's remaining obligation is
+  the bounded `handoff.md`, and its interfaces — `schemas/*.json`, the
+  `pm-flow export --json` output shape, and `export.py check` — are what the future
+  ticket-integration section consumes.

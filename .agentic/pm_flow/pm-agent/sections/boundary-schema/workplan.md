@@ -20,7 +20,7 @@
   file, read once per call, instead of a literal list in the function body.
 - Section facts already exist as per-section files (`status.txt`, `priority.txt`,
   `owned_paths.txt`, `dependency_handoffs.txt`, `handoff.md`, `brief.md`, `state.md`)
-  and `refresh_sections_index` (`pm_flow.sh:613`) already reads most of them. The
+  and `refresh_sections_index` (`pm_flow.sh:627`) already reads most of them. The
   export reads the same files; it does not parse the generated `sections.md` table.
 
 ## Interfaces and data changes
@@ -129,11 +129,15 @@
      a store — including this one. Legality of a cli comes from the schema enum;
      the registry only constrains models, looked up with `registry.get(cli, [])`.
 
-## Integration and end-to-end validation
+## Task T4 — `pm-flow export --json`, the end-to-end scenario
 
-## Task T4 — `pm-flow export --json`
-
-- Status: pending
+- Status: done (cycle 004, GO)
+- Delivered: `schemas/project_export.schema.json` (handoff node is
+  `{"$ref": "handoff.schema.json#"}`, priority is
+  `{"$ref": "section_brief.schema.json#/properties/priority"}`, `acceptance[].state`
+  is the two-value enum), `export.py`'s `emit` subcommand and external-`$ref`
+  resolver, the `export)` arm at `pm_flow.sh:2031` and its `usage()` line at `:48`,
+  and eight new suite cases with four fixture sections.
 - Outcome: in a flow directory, `pm-flow export --json` exits 0 and prints JSON
   covering every section directory, validated against `project_export.schema.json`
   before it reaches stdout; a section with a corrupt handoff makes the command exit
@@ -142,14 +146,50 @@
   `template/.agentic/pm_flow/schemas/project_export.schema.json`,
   `template/.agentic/pm_flow/pm_flow.sh`, `tests/boundary_schema_test.sh`,
   `tests/fixtures/boundary_schema/**`.
-- Reuse: `refresh_sections_index`'s `first_line` reader (`pm_flow.sh:613`) for the
-  per-section text files; T1's handoff and brief parsers; the dispatch case block and
-  `usage()` heredoc in `pm_flow.sh`.
+- Reuse: `refresh_sections_index`'s `first_line` reader (`pm_flow.sh:668`) for the
+  per-section text files; T1's `parse_brief`/`parse_handoff` and `validate_schema`;
+  the `main` case block (`pm_flow.sh:1983-2084`) and `usage()` heredoc
+  (`pm_flow.sh:35`); the suite's engine-copy-as-flow-directory harness
+  (`boundary_schema_test.sh:42-56`).
 - Acceptance IDs: A1, A2, A5.
 - Validation: `pm-flow export --json | python3 -m json.tool` parses, and the
   `otel-semconv` entry's status and priority match its `status.txt`/`priority.txt`
   and its handoff fields match `handoff.md`; `zsh tests/boundary_schema_test.sh` exits 0.
 - Depends on: T1, T2, T3.
+- Facts observed at cycle 004 scoping (`probe_export_004.zsh`) that fix what this
+  task must do:
+  1. The live project is exportable today. All 22 sections pass both
+     `export.py check --kind brief` and `--kind handoff`, and all eight per-section
+     text files exist in all 22 directories. So A1's "exits 0 on the pm-agent
+     project" is reachable without touching any markdown; if the emit path fails on
+     a live section, that is a defect in the emit path, not in the data.
+  2. `parse_brief`'s `acceptance_ids` are whole bullet lines, not identifiers —
+     `"A1: On a run recorded after this change, an OTLP receiver independent of"`.
+     The export's `acceptance[].id` must be the bare token (`A1`), extracted with the
+     same `^`?A[0-9]+`?` prefix the schema pattern already pins
+     (`section_brief.schema.json:81`), so the two cannot drift.
+  3. `state.md` heading names are not a contract. `## Completed tasks and evidence`
+     exists in 18 of 22 sections; `agents-md`, `green-suite`, `installer` and
+     `worktree-isolation` use free-form headings instead. A derivation keyed on that
+     one heading reports every ID `open` for four sections, three of which are
+     `done`. The rule must therefore be heading-name-independent in the positive
+     direction and use headings only to exclude: an ID is `met` when its bare token
+     appears in `state.md` outside the `Blockers` and `Next eligible task` sections,
+     `open` otherwise.
+  4. `priority.txt` is multi-line — line 1 is the token, the rest is the loss text.
+     Read the first line only, as `first_line` does.
+- Carried from the cycle-003 review: `validate_schema`'s `$ref` resolver swallows an
+  unresolvable pointer inside a `oneOf` arm when another arm matches. Harmless while
+  both arms of `config.schema.json` share one `$ref`; it becomes real the moment
+  `project_export.schema.json` gives two arms different pointers. Resolve pointers
+  before the arms are tried, or let the unresolvable-pointer error escape the arm
+  loop rather than joining the collected messages.
+  Closed in cycle 004: `SchemaReferenceError` is re-raised out of the `oneOf` arm
+  loop (`export.py:141-142`). PM probe: a schema whose arm 0 matches and whose arm 1
+  holds `#/$defs/typo-that-does-not-exist` now raises
+  `unresolvable schema pointer '#/$defs/typo-that-does-not-exist'` instead of
+  accepting, and a missing referenced *file* raises `cannot load referenced schema
+  at …` — while `{"$ref": "handoff.schema.json#"}` still resolves.
 
 ## Risks and rollback
 
