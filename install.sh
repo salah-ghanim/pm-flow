@@ -475,6 +475,7 @@ resolve_install_project_key() {
 
   if [[ -d "$flow_dir" ]]; then
     local candidates=("${(@f)$(discover_project_workspaces "$flow_dir")}")
+    candidates=("${(@)candidates:#}")
     if [[ "${#candidates[@]}" == "1" ]]; then
       printf '%s\n' "$candidates[1]"
       return
