@@ -1,10 +1,10 @@
 {
   "context": [
     {
-      "bytes": 7367,
+      "bytes": 7939,
       "exists": true,
       "path": ".agentic/pm_flow/pm-agent/project_state/plan.md",
-      "words": 1088
+      "words": 1179
     },
     {
       "bytes": 46388,
@@ -19,16 +19,22 @@
       "words": 2960
     },
     {
-      "bytes": 5820,
+      "bytes": 6573,
       "exists": true,
       "path": ".agentic/pm_flow/pm-agent/project_state/sections.md",
-      "words": 642
+      "words": 720
     },
     {
-      "bytes": 1776,
+      "bytes": 2058,
       "exists": true,
       "path": ".agentic/pm_flow/pm-agent/project_state/portfolio/007/facts.md",
-      "words": 209
+      "words": 240
+    },
+    {
+      "bytes": 357,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/boundary-schema/handoff.md",
+      "words": 42
     },
     {
       "bytes": 356,
@@ -37,27 +43,44 @@
       "words": 42
     },
     {
+      "bytes": 352,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/plan-inbox/handoff.md",
+      "words": 42
+    },
+    {
       "bytes": 354,
       "exists": true,
       "path": ".agentic/pm_flow/pm-agent/sections/real-install/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 356,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/ticket-exhaust/handoff.md",
       "words": 42
     }
   ],
   "findings": [
     {
+      "code": "context-fanout",
+      "message": "prompt asks the role to read 10 context files",
+      "severity": "warning"
+    },
+    {
       "code": "context-budget",
-      "message": "listed context contains approximately 11531 words",
+      "message": "listed context contains approximately 11857 words",
       "severity": "warning"
     }
   ],
   "metrics": {
-    "bytes": 6522,
-    "context_files": 7,
-    "context_words": 11531,
+    "bytes": 6708,
+    "context_files": 10,
+    "context_words": 11857,
     "duplicate_ratio": 0.0,
-    "task_ratio": 0.7052,
-    "task_words": 677,
-    "words": 960
+    "task_ratio": 0.7115,
+    "task_words": 698,
+    "words": 981
   },
   "path": "/Users/salah/code/personal/pm-flow/.agentic/pm_flow/pm-agent/project_state/portfolio/007/prompt.md",
   "runtime": {

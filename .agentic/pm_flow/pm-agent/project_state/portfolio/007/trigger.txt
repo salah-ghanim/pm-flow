@@ -1,1 +1,1 @@
-25 dispatch(es) since the last portfolio review (threshold 12)
+30 dispatch(es) since the last portfolio review (threshold 12)

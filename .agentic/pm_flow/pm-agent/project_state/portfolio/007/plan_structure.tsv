@@ -1,0 +1,4 @@
+UNSTARTED_DEPENDENCY	FOUND	— plan-inbox waits on boundary-schema and outcome-record (both 0 cycles); ticket-exhaust waits on boundary-schema (0 cycles); both upstreams wait on nothing and are dispatchable, so one run cures it.
+UNREACHABLE_SECTION	CLEAR	
+MUST_HAVE_INFLATION	CLEAR	
+LINEAR_CHAIN_RISK	CLEAR	

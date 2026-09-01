@@ -43,7 +43,7 @@ steps, write them to a script in your own workspace and run it with
 # Task: review the portfolio against the mission
 
 A recurring product review, not a section review. Since the last one the
-project spent $27.7715 across 25 dispatch(es) and
+project spent $32.1246 across 30 dispatch(es) and
 5 section cycle(s); 15 section(s) are done.
 
 Read, in this order:
@@ -53,8 +53,11 @@ Read, in this order:
 - .agentic/pm_flow/pm-agent/task_contract.md
 - .agentic/pm_flow/pm-agent/project_state/sections.md
 - .agentic/pm_flow/pm-agent/project_state/portfolio/007/facts.md
+- .agentic/pm_flow/pm-agent/sections/boundary-schema/handoff.md
 - .agentic/pm_flow/pm-agent/sections/outcome-record/handoff.md
+- .agentic/pm_flow/pm-agent/sections/plan-inbox/handoff.md
 - .agentic/pm_flow/pm-agent/sections/real-install/handoff.md
+- .agentic/pm_flow/pm-agent/sections/ticket-exhaust/handoff.md
 
 `portfolio_log.md` is your memory of every previous review; read it before any
 section report. Hold one question throughout: **what does the product still
