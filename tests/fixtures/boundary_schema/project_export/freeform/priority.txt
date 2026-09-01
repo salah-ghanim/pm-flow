@@ -1,0 +1,2 @@
+nice-to-have
+This variant guards heading-independent evidence.

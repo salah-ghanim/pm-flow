@@ -1,0 +1,2 @@
+must-have
+Empty files must become empty arrays.

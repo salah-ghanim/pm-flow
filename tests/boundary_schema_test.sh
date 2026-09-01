@@ -52,6 +52,8 @@ PROJECT_DIR="$FLOW/$PROJECT_KEY"
 DB="$PROJECT_DIR/runs/pm_flow.db"
 TOPOLOGY_KEY="boundary-config"
 mkdir -p "$PROJECT_DIR/runs"
+mkdir -p "$PROJECT_DIR/sections"
+cp -R "$FIXTURES/project_export/." "$PROJECT_DIR/sections/"
 printf '%s\n' "$PROJECT_KEY" > "$FLOW/.project-key"
 printf '%s\n' '{"domain":"generic"}' > "$PROJECT_DIR/project.json"
 
@@ -195,6 +197,186 @@ run_case handoff handoff_over_budget.md REJECT word_count
 run_case handoff handoff_over_bytes.md REJECT byte_count
 run_case verdict verdict_valid.md ACCEPT "" "GO,GO_WITH_CHANGES,NO_GO"
 run_case verdict verdict_illegal_token.md REJECT Decision "GO,GO_WITH_CHANGES,NO_GO"
+run_case export project_export_illegal_state.json REJECT state
+
+export_fixture_case() {
+  local first_output="$TEST_ROOT/project-export-first.json"
+  local second_output="$TEST_ROOT/project-export-second.json"
+
+  zsh "$FLOW/pm_flow.sh" export --json > "$first_output" || \
+    fail "valid fixture project did not export"
+  zsh "$FLOW/pm_flow.sh" export --json > "$second_output" || \
+    fail "valid fixture project did not export a second time"
+  cmp -s "$first_output" "$second_output" || \
+    fail "project export changed between identical runs"
+
+  python3 - "$first_output" "$FIXTURES/project_export" \
+      "$FLOW/schemas/handoff.schema.json" \
+      "$FLOW/schemas/section_brief.schema.json" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+document = json.loads(Path(sys.argv[1]).read_text())
+fixtures = Path(sys.argv[2])
+handoff_schema = json.loads(Path(sys.argv[3]).read_text())
+brief_schema = json.loads(Path(sys.argv[4]).read_text())
+expected_states = {
+    "complete": {"A1": "met", "A2": "open"},
+    "freeform": {"A1": "met"},
+    "empty-dependencies": {},
+}
+
+def first_line(path):
+    lines = path.read_text().splitlines()
+    return lines[0].strip() if lines else ""
+
+def nonempty_lines(path):
+    return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+
+def markdown_sections(path):
+    sections = {}
+    current = None
+    content = []
+    for line in path.read_text().splitlines():
+        match = re.match(r"^#{1,6}\s+(.+?)\s*$", line)
+        if match:
+            if current is not None and current not in sections:
+                sections[current] = "\n".join(content).strip()
+            current = match.group(1).strip().casefold()
+            content = []
+        elif current is not None:
+            content.append(line)
+    if current is not None and current not in sections:
+        sections[current] = "\n".join(content).strip()
+    return sections
+
+acceptance_pattern = re.compile(
+    brief_schema["oneOf"][1]["properties"]["acceptance_ids"]["items"]["pattern"]
+)
+sections = {section["key"]: section for section in document["sections"]}
+expected_keys = sorted(path.name for path in fixtures.iterdir() if path.is_dir())
+assert document["project"] == "boundary-schema-project"
+assert sorted(sections) == expected_keys
+
+for key in expected_keys:
+    actual = sections[key]
+    source = fixtures / key
+    assert actual["name"] == first_line(source / "name.txt")
+    assert actual["status"] == first_line(source / "status.txt")
+    assert actual["priority"] == first_line(source / "priority.txt")
+    assert actual["summary"] == first_line(source / "summary.txt")
+    assert actual["updated_at"] == first_line(source / "updated_at.txt")
+    assert actual["owned_paths"] == nonempty_lines(source / "owned_paths.txt")
+    assert actual["dependencies"] == nonempty_lines(source / "dependency_handoffs.txt")
+
+    brief_sections = markdown_sections(source / "brief.md")
+    acceptance_lines = re.findall(
+        r"(?m)^\s*[-*]\s+(.*)$", brief_sections["acceptance"]
+    )
+    expected_ids = []
+    for line in acceptance_lines:
+        match = acceptance_pattern.match(line)
+        if match:
+            expected_ids.append(match.group(0).strip().strip("`:.—- "))
+    assert actual["acceptance"] == [
+        {"id": identifier, "state": expected_states[key][identifier]}
+        for identifier in expected_ids
+    ]
+
+    handoff_text = (source / "handoff.md").read_text()
+    handoff_sections = markdown_sections(source / "handoff.md")
+    expected_handoff = {
+        field: handoff_sections[handoff_schema["properties"][field]["title"].casefold()]
+        for field in handoff_schema["required"]
+        if "title" in handoff_schema["properties"][field]
+    }
+    shell_text = handoff_text.rstrip("\n") + "\n"
+    expected_handoff["word_count"] = len(shell_text.split())
+    expected_handoff["byte_count"] = len(
+        shell_text.encode("utf-8", errors="replace")
+    )
+    assert actual["handoff"] == expected_handoff
+
+assert sections["empty-dependencies"]["dependencies"] == []
+assert sections["freeform"]["acceptance"] == [{"id": "A1", "state": "met"}]
+print("project export: sections=3 stable=yes fields=fixture-matched")
+PY
+}
+
+corrupt_export_case() {
+  local engine_copy="$TEST_ROOT/corrupt-export"
+  local stdout_file="$TEST_ROOT/corrupt-export.stdout"
+  local stderr_file="$TEST_ROOT/corrupt-export.stderr"
+  local output
+  cp -R "$FLOW" "$engine_copy"
+  cp -R "$FIXTURES/project_export_invalid/." \
+    "$engine_copy/$PROJECT_KEY/sections/"
+
+  if zsh "$engine_copy/pm_flow.sh" export --json \
+      > "$stdout_file" 2> "$stderr_file"; then
+    fail "corrupt handoff export unexpectedly succeeded"
+  fi
+  [[ ! -s "$stdout_file" ]] || \
+    fail "corrupt handoff export wrote a partial JSON payload"
+  output="$(<"$stderr_file")"
+  [[ "$output" == *"corrupt-handoff"* ]] || \
+    fail "corrupt handoff rejection did not name its section: $output"
+  [[ "$output" == *"What is unproven"* ]] || \
+    fail "corrupt handoff rejection did not name its field: $output"
+  printf 'corrupt export: REJECT section=corrupt-handoff field=What-is-unproven stdout=empty\n'
+}
+
+missing_export_schema_case() {
+  local engine_copy="$TEST_ROOT/missing-export"
+  local schema_path="$engine_copy/schemas/project_export.schema.json"
+  local stdout_file="$TEST_ROOT/missing-export.stdout"
+  local stderr_file="$TEST_ROOT/missing-export.stderr"
+  local output
+  cp -R "$FLOW" "$engine_copy"
+  rm -- "$schema_path"
+
+  if zsh "$engine_copy/pm_flow.sh" export --json \
+      > "$stdout_file" 2> "$stderr_file"; then
+    fail "export without its schema unexpectedly succeeded"
+  fi
+  [[ ! -s "$stdout_file" ]] || \
+    fail "export without its schema wrote an unvalidated payload"
+  output="$(<"$stderr_file")"
+  [[ "$output" == *"cannot load export schema at $schema_path"* ]] || \
+    fail "missing export schema rejection was not loud: $output"
+  printf 'project_export.schema.json missing: export=REJECT stdout=empty\n'
+}
+
+handoff_title_mutation_case() {
+  local engine_copy="$TEST_ROOT/mutated-handoff-title"
+  local stdout_file="$TEST_ROOT/mutated-handoff-title.stdout"
+  local stderr_file="$TEST_ROOT/mutated-handoff-title.stderr"
+  cp -R "$FLOW" "$engine_copy"
+  python3 - "$engine_copy/schemas/handoff.schema.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+schema_path = Path(sys.argv[1])
+schema = json.loads(schema_path.read_text())
+schema["properties"]["unproven"]["title"] = "Renamed unproven heading"
+schema_path.write_text(json.dumps(schema, indent=2) + "\n")
+PY
+  if zsh "$engine_copy/pm_flow.sh" export --json \
+      > "$stdout_file" 2> "$stderr_file"; then
+    fail "export stayed green after mutating the handoff title definition"
+  fi
+  [[ ! -s "$stdout_file" ]] || \
+    fail "mutated handoff title export wrote a partial JSON payload"
+  printf 'handoff title mutation: export=REJECT stdout=empty\n'
+}
+
+export_fixture_case
+corrupt_export_case
+missing_export_schema_case
+handoff_title_mutation_case
 
 write_config_topology() {
   local flow="$1"

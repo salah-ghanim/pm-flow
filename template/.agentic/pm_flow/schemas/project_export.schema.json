@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project_export.schema.json",
+  "title": "pm-flow project export",
+  "type": "object",
+  "required": ["project", "sections"],
+  "properties": {
+    "project": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "status",
+          "priority",
+          "summary",
+          "updated_at",
+          "owned_paths",
+          "dependencies",
+          "acceptance",
+          "handoff"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "priority": {
+            "$ref": "section_brief.schema.json#/properties/priority"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "owned_paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          },
+          "acceptance": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "state"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "\\S"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": ["met", "open"]
+                }
+              }
+            }
+          },
+          "handoff": {
+            "$ref": "handoff.schema.json#"
+          }
+        }
+      }
+    }
+  }
+}

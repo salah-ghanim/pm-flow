@@ -1,0 +1,28 @@
+{
+  "project": "boundary-schema-project",
+  "sections": [
+    {
+      "key": "illegal-state",
+      "name": "Illegal state fixture",
+      "status": "blocked",
+      "priority": "must-have",
+      "summary": "This document has one illegal acceptance state.",
+      "updated_at": "2026-08-31T10:00:00Z",
+      "owned_paths": [],
+      "dependencies": [],
+      "acceptance": [
+        {"id": "A1", "state": "unknown"}
+      ],
+      "handoff": {
+        "outcome": "The state is invalid.",
+        "decisions": "Reject the document.",
+        "interfaces": "The export checker.",
+        "risks": "None.",
+        "unproven": "Nothing.",
+        "next_action": "Report the field.",
+        "word_count": 6,
+        "byte_count": 42
+      }
+    }
+  ]
+}
