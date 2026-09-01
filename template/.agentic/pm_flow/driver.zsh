@@ -3748,7 +3748,7 @@ cmd_portfolio_review() {
   [[ "$(project_next_action)" != "decompose" ]] || \
     fail "this project has no sections yet; decompose it before reviewing the portfolio"
   acquire_driver_lock
-  telemetry_begin_run "${PM_FLOW_COMMAND:-tick}"
+  telemetry_begin_run "${PM_FLOW_COMMAND:-portfolio-review}"
   run_portfolio_review
   printf 'spent_usd=%s\n' "$(spent_usd)"
   telemetry_end_run ok
@@ -3802,7 +3802,7 @@ $(cycle_history_files "$section_dir" "$(( cycles_before + 1 ))" "$(scope_history
     "CYCLE=$(printf '%03d' "$cycles_before")" \
     "CONTEXT_FILES=$context" > "$prompt"
 
-  telemetry_begin_run "${PM_FLOW_COMMAND:-tick}"
+  telemetry_begin_run "${PM_FLOW_COMMAND:-section-analysis}"
   dispatch_role pm "$prompt" "$analysis_dir/analysis.md" "" \
     "analysis $section_key" "$section_key"
   /bin/cp "$analysis_dir/analysis.md" "$section_dir/analysis/latest.md"
@@ -3878,7 +3878,7 @@ cmd_proposals() {
     printf 'and the one observation that would change your mind.\n'
   } > "$consultant_persona"
 
-  telemetry_begin_run "${PM_FLOW_COMMAND:-tick}"
+  telemetry_begin_run "${PM_FLOW_COMMAND:-proposals}"
   run_panel_seats "$panel_dir" "$consultant_persona"
 
   local panel_files
