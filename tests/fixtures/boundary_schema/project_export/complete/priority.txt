@@ -1,0 +1,2 @@
+must-have
+This fixture proves every exported field.

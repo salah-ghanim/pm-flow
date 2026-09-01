@@ -13,7 +13,12 @@ SCHEMA_NAMES = {
     "handoff": "handoff.schema.json",
     "verdict": "verdict.schema.json",
     "config": "config.schema.json",
+    "export": "project_export.schema.json",
 }
+
+
+class SchemaReferenceError(ValueError):
+    """A schema reference is invalid or cannot be loaded."""
 
 
 def _type_matches(value, expected):
@@ -32,22 +37,53 @@ def _type_matches(value, expected):
         raise ValueError(f"unsupported schema type {expected!r}") from error
 
 
-def validate_schema(payload, schema, path="$", root=None):
+def _resolve_reference(reference, root, schema_dir):
+    target, separator, fragment = reference.partition("#")
+    referenced_root = root
+    if target:
+        target_path = Path(target)
+        if target_path.is_absolute() or ".." in target_path.parts:
+            raise SchemaReferenceError(f"invalid schema reference {reference!r}")
+        schema_path = schema_dir / target_path
+        try:
+            referenced_root = json.loads(schema_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise SchemaReferenceError(
+                f"cannot load referenced schema at {schema_path}: {error}"
+            ) from error
+
+    if not separator or not fragment:
+        return referenced_root, referenced_root
+    if not fragment.startswith("/"):
+        raise SchemaReferenceError(f"unsupported schema reference {reference!r}")
+
+    resolved = referenced_root
+    try:
+        for raw_key in fragment[1:].split("/"):
+            key = raw_key.replace("~1", "/").replace("~0", "~")
+            if isinstance(resolved, list):
+                resolved = resolved[int(key)]
+            else:
+                resolved = resolved[key]
+    except (IndexError, KeyError, TypeError, ValueError) as error:
+        raise SchemaReferenceError(
+            f"unresolvable schema pointer {reference!r}"
+        ) from error
+    return resolved, referenced_root
+
+
+def validate_schema(payload, schema, path="$", root=None, schema_dir=None):
     """Validate the JSON Schema subset used by the boundary schemas."""
     root = schema if root is None else root
+    schema_dir = (
+        Path(__file__).resolve().parent / "schemas"
+        if schema_dir is None
+        else Path(schema_dir)
+    )
     try:
         reference = schema.get("$ref")
-        if isinstance(reference, str) and reference.startswith("#/"):
-            resolved = root
-            try:
-                for raw_key in reference[2:].split("/"):
-                    key = raw_key.replace("~1", "/").replace("~0", "~")
-                    resolved = resolved[key]
-            except (KeyError, TypeError) as error:
-                raise ValueError(
-                    f"unresolvable schema pointer {reference!r}"
-                ) from error
-            schema = resolved
+        if isinstance(reference, str):
+            schema, root = _resolve_reference(reference, root, schema_dir)
 
         expected_type = schema.get("type")
         if expected_type and not _type_matches(payload, expected_type):
@@ -68,12 +104,16 @@ def validate_schema(payload, schema, path="$", root=None):
                     raise ValueError(f"{path}.{label} is required")
             for key, child_schema in properties.items():
                 if key in payload:
-                    validate_schema(payload[key], child_schema, f"{path}.{key}", root)
+                    validate_schema(
+                        payload[key], child_schema, f"{path}.{key}", root, schema_dir
+                    )
             extra_schema = schema.get("additionalProperties")
             if isinstance(extra_schema, dict):
                 for key, value in payload.items():
                     if key not in properties:
-                        validate_schema(value, extra_schema, f"{path}.{key}", root)
+                        validate_schema(
+                            value, extra_schema, f"{path}.{key}", root, schema_dir
+                        )
 
         if isinstance(payload, list):
             if len(payload) < schema.get("minItems", 0):
@@ -83,7 +123,10 @@ def validate_schema(payload, schema, path="$", root=None):
             item_schema = schema.get("items")
             if item_schema:
                 for index, item in enumerate(payload):
-                    validate_schema(item, item_schema, f"{path}[{index}]", root)
+                    item_label = item.get("key", index) if isinstance(item, dict) else index
+                    validate_schema(
+                        item, item_schema, f"{path}[{item_label}]", root, schema_dir
+                    )
 
         if "maximum" in schema and payload > schema["maximum"]:
             raise ValueError(f"{path} must be at most {schema['maximum']}, got {payload}")
@@ -93,8 +136,10 @@ def validate_schema(payload, schema, path="$", root=None):
             errors = []
             for choice in schema["oneOf"]:
                 try:
-                    validate_schema(payload, choice, path, root)
+                    validate_schema(payload, choice, path, root, schema_dir)
                     matches += 1
+                except SchemaReferenceError:
+                    raise
                 except ValueError as error:
                     errors.append(str(error))
             if matches != 1:
@@ -280,6 +325,123 @@ def _load_schema(kind):
         raise ValueError(f"cannot load {kind} schema at {schema_path}: {error}") from error
 
 
+def _read_text(path, section_key, field):
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ValueError(
+            f"section {section_key}.{field} cannot be read at {path}: {error}"
+        ) from error
+
+
+def _first_line(path, section_key, field, default):
+    if not path.is_file():
+        return default
+    lines = _read_text(path, section_key, field).splitlines()
+    value = lines[0].strip() if lines else ""
+    return value or default
+
+
+def _nonempty_lines(path, section_key, field):
+    return [
+        line.strip()
+        for line in _read_text(path, section_key, field).splitlines()
+        if line.strip()
+    ]
+
+
+def _acceptance_pattern(schema):
+    for choice in schema.get("oneOf", []):
+        try:
+            return choice["properties"]["acceptance_ids"]["items"]["pattern"]
+        except KeyError:
+            continue
+    raise ValueError("brief schema has no acceptance ID pattern")
+
+
+def _bare_acceptance_id(value, pattern):
+    match = re.match(pattern, value)
+    if not match:
+        return None
+    return match.group(0).strip().strip("`:.—- ")
+
+
+def _acceptance_state(identifier, state_text):
+    sections, _ = _markdown_sections(state_text)
+    evidence = "\n".join(
+        body
+        for heading, body in sections.items()
+        if heading not in {"blockers", "next eligible task"}
+    )
+    return "met" if re.search(rf"(?<!\w){re.escape(identifier)}(?!\w)", evidence) else "open"
+
+
+def emit(flow_dir, project_key):
+    export_schema = _load_schema("export")
+    brief_schema = _load_schema("brief")
+    acceptance_pattern = _acceptance_pattern(brief_schema)
+    sections_dir = Path(flow_dir) / project_key / "sections"
+    try:
+        section_dirs = sorted(
+            path
+            for path in sections_dir.iterdir()
+            if path.is_dir() and not path.name.startswith(".")
+        )
+    except OSError as error:
+        raise ValueError(f"cannot read sections directory at {sections_dir}: {error}") from error
+
+    sections = []
+    for section_dir in section_dirs:
+        key = section_dir.name
+        brief = parse_brief(
+            _read_text(section_dir / "brief.md", key, "brief"), brief_schema
+        )
+        validate_schema(brief, brief_schema, f"section {key}.brief")
+        acceptance_ids = []
+        for value in brief["acceptance_ids"]:
+            identifier = _bare_acceptance_id(value, acceptance_pattern)
+            if identifier is not None:
+                acceptance_ids.append(identifier)
+        state_text = _read_text(section_dir / "state.md", key, "state")
+        handoff = parse_handoff(
+            _read_text(section_dir / "handoff.md", key, "handoff")
+        )
+        sections.append(
+            {
+                "key": key,
+                "name": _first_line(section_dir / "name.txt", key, "name", key),
+                "status": _first_line(section_dir / "status.txt", key, "status", "unknown"),
+                "priority": _first_line(
+                    section_dir / "priority.txt", key, "priority", "must-have"
+                ),
+                "summary": _first_line(
+                    section_dir / "summary.txt",
+                    key,
+                    "summary",
+                    "No bounded handoff yet.",
+                ),
+                "updated_at": _first_line(
+                    section_dir / "updated_at.txt", key, "updated_at", "unknown"
+                ),
+                "owned_paths": _nonempty_lines(
+                    section_dir / "owned_paths.txt", key, "owned_paths"
+                ),
+                "dependencies": _nonempty_lines(
+                    section_dir / "dependency_handoffs.txt", key, "dependencies"
+                ),
+                "acceptance": [
+                    {"id": identifier, "state": _acceptance_state(identifier, state_text)}
+                    for identifier in acceptance_ids
+                ],
+                "handoff": handoff,
+            }
+        )
+
+    payload = {"project": project_key, "sections": sections}
+    validate_schema(payload, export_schema, "export")
+    return payload
+
+
 def check(kind, path, allowed_csv=None):
     schema = _load_schema(kind)
     source = Path(path)
@@ -318,6 +480,10 @@ def _build_parser():
     verdict = subparsers.add_parser("verdict", help="parse a markdown verdict from stdin")
     verdict.add_argument("--allowed", required=True, help="comma-separated verdict tokens")
     verdict.add_argument("--heading", default="Decision")
+    emitter = subparsers.add_parser("emit", help="emit a validated project export")
+    emitter.add_argument("--json", action="store_true", required=True)
+    emitter.add_argument("flow_dir")
+    emitter.add_argument("project_key")
     return parser
 
 
@@ -341,6 +507,14 @@ def main(argv=None):
             return 1
         print(parsed["token"])
         print(parsed["value_line"])
+        return 0
+    if args.command == "emit":
+        try:
+            payload = emit(args.flow_dir, args.project_key)
+        except (ValueError, TypeError, KeyError) as error:
+            print(f"export failed: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
     return 2
 

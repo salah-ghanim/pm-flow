@@ -45,6 +45,7 @@ Usage:
   pm_flow.sh [--project <name>] access [--all]
   pm_flow.sh [--project <name>] trace export [--otlp <url>|--file <path>] [--header k=v]
   pm_flow.sh [--project <name>] trace status
+  pm_flow.sh [--project <name>] export --json
   pm_flow.sh [--project <name>] [--section <name>] tick
   pm_flow.sh [--project <name>] [--section <name>] run [--max-ticks <n>]
   pm_flow.sh [--project <name>] run-detach {start [--max-ticks <n>] [--section <name>]|stop|status}
@@ -2026,6 +2027,10 @@ main() {
     trace)
       shift || true
       python3 "$SCRIPT_DIR/trace_export.py" --db "$(telemetry_store_file)" "$@"
+      ;;
+    export)
+      shift || true
+      python3 "$SCRIPT_DIR/export.py" emit "$@" "$FLOW_DIR" "$PROJECT_KEY"
       ;;
     access)
       shift || true
