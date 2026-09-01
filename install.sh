@@ -59,6 +59,7 @@ COPIED_ENGINE_FILES=(
   telemetry.py
   topology.py
   trace_export.py
+  export.py
   prompt_quality.py
   watch.py
   upgrade.py
@@ -81,6 +82,7 @@ COPIED_ENGINE_DIRS=(
   __pycache__
   .pm-flow
   cards
+  schemas
 )
 
 usage() {
@@ -326,25 +328,51 @@ PY_MIGRATE
 # personas and inside a workspace is the repository's own overlay - the one
 # thing customisation now depends on.
 #
-# A workspace is recognised by its key rather than by its shape. `project/` is
-# the packaged scaffold and holds a project.json, a task_contract.md and a
-# project_state/ exactly as a real workspace does, so nothing structural tells
-# the two apart; what does is that a real workspace is one the repository has
-# named, in .project-key or in projects.md.
+# A persisted selector or registry is authoritative when one exists. Older
+# multi-workspace installs can predate both, though, so in that one case the
+# structural workspace scan shared with project-key resolution is the only
+# record of which directories belong to the repository.
+discover_project_workspaces() {
+  local flow_dir="$1"
+  [[ -d "$flow_dir" ]] || return 0
+
+  local candidate
+  for candidate in "$flow_dir"/*(/N); do
+    if [[ -f "$candidate/task_contract.md" && -d "$candidate/project_state" ]]; then
+      printf '%s\n' "$(basename "$candidate")"
+    fi
+  done
+}
+
 remove_copied_engine() {
   local flow_dir="$1"
   local selected_key="$2"
   [[ -d "$flow_dir" ]] || return 0
 
   local -a project_keys
+  local repository_named_projects=0
   project_keys=("$selected_key")
   if [[ -f "$flow_dir/.project-key" ]]; then
-    project_keys+=("$(/usr/bin/head -n 1 "$flow_dir/.project-key" | tr -d '\r')")
+    local persisted
+    persisted="$(/usr/bin/head -n 1 "$flow_dir/.project-key" | tr -d '\r')"
+    if [[ -n "$persisted" ]]; then
+      project_keys+=("$persisted")
+      repository_named_projects=1
+    fi
   fi
   if [[ -f "$flow_dir/projects.md" ]]; then
     local listed
     for listed in ${(f)"$(sed -n 's/^- `\([^`]*\)`.*/\1/p' "$flow_dir/projects.md")"}; do
-      [[ -n "$listed" ]] && project_keys+=("$listed")
+      if [[ -n "$listed" ]]; then
+        project_keys+=("$listed")
+        repository_named_projects=1
+      fi
+    done
+  fi
+  if (( repository_named_projects == 0 )); then
+    local discovered
+    for discovered in ${(f)"$(discover_project_workspaces "$flow_dir")"}; do
+      [[ -n "$discovered" ]] && project_keys+=("$discovered")
     done
   fi
 
@@ -446,13 +474,7 @@ resolve_install_project_key() {
   fi
 
   if [[ -d "$flow_dir" ]]; then
-    local candidates=()
-    local candidate
-    for candidate in "$flow_dir"/*(/N); do
-      if [[ -f "$candidate/task_contract.md" && -d "$candidate/project_state" ]]; then
-        candidates+=("$(basename "$candidate")")
-      fi
-    done
+    local candidates=("${(@f)$(discover_project_workspaces "$flow_dir")}")
     if [[ "${#candidates[@]}" == "1" ]]; then
       printf '%s\n' "$candidates[1]"
       return
@@ -807,9 +829,16 @@ except Exception:
   touch "$project_dir/sections/.gitkeep"
   write_project_key "$flow_dir/.project-key" "$project_key"
 
-  if ! grep -q -- "- \`$project_key\`" "$flow_dir/projects.md"; then
-    printf -- '- `%s` - installed project workspace for %s\n' "$project_key" "$project_name" >> "$flow_dir/projects.md"
-  fi
+  local -a registry_keys
+  registry_keys=("$project_key" "${(@f)$(discover_project_workspaces "$flow_dir")}")
+  local registry_key
+  for registry_key in "${registry_keys[@]}"; do
+    [[ -n "$registry_key" ]] || continue
+    if ! grep -q -- "- \`$registry_key\`" "$flow_dir/projects.md"; then
+      printf -- '- `%s` - installed project workspace for %s\n' \
+        "$registry_key" "$project_name" >> "$flow_dir/projects.md"
+    fi
+  done
 
   printf 'installed_pm_flow=%s\n' "$flow_dir"
   printf 'project_name=%s\n' "$project_name"
