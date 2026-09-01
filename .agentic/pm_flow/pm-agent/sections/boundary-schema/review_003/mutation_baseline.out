@@ -1,0 +1,19 @@
+brief_valid.md: checker=ACCEPT shell=ACCEPT
+brief_missing_scope.md: checker=REJECT shell=REJECT
+brief_acceptance_missing_id.md: checker=REJECT shell=REJECT
+brief_priority_missing_loss.md: checker=REJECT shell=REJECT
+brief_priority_unknown.md: checker=REJECT shell=REJECT
+handoff_valid.md: checker=ACCEPT shell=ACCEPT
+handoff_missing_unproven.md: checker=REJECT shell=REJECT
+handoff_over_budget.md: checker=REJECT shell=REJECT
+handoff_over_bytes.md: checker=REJECT shell=REJECT
+verdict_valid.md: checker=ACCEPT shell=ACCEPT
+verdict_illegal_token.md: checker=REJECT shell=REJECT
+config_valid.json: pm-flow=ACCEPT topology=ACCEPT agent-exec=ACCEPT
+config_valid.json: store-clis=claude,codex,copilot topology-exit=0
+config_unknown_cli.json: pm-flow=REJECT topology=REJECT agent-exec=REJECT
+config.schema.json missing: pm-flow=REJECT topology=REJECT agent-exec=REJECT
+section_brief.schema.json missing: shell=REJECT error=ERROR: cannot load section brief schema at /private/var/folders/9x/9xzxgmhn75q66kr2x3n691hw0000gn/T/boundary-schema-test.9RXE35/missing-brief/schemas/section_brief.schema.json: [Errno 2] No such file or directory: '/private/var/folders/9x/9xzxgmhn75q66kr2x3n691hw0000gn/T/boundary-schema-test.9RXE35/missing-brief/schemas/section_brief.schema.json'
+handoff.schema.json missing: shell=REJECT error=ERROR: cannot load handoff schema at /private/var/folders/9x/9xzxgmhn75q66kr2x3n691hw0000gn/T/boundary-schema-test.9RXE35/missing-handoff/schemas/handoff.schema.json: [Errno 2] No such file or directory: '/private/var/folders/9x/9xzxgmhn75q66kr2x3n691hw0000gn/T/boundary-schema-test.9RXE35/missing-handoff/schemas/handoff.schema.json'
+driver verdict token sets: 12 literals use 9 schema-defined sets
+boundary schema tests passed

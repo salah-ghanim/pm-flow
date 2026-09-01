@@ -1,0 +1,15 @@
+PASS: codex token accounting against a real event stream
+PASS: per-dispatch access observation
+PASS: dependency scheduling and blocked sections
+PASS: headless driver, escalation, and parallel rescue
+WARNING: section alpha brief: owned path does not exist in the working tree: src/alpha.txt
+WARNING: section beta brief: owned path does not exist in the working tree: src/beta.txt
+WARNING: section gamma brief: owned path does not exist in the working tree: src/gamma.txt
+PASS: per-section git worktrees, merge-back, and cleanup
+WARNING: section delta brief: owned path does not exist in the working tree: src/delta.txt
+WARNING: section epsilon brief: owned path does not exist in the working tree: src/epsilon.txt
+PASS: concurrent section runs, serialised merges, and lock exclusion
+PASS: product decomposition and a full headless project run
+PASS: section-scoped PM flow
+PASS: role personas, agent dispatch, and supervision
+PASS: independent consultant panel and CPO adjudication

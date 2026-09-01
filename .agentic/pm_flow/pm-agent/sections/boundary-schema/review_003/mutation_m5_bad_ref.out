@@ -1,0 +1,1 @@
+config check failed: config.roles.developer does not match exactly one allowed shape: unresolvable schema pointer '#/$defs/nosuch'; config.roles.developer must be of type array

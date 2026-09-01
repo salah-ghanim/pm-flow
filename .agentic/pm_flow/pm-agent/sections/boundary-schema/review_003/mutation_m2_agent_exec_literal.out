@@ -1,0 +1,12 @@
+brief_valid.md: checker=ACCEPT shell=ACCEPT
+brief_missing_scope.md: checker=REJECT shell=REJECT
+brief_acceptance_missing_id.md: checker=REJECT shell=REJECT
+brief_priority_missing_loss.md: checker=REJECT shell=REJECT
+brief_priority_unknown.md: checker=REJECT shell=REJECT
+handoff_valid.md: checker=ACCEPT shell=ACCEPT
+handoff_missing_unproven.md: checker=REJECT shell=REJECT
+handoff_over_budget.md: checker=REJECT shell=REJECT
+handoff_over_bytes.md: checker=REJECT shell=REJECT
+verdict_valid.md: checker=ACCEPT shell=ACCEPT
+verdict_illegal_token.md: checker=REJECT shell=REJECT
+FAIL: config_valid.json agent-exec verdict: expected 'ACCEPT', got 'REJECT'

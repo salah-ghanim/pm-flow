@@ -1,0 +1,33 @@
+PASS: sandbox capability yields enforceable=true for write
+PASS: ACP token usage is normalised and context occupancy is ignored
+PASS: sandbox capability yields enforceable=true for scoped
+PASS: sandbox capability yields enforceable=true for read
+PASS: no sandbox capability yields enforceable=false for write
+PASS: no sandbox capability yields enforceable=false for scoped
+PASS: no sandbox capability yields enforceable=false for read
+PASS: permission requests follow the access tier and option kind
+PASS: malformed protocol frames have an explicit reason
+PASS: child exit has an explicit recoverable reason
+PASS: an unwritable ACP access log fails closed with an explicit reason
+PASS: cancellation notifies and reaps the child
+PASS: ACP client runs as module and bare file
+PASS: agent binding scenarios use an isolated wheel install
+PASS: ACP developer completes a public driver cycle to GO
+PASS: enforced ACP access is recorded before work
+PASS: cost distinguishes ACP and claude transports
+PASS: cost preserves ACP and nested claude token counts
+role=developer
+cli=acp
+response=/var/folders/9x/9xzxgmhn75q66kr2x3n691hw0000gn/T//pm-flow-agent-bindings.kvw6NR/prompt-level-response.json
+attempts=1
+PASS: prompt-level ACP access is recorded before work and still dispatches
+PASS: an empty ACP usage block is omitted from the response envelope
+PASS: ACP failures use the dedicated retry mapping
+PASS: an ACP access-log fault is permanent and is not retried
+PASS: agent bindings ACP suite
+PASS: MCP client has no shell or state-reading escape hatch
+PASS: MCP tick reports the driver lock as a tool error without advancing
+PASS: MCP tick reports budget exhaustion as a tool error without dispatching
+PASS: MCP lists exactly five tools and drives a section to done
+PASS: MCP targets one named section and leaves the other unchanged
+PASS: agent bindings MCP suite

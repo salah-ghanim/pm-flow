@@ -98,7 +98,7 @@
 
 ## Task T3 — One cli definition across the three config consumers
 
-- Status: pending
+- Status: done (cycle 003, GO)
 - Outcome: `config.schema.json` is the only place the cli and difficulty enums are
   written. A role bound to cli `acp` passes `pm-flow config`, `topology.py`'s binding
   check and `agent_exec.sh`'s guard; a cli outside the enum fails all three with a
@@ -109,11 +109,25 @@
   `tests/fixtures/boundary_schema/**`.
 - Reuse: the existing guards at `pm_flow.sh:539`, `topology.py:158`,
   `agent_exec.sh:199`; `copilot`'s empty `FALLBACK_MODELS` entry as the precedent for
-  a cli with an unconstrained model list.
+  a cli with an unconstrained model list; the schema-reading inline python blocks
+  already in `pm_flow.sh` (`:1092-1119`, `:1424-1449`) for the load-or-fail shape.
 - Acceptance IDs: A4, A5.
 - Validation: `zsh tests/boundary_schema_test.sh` exits 0; `zsh tests/topology_compare_test.sh`
   and `zsh tests/agent_bindings_test.sh` exit 0.
 - Depends on: T1.
+- Two facts observed at cycle 003 scoping that change what this task must do:
+  1. `config.schema.json` writes the cli and difficulty enums **twice** — once in the
+     single-binding arm (`:29`) and once in the panel arm (`:41`). "One definition"
+     is not reached by pointing three consumers at a file that contradicts itself
+     twice over; the seat shape has to be hoisted into `$defs` and referenced, which
+     means `validate_schema` needs minimal `$ref` support.
+  2. `topology.py` conflates two different questions in `cli not in registry`
+     (`:193`). `model_registry` prefers the store's `clis` table over
+     `FALLBACK_MODELS` (`:83`), and that table is seeded by `catalog.py:227`, which
+     is owned by `persona-packs` and lists no `acp`. Adding `acp` to
+     `FALLBACK_MODELS` alone therefore leaves an `acp` seat rejected on any flow with
+     a store — including this one. Legality of a cli comes from the schema enum;
+     the registry only constrains models, looked up with `registry.get(cli, [])`.
 
 ## Integration and end-to-end validation
 
