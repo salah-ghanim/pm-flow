@@ -776,6 +776,30 @@ def cmd_outcome(args):
              task_id, args.attempt, args.metric, args.num, args.text,
              args.source, store.now()),
         )
+
+    evaluation_lookup = getattr(SEMCONV, "evaluation_event", None)
+    evaluation = evaluation_lookup() if evaluation_lookup is not None else None
+    if (args.attempt is None or args.source != "verdict" or
+            args.text is None or evaluation is None):
+        return 0
+
+    attempt_row = connection.execute(
+        "SELECT span_id FROM attempts WHERE id = ?", (args.attempt,)
+    ).fetchone()
+    if attempt_row is None or not attempt_row["span_id"]:
+        return 0
+
+    attributes = {
+        evaluation["evaluation_name"]: args.metric,
+        evaluation["score_label"]: args.text,
+    }
+    with connection:
+        connection.execute(
+            "INSERT INTO span_events (span_id, at, name, attributes)"
+            " VALUES (?, ?, ?, ?)",
+            (attempt_row["span_id"], store.now(), evaluation["event_name"],
+             store.dumps(attributes)),
+        )
     return 0
 
 
