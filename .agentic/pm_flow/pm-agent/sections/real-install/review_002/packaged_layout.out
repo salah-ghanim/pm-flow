@@ -1,0 +1,13 @@
+PASS: a fixture repository that holds project data and no engine
+PASS: the installed command runs the packaged engine
+PASS: project data is read from the invoked repository
+PASS: the default persona and domain come from the installed package
+PASS: missing project data fails against the repository, not the package
+PASS: an installed dispatch composes base, domain and local layers and records them
+PASS: packaged layout, engine from the venv and data from the repository
+PASS: a fresh repository holds project data only, and the installed command drives it
+PASS: a copied-engine repository migrates losslessly and keeps running
+PASS: initialisation and migration leave the installed package untouched
+PASS: two repositories run independently pinned versions and drive their own projects
+PASS: upgrading one repository changes its version, not its data and not the other repository
+PASS: the documented workflow runs through the installed command, and no manifest machinery remains

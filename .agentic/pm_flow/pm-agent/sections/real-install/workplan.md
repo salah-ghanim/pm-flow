@@ -81,11 +81,15 @@ doc, never by reading `cost.py`'s own answer back.
 
 ## Task T2 — the migrated install drives a tick and its legacy TSVs import
 
-- Status: pending
-- Outcome: the same suite continues past migration: the venv's `pm-flow`
-  drives one tick in the migrated fixture, and for each fixture workspace
+- Status: done (cycle 002; the carried empty-key fix landed, cost parity and the
+  installed tick are asserted, and the copied-engine expectation is now read out
+  of `install.sh`. The `cost.py` empty-`response_path` drop was probed read-only
+  and confirmed — escalated, not fixed here; see `state.md`.)
+- Outcome: the same suite continues past migration: for each fixture workspace
   `cost.py import` then `cost.py total` matches arithmetic computed from the
-  TSV bytes, with a re-run printing `imported=0`.
+  TSV bytes with a re-run printing `imported=0`, and afterwards the venv's
+  `pm-flow` drives one tick in the migrated fixture that leaves every
+  `cost_ledger.tsv` byte-identical.
 - Paths: `tests/real_install_test.sh`, `tests/fixtures/real_install/**`,
   `install.sh` (only if the tick forces it, plus the T1 follow-up below).
 - Carried from T1 (must land in this cycle): `resolve_install_project_key`'s
@@ -96,12 +100,23 @@ doc, never by reading `cost.py`'s own answer back.
   and `.project-key` is written blank, after which the next install fails with
   `invalid persisted project key`. Filter the empty element and pin the case
   with an assertion in the suite.
+- Order is forced, not stylistic: `cost.py total` calls `import_legacy` itself
+  (`cost.py:275`) and `import_legacy` ingests response envelopes as well as TSV
+  rows (`cost.py:195-203`). A tick writes envelopes, so the parity block must
+  run *before* the tick or the `imported=0` re-run claim is false for reasons
+  that have nothing to do with the TSVs.
+- The tick doubles as the completion-criterion probe: no engine path writes
+  `cost_ledger.tsv` any more (grepped `driver.zsh`, `pm_flow.sh`,
+  `agent_exec.sh` — no hit), so "the host repository absorbs no per-dispatch
+  writes" is checkable here by digesting the TSVs across the tick.
 - Reuse: the packaged suite's installed-tick block
-  (`tests/packaged_layout_test.sh:448-650`) for how a tick is driven through
-  the venv entry point with a stubbed child; `pm_flow/engine/cost.py` in the
-  installed package, located as `trace_commands_test.sh:705-716` locates
-  `trace_export.py`.
-- Acceptance IDs: A1 (installed-tick half; completes A1).
+  (`tests/packaged_layout_test.sh:483-534`) for the deterministic stubbed child
+  and the `PATH`-injected `claude`; its minimal dispatchable section shape
+  (296-325), which the fixture workspaces already match;
+  `pm_flow/engine/cost.py` in the installed package, located as
+  `trace_commands_test.sh:709-716` locates `trace_export.py`.
+- Acceptance IDs: A1 (installed-tick half; completes A1), plus the fixture half
+  of the arithmetic method A4 later applies to golden-grid.
 - Validation: `zsh tests/real_install_test.sh` exits 0 and its output names the
   ticked section and one `imported=` line per fixture workspace;
   `zsh tests/packaged_layout_test.sh` still 13 PASS.
@@ -181,8 +196,15 @@ doc, never by reading `cost.py`'s own answer back.
   ledger rows with an empty response field collapse to the single key `""` and
   all but the first are dropped — a plausible shape in a legacy TSV, and it
   would make A4's independent arithmetic disagree. `template/.agentic/pm_flow/
-  cost.py` is not an owned path: if T2 reproduces this, record the figures and
-  escalate through `handoff.md` rather than editing it.
+  cost.py` is not an owned path: T2 probes it read-only against a throwaway
+  workspace and records the figures; if the drop is real it is escalated
+  through `handoff.md` and the fixture keeps distinct response paths, so the
+  suite still exits 0 and the hazard is known before T5 meets real TSVs.
+- The suite hardcodes its own `COPIED_ENGINE_FILES` list
+  (`tests/real_install_test.sh:260-265`). It matches `install.sh` today, but the
+  next engine file added to `template/` would be missed by both lists at once
+  and silently left behind by every migration. T2 derives the expectation from
+  `install.sh`'s own arrays instead of restating them.
 - An `install.sh` fix that widens what counts as a named workspace could stop
   removing a genuine copied `roles/`. Guard: T1 asserts both directions on the
   same fixture — the workspace survives, the flow-level packaged copy goes.

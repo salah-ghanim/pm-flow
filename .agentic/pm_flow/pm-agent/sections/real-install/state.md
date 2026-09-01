@@ -2,12 +2,49 @@
 
 ## Current task
 
-- T2 — the migrated install drives a tick and its legacy TSVs import. T1 was
-  accepted in cycle 001 with one carried change (below).
+- T3 — golden-grid migrated, with the run recorded. T1 and T2 are accepted; A1
+  is complete. T3 cannot start until golden-grid is reachable (see Blockers).
 
 ## Completed tasks and evidence
 
-- T1 (A1, migration half) — accepted cycle 001.
+- T2 (A1, installed-tick half — A1 complete; fixes the arithmetic method A4
+  later applies to golden-grid) — accepted cycle 002.
+  - `zsh /Users/salah/code/personal/.pm-flow-worktrees/pm-flow/pm-agent/real-install/tests/real_install_test.sh`
+    exits 0 with nine PASS lines, adding to T1's three: the workspace-less flow
+    defaults to its repository basename and reinstalls; `workspace=<key>
+    imported=3 reimported=0 total=7.5000` for each of alpha, beta, gamma,
+    project; and `installed tick section=beta-section action=scope -> ASSIGN;
+    TSVs unchanged; completed pm attempt stored`.
+  - `zsh …/tests/packaged_layout_test.sh` exits 0 with 13 PASS.
+  - The carried empty-key defect is fixed by one line, `install.sh:478`
+    (`candidates=("${(@)candidates:#}")`). Mutation check
+    (`sections/real-install/probe_mutate_002.zsh`, mutation A): with that single
+    line deleted from a throwaway copy of the tree, the suite fails at
+    `a workspace-less flow uses the repository basename as its key: expected
+    'empty-workspace', got ''`. The assertion is load-bearing, and the fix is a
+    filter rather than a revert of what T1 widened — all four fixture
+    workspaces still survive and `packaged_layout_test.sh` is still 13 PASS.
+  - The cost total is computed from the TSV bytes, not copied from `cost.py`.
+    Mutation B: changing the fixture's first ledger amount from `1.250000` to
+    `9.000000` in the copy makes every workspace print `total=15.2500` and the
+    suite still exits 0 — expected and actual moved together.
+  - The tick reaches the migrated data through the installed engine. Mutation C:
+    renaming the fixture's workspace overlay marker makes the suite fail at
+    `the installed engine reads the migrated workspace's pm overlay: expected to
+    find 'Beta workspace role marker'`, so the marker really arrives from
+    `beta/roles/pm.md` and not from a packaged default.
+  - The copied-engine expectation is read out of `install.sh` by
+    `install_array_names`, which parses the `COPIED_ENGINE_FILES` /
+    `COPIED_ENGINE_DIRS` array bodies. Verified independently: it yields all 22
+    file names and all 10 dir names, `roles domains tasks topologies project
+    tests __pycache__ .pm-flow cards schemas` — three more dirs than the list it
+    replaced. Workspace keys are skipped in the dirs loop, which is what lets
+    the fixture's real `project` workspace collide with the scaffold name.
+
+- T1 (A1, migration half) — accepted cycle 001, now merged to `main`:
+  `tests/real_install_test.sh` and `tests/fixtures/real_install/build_fixture.sh`
+  exist in the checkout and `install.sh:335` defines `discover_project_workspaces`
+  with callers at 374, 477 and 833.
   - `zsh /Users/salah/code/personal/.pm-flow-worktrees/pm-flow/pm-agent/real-install/tests/real_install_test.sh`
     exits 0 with three PASS lines: the fixture has four unnamed legacy
     workspaces and a copied engine; the no-key path names every discovered
@@ -30,17 +67,28 @@
 
 ## Carried defects
 
-- `install.sh:477` — `local candidates=("${(@f)$(discover_project_workspaces
-  "$flow_dir")}")` expands empty output to one empty element, so a flow
-  directory that exists with no workspace resolves to an empty project key
-  where the pre-change code fell through to the repo-basename default.
-  Observed (`sections/real-install/probe_empty_followup.zsh`): a repository
-  holding only `.agentic/pm_flow/config.json` installs with `project_key=`,
-  `task_contract.md` / `project_state/` / `runs/` / `sections/` written at the
-  flow root, a `.project-key` containing one newline, and the second install of
-  the same repository exiting 1 with `ERROR: invalid persisted project key`.
-  The same probe against `main`'s `install.sh` yields `project_key=old-empty`
-  and a proper workspace directory. Assigned into T2.
+Both defects carried out of T1 — the empty project key at `install.sh:477` and
+the suite's restated `COPIED_ENGINE_FILES` list — were fixed and pinned in
+cycle 002; evidence above. One new defect, in an unowned file, replaces them.
+
+- `cost.py` drops legacy ledger rows whose response field is empty, and this is
+  now confirmed, not suspected. `import_legacy` dedupes on `response_path`
+  against a set seeded from the store (`cost.py:176-193`), and an empty field is
+  a key like any other, so the first empty-response row is inserted and every
+  later one is skipped. Observed
+  (`sections/real-install/probe_empty_response_002.zsh`, read-only, against a
+  throwaway workspace): a two-row TSV with empty response fields costing
+  1.000000 and 2.000000 prints `imported=1`, and `cost.py total` prints
+  `1.0000` where the TSV sums to 3.0000. Money silently disappears; nothing
+  reports a discrepancy.
+  - Not fixed here: `template/.agentic/pm_flow/cost.py` is not an owned path,
+    and the fixture's TSVs carry distinct response paths, so the suite is
+    honest and green either way.
+  - Consequence for this section: A4's independent arithmetic will disagree with
+    `cost.py total` on any golden-grid workspace whose legacy TSV has more than
+    one empty-response row. This must be escalated through `handoff.md` and
+    settled before T5, and golden-grid's real TSVs should be scanned for empty
+    response fields as part of T3's survey rather than discovered at T5.
 
 ## Active decisions
 
@@ -61,6 +109,14 @@
 - Independent arithmetic for A4 is computed from the TSV bytes by a formula
   written down in `docs/real-install.md`, never by reading `cost.py`'s own
   output back. Copying the tool's figure is a stated rejection condition.
+- The cost-parity block runs before the tick, not after. `cost.py total` calls
+  `import_legacy` itself (`cost.py:275`) and that function ingests response
+  envelopes alongside TSV rows (`cost.py:195-203`), so a tick's envelope would
+  make the `imported=0` re-run false for a reason unrelated to the TSVs.
+- No engine path writes `cost_ledger.tsv` any more — grepped `driver.zsh`,
+  `pm_flow.sh` and `agent_exec.sh` this cycle, no hit. The brief's "the host
+  repository absorbs no per-dispatch writes" is therefore a live assertion the
+  fixture tick can make, by digesting the TSVs across it.
 
 ## Blockers
 
@@ -81,4 +137,8 @@
 
 ## Next eligible task
 
-- T2 on the same suite, carrying the empty-key fix above.
+- T3 — golden-grid migrated, with the run recorded. Not dispatchable from this
+  role's sandbox until the driver grants `/Users/salah/code/personal/golden-grid`
+  via `DISPATCH_EXTRA_DIRS` (`driver.zsh:2539-2557`) or the operator runs the T3
+  runbook and its output is committed. T3's survey must also record which
+  golden-grid ledgers carry empty response fields (see Carried defects).

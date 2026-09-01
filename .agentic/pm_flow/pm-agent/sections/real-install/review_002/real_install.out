@@ -1,0 +1,9 @@
+PASS: workspace-less flow defaults to its repository basename and reinstalls
+PASS: fixture has four unnamed legacy workspaces and copied engine data
+PASS: migration without a key names every discovered workspace
+PASS: workspace=alpha imported=3 reimported=0 total=7.5000
+PASS: workspace=beta imported=3 reimported=0 total=7.5000
+PASS: workspace=gamma imported=3 reimported=0 total=7.5000
+PASS: workspace=project imported=3 reimported=0 total=7.5000
+PASS: all workspaces survive migration, are registered, and the installed command reads them
+PASS: installed tick section=beta-section action=scope -> ASSIGN; TSVs unchanged; completed pm attempt stored
