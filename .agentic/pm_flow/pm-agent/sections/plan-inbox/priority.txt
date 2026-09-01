@@ -1,0 +1,2 @@
+must-have
+the plan's completion criterion "a plan-level request made while a run holds the driver lock is queued and applied at the next safe point, never refused and lost" cannot be met without it.

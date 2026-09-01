@@ -1,0 +1,112 @@
+{
+  "is_error": false,
+  "duration_api_ms": 149807,
+  "num_turns": 10,
+  "stop_reason": "end_turn",
+  "session_id": "81db6124-48cc-433f-8551-58356f1fba4f",
+  "total_cost_usd": 1.3578169999999998,
+  "usage": {
+    "input_tokens": 8,
+    "cache_creation_input_tokens": 32525,
+    "cache_read_input_tokens": 120881,
+    "output_tokens": 11673,
+    "output_tokens_details": {
+      "thinking_tokens": 7407
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 32525,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 8599,
+        "cache_read_input_tokens": 44241,
+        "cache_creation_input_tokens": 4322,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 4322
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 2641,
+      "outputTokens": 13,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.002706,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty"
+    },
+    "claude-fable-5": {
+      "inputTokens": 8,
+      "outputTokens": 11673,
+      "cacheReadInputTokens": 120881,
+      "cacheCreationInputTokens": 32525,
+      "webSearchRequests": 0,
+      "costUSD": 1.355111,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "canonicalModel": "claude-fable-5",
+      "provider": "firstParty"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "## Assessment\n\nThe request asks for a durable queue so a plan-level `init-section` issued while the driver holds the lock is applied at the next tick boundary instead of refused. It serves the plan's completion criterion verbatim: \"A plan-level request made while a run holds the driver lock is queued and applied at the next safe point, never refused and lost\" (`plan.md:75-76`, added by the owner in commit `01ea0da`).\n\nProbes run:\n\n- `grep -rn -i inbox template/.agentic/pm_flow tests` \u2014 no matches; nothing on `main` queues anything.\n- `grep -n \"already running\" template/.agentic/pm_flow/pm_flow.sh` \u2014 the refusal the owner hit is real, at `pm_flow.sh:890`.\n- `grep -n init_section pm_flow.sh driver.zsh` \u2014 `cmd_init_section` at `pm_flow.sh:1665` (dispatch arm `:1990`); the officer-mediated request\u2192proposal path already exists at `driver.zsh:3632-3704`; the project-before-section preemption point is `project_next_action` (`driver.zsh:2976-2990`), consumed by `cmd_tick` (`:2784`) and the run loop (`:2867`) \u2014 today it returns only `decompose` and `portfolio-review`. `pm-flow status` (`driver.zsh:2960-2964`) shows portfolio state, no queued requests.\n- `sections.md` \u2014 no live or cancelled section covers queueing. But the two files the capability must edit are live-owned: `pm_flow.sh` by boundary-schema, `driver.zsh` by outcome-record. Their briefs confirm neither will build an inbox. So this section is real, uncovered, and held behind both.\n\n## Section: plan-inbox\n\n### Objective\n- A plan-level request made while the driver lock is held is queued as a durable file and applied through the existing officer-mediated proposal path at the next tick boundary, never refused and lost.\n\n### Current baseline\n- `pm-flow init-section` under a held lock fails outright: `template/.agentic/pm_flow/pm_flow.sh:890` (\"another pm_flow driver is already running\").\n- `cmd_init_section` (`pm_flow.sh:1665`) and the officer-mediated request\u2192proposal path (`driver.zsh:3632-3704`) exist and work when the lock is free.\n- `project_next_action` (`driver.zsh:2976-2990`) already runs project work before section work, but knows only `decompose` and `portfolio-review`.\n- No inbox mechanism exists anywhere in `template/` or `tests/` (grep for `inbox`: zero matches); `pm-flow status` shows no queued requests.\n\n### Deliverables\n- An inbox directory per project under the flow's runtime state: one request per file, atomic write (temp + rename), no lock taken.\n- A request envelope with an explicit `kind`, extensible to later plan actions; only `create-section` (name plus free-text request body, exactly what `init-section` accepts today) is implemented.\n- `pm-flow init-section` queues instead of refusing when the lock is held, says so, and prints the queued file's path; `--now` preserves today's immediate-attempt-or-refusal behaviour.\n- A drain step at the existing project-work preemption point: each pending request runs the existing officer-mediated proposal path; a failed request (invalid, ownership overlap, officer DECLINE) moves to a `failed/` area with the error recorded, never dropped, never auto-retried.\n- `pm-flow status` lists pending inbox requests.\n- A suite `tests/plan_inbox_test.sh` wired into `tests/run.zsh`, with fixtures.\n\n### User-visible scenarios\n1. Start `pm-flow run`; from a second shell run `pm-flow init-section demo --file req.md`: exit 0, output says the request was queued and prints the file's path; the file exists in the inbox.\n2. Same command with `--now`: today's refusal message and nonzero exit.\n3. Let the run reach its next tick: the tick log shows a project-level drain, the officer proposal runs, the section appears in `project_state/sections.md`, and the inbox no longer holds the request.\n4. Queue a request whose owned paths overlap a live section: after one tick it sits under `failed/` with the error recorded beside it; the following tick does not touch it again.\n5. With one request queued, run `pm-flow status`: the pending request is listed by name.\n6. Kill the driver between queueing and draining, restart, tick: the request is still applied exactly once.\n\n### Interfaces produced\n- The inbox directory layout and request-envelope format (the `kind` field is the extension point for later plan actions).\n- The queued-path output of `init-section` and the pending-requests lines of `pm-flow status`.\n\n### Interfaces consumed\n- The officer-mediated proposal path and its validate-then-create contract (`driver.zsh:3632-3704`).\n- `project_next_action`'s project-before-section preemption (`driver.zsh:2976`).\n- The driver-lock check at `pm_flow.sh:890`.\n- boundary-schema's request/record schemas, if one covers request envelopes by then.\n\n### Scope\n- In: the inbox module, envelope format, queue-on-lock behaviour of `init-section`, `--now`, the tick-boundary drain, failed/ handling, status visibility, the suite.\n- Out: implementing any request kind beyond `create-section`; any UI or daemon beyond the existing tick loop; editing live sections mid-cycle; changing lock semantics; `install.sh` registration (owned by real-install).\n\n### Non-goals\n- Block/reopen, priority-change, or cut requests \u2014 the envelope must admit them, this section must not build them.\n- A watcher, poller, or any drain trigger other than the existing tick boundary.\n- Retry policy for failed requests; a failed request is terminal until a human re-queues it.\n\n### Priority\n- must-have: the plan's completion criterion \"a plan-level request made while a run holds the driver lock is queued and applied at the next safe point, never refused and lost\" cannot be met without it.\n\n### Owned paths\n- template/.agentic/pm_flow/inbox.zsh\n- tests/plan_inbox_test.sh\n- tests/fixtures/plan_inbox/**\n\n### Dependencies\n- boundary-schema\n- outcome-record\n\n### Constraints and fixed decisions\n- The queue and drain hooks must land in `template/.agentic/pm_flow/pm_flow.sh` (init-section entry) and `template/.agentic/pm_flow/driver.zsh` (tick-boundary drain, status). Both are owned by the sections named under Dependencies; this section starts only after both are done and then claims exactly those two hook sites \u2014 do not reopen or weaken their delivered work, including outcome-record's swallow-and-exit-0 telemetry contract and boundary-schema's validators.\n- Drain reuses the existing officer-mediated proposal path; no second proposal mechanism.\n- Queueing takes no lock; the write is atomic (temp file + rename, the pattern at `driver.zsh:994`); lock semantics are unchanged (owner decision).\n- A failed request is moved with its error recorded \u2014 never silently dropped, never retried in a loop (owner decision).\n- If boundary-schema ships a schema covering request envelopes, the inbox envelope validates against it; otherwise the envelope is documented in the inbox module.\n- Inbox files are runtime state under the flow directory, like `runs/` \u2014 never committed per-dispatch into the host repository.\n- `install.sh` is owned by real-install: hand it the new engine file (`inbox.zsh`) for its copied-engine lists; acceptance here is checked against the checkout.\n- These paths are the engine: work happens in a git worktree, merged back after review.\n\n### Acceptance\n- A1: with a `pm-flow run` live, `pm-flow init-section` exits 0, prints the queued file's path, and the file exists in the inbox; with `--now` it reproduces today's refusal \u2014 checked per scenarios 1 and 2.\n- A2: the next tick drains the queue at the project-work boundary through the officer proposal path, and a valid request's section appears in `project_state/sections.md` \u2014 checked per scenario 3.\n- A3: an invalid or rejected request lands in `failed/` with its error recorded, and a subsequent tick leaves it untouched \u2014 checked per scenario 4.\n- A4: `pm-flow status` lists pending requests \u2014 checked per scenario 5.\n- A5: a queued request survives a driver kill and restart and is applied exactly once; re-draining an applied request creates nothing \u2014 checked per scenario 6.\n- A6: `zsh tests/plan_inbox_test.sh` exits 0 on `main` and `tests/run.zsh` still runs to completion.\n\n### Rejection conditions\n- Queueing implemented as waiting for the lock (blocking or polling `init-section`) instead of a durable file the process can abandon.\n- A drained `create-section` applied without the officer-mediated validate-then-create path.\n- A failed request deleted, overwritten, or retried automatically.\n- An envelope that hard-codes `create-section` so a second kind needs a new mechanism.\n- Suite green without ever exercising the queue under a genuinely held lock.\n\n### Open questions\n- None.\n\n## Decision\nCUT \u2014 the request implements the plan's queued-request completion criterion, nothing on `main` or in any live section covers it (zero inbox hits in `template/` and `tests/`), and it is held behind boundary-schema and outcome-record only because they own the two files its hooks must land in.",
+  "ttft_ms": 3059,
+  "ttft_stream_ms": 2081,
+  "time_to_request_ms": 27,
+  "type": "result",
+  "duration_ms": 149157,
+  "uuid": "88240c0c-6677-460a-b807-78bb14b0a753",
+  "queued_turn_count": 0,
+  "failure_reason": "none",
+  "role": "cpo",
+  "pm_backend": "claude",
+  "model": "claude-fable-5",
+  "difficulty": "xhigh",
+  "attempts": 1,
+  "session_resumable": false
+}

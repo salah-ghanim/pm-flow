@@ -1,0 +1,1 @@
+CUT — the request implements the plan's queued-request completion criterion, nothing on `main` or in any live section covers it (zero inbox hits in `template/` and `tests/`), and it is held behind boundary-schema and outcome-record only because they own the two files its hooks must land in.

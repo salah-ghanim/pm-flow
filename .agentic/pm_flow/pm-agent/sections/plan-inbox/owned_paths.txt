@@ -1,0 +1,3 @@
+template/.agentic/pm_flow/inbox.zsh
+tests/plan_inbox_test.sh
+tests/fixtures/plan_inbox/**

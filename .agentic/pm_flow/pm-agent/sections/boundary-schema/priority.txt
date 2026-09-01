@@ -1,0 +1,2 @@
+must-have
+the plan's completion criterion "section state is exportable as validated JSON in one command, and one schema settles what the flow's own validators accept" cannot be met without it, and the ticket-tracker criterion is blocked until it exists.
