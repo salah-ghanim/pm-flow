@@ -66,20 +66,35 @@
 
 ## Task T2 — Shell validators derive from the schemas
 
-- Status: pending
+- Status: done (cycle 002, GO)
 - Outcome: `validate_section_brief`, `validate_handoff` and `markdown_verdict_parse`
   read their required headings and legal tokens from `schemas/`, and the suite feeds
   every shared fixture to both the shell validator and `export.py check`, failing if
   the two disagree on any fixture.
 - Paths: `template/.agentic/pm_flow/pm_flow.sh`,
+  `template/.agentic/pm_flow/export.py`,
   `template/.agentic/pm_flow/schemas/**`, `tests/boundary_schema_test.sh`,
   `tests/fixtures/boundary_schema/**`.
 - Reuse: the T1 schemas and parsers; `assert_matches` (`pm_flow.sh:911`) and `fail`
-  as the existing rejection path.
+  as the existing rejection path; the function-extraction harness in
+  `template/.agentic/pm_flow/tests/verdict_parser.zsh:19-33`, which already calls the
+  shell validators without running `main`.
 - Acceptance IDs: A3, A5.
 - Validation: `zsh tests/boundary_schema_test.sh` exits 0 and its output names each
-  fixture with both verdicts; `zsh tests/pm_flow_test.sh` exits 0.
+  fixture with both verdicts; `zsh tests/pm_flow_test.sh` and
+  `zsh template/.agentic/pm_flow/tests/verdict_parser.zsh` exit 0.
 - Depends on: T1.
+- Shell comparison is against the *pair* `validate_section_brief` +
+  `extract_section_priority` for briefs, because both real call sites
+  (`pm_flow.sh:1688`/`:1691`, `driver.zsh:3593`/`:3600`) run them together and the
+  priority contract lives in the second.
+- One real disagreement to close, observed this cycle: a brief whose Priority bullet
+  is `- must-have` with no loss text is accepted by `export.py check --kind brief`
+  and rejected by `extract_section_priority`. The schema is the definition, so it
+  states the loss requirement and the checker enforces it; the shell keeps its
+  message. Closed in cycle 002: `parse_brief` now returns `priority_loss` and
+  `section_brief.schema.json` requires it with `"pattern": "\\S"`, so both sides
+  reject `brief_priority_missing_loss.md`.
 
 ## Task T3 — One cli definition across the three config consumers
 
