@@ -766,10 +766,17 @@ telemetry_end_run() {
   [[ -n "$TELEMETRY_RUN_KEY" ]] || return 0
   python3 "$SCRIPT_DIR/telemetry.py" --db "$(telemetry_store_file)" run-end \
     --run "$TELEMETRY_RUN_KEY" --span "$TELEMETRY_ROOT_SPAN" \
-    --status "$run_status" >/dev/null 2>&1 || true
+    --status "$run_status" --only-open >/dev/null 2>&1 || true
   telemetry_autoexport
   return 0
 }
+
+# This is the owning process closing its own row as it exits, not a sweeper
+# finding and changing rows opened by other processes. It is installed at
+# source scope because zsh runs a function-local EXIT trap when that function
+# returns. The store-side only-open guard keeps this safety net from replacing
+# an explicit status.
+trap 'telemetry_end_run error' EXIT
 
 # Ship on the way out, when an endpoint is configured. A run that finishes with
 # a live collector should not need a second command to appear in it.
@@ -3741,8 +3748,10 @@ cmd_portfolio_review() {
   [[ "$(project_next_action)" != "decompose" ]] || \
     fail "this project has no sections yet; decompose it before reviewing the portfolio"
   acquire_driver_lock
+  telemetry_begin_run "${PM_FLOW_COMMAND:-tick}"
   run_portfolio_review
   printf 'spent_usd=%s\n' "$(spent_usd)"
+  telemetry_end_run ok
 }
 
 # One section's manager, asked where the section stands, outside a cycle.
@@ -3793,6 +3802,7 @@ $(cycle_history_files "$section_dir" "$(( cycles_before + 1 ))" "$(scope_history
     "CYCLE=$(printf '%03d' "$cycles_before")" \
     "CONTEXT_FILES=$context" > "$prompt"
 
+  telemetry_begin_run "${PM_FLOW_COMMAND:-tick}"
   dispatch_role pm "$prompt" "$analysis_dir/analysis.md" "" \
     "analysis $section_key" "$section_key"
   /bin/cp "$analysis_dir/analysis.md" "$section_dir/analysis/latest.md"
@@ -3815,6 +3825,7 @@ $(cycle_history_files "$section_dir" "$(( cycles_before + 1 ))" "$(scope_history
   printf 'analysis=%s\n' "$analysis_dir/analysis.md"
   printf 'cycles=%s\n' "$cycles_after"
   printf 'spent_usd=%s\n' "$(spent_usd)"
+  telemetry_end_run ok
 }
 
 # The consultant panel, convened on a question instead of on a failure.
@@ -3867,6 +3878,7 @@ cmd_proposals() {
     printf 'and the one observation that would change your mind.\n'
   } > "$consultant_persona"
 
+  telemetry_begin_run "${PM_FLOW_COMMAND:-tick}"
   run_panel_seats "$panel_dir" "$consultant_persona"
 
   local panel_files
@@ -3899,4 +3911,5 @@ cmd_proposals() {
   printf 'decision=%s\n' "$decision"
   printf 'spent_usd=%s\n' "$(spent_usd)"
   [[ "$PANEL_SEAT_FAILURE" == "0" ]] || printf 'note=at least one seat failed; see the seat logs\n'
+  telemetry_end_run ok
 }

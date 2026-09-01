@@ -78,6 +78,19 @@ brief() {
   printf '## Objective\n\n- %s\n\n## Scope\n\n- one thing\n\n## Priority\n\n- must-have: required by the fixture\n\n## Owned paths\n\n- `%s`\n\n## Dependencies\n\n- None.\n\n## Acceptance\n\n- `.venv/bin/python -m pytest -q` exits 0\n\n## Rejection conditions\n\n- nothing runs\n' "$1" "$2"
 }
 
+set_project_budget() {
+  python3 - "$FLOW/config.json" "$1" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+config = json.loads(path.read_text())
+config["budget"]["max_usd"] = float(sys.argv[2])
+path.write_text(json.dumps(config, indent=2) + "\n")
+PY
+}
+
 FLOWSH="$FLOW/pm_flow.sh"
 brief review "lib/" > "$TEST_ROOT/brief.md"
 "$FLOWSH" init-section review --file "$TEST_ROOT/brief.md" >/dev/null
@@ -214,3 +227,66 @@ assert_eq "$DERIVED_ROWS" $'section_status|abandoned|derived\nsection_status|com
 printf 'RAW SELECT:\n%s\n' "$DERIVED_SQL"
 printf '%s\n' "$DERIVED_ROWS"
 printf 'PASS: complete and abandoned section_status rows remain derived\n'
+
+# A completed run closes explicitly as ok. The following tick dies in fail()
+# at the budget check, before reaching cmd_tick's straight-line close, so only
+# the owner-process EXIT trap can close it as error.
+mkdir -p "$WORK/closure"
+brief closure "closure/" > "$TEST_ROOT/brief.md"
+"$FLOWSH" init-section closure --file "$TEST_ROOT/brief.md" >/dev/null
+RUN_BASELINE="$(sqlite3 "$DB" "SELECT COALESCE(MAX(id), 0) FROM runs;")"
+PM_FLOW_STUB="$SCOPE" PM_FLOW_SECTION=closure \
+  "$FLOWSH" run --max-ticks 1 >/dev/null
+set_project_budget 0.0001
+set +e
+FAILED_TICK_OUTPUT="$(PM_FLOW_SECTION=closure "$FLOWSH" tick 2>&1)"
+FAILED_TICK_EXIT=$?
+set -e
+assert_eq "$FAILED_TICK_EXIT" "1" "budget-exhausted tick exits through fail"
+[[ "$FAILED_TICK_OUTPUT" == *"project budget exhausted"* ]] || \
+  fail "budget-exhausted tick did not reach the documented fail path"
+set_project_budget 0
+
+CLOSE_SQL="SELECT command || '|' || status FROM runs WHERE id > $RUN_BASELINE ORDER BY id;"
+CLOSE_ROWS="$(sqlite3 "$DB" "$CLOSE_SQL")"
+assert_eq "$CLOSE_ROWS" $'run|ok\ntick|error' \
+  "completed run and failed tick retain distinct terminal statuses"
+OPEN_SQL="SELECT COUNT(*) FROM runs WHERE id > $RUN_BASELINE AND ended_at IS NULL;"
+OPEN_ROWS="$(sqlite3 "$DB" "$OPEN_SQL")"
+assert_eq "$OPEN_ROWS" "0" "completed run and failed tick both have ended_at"
+assert_eq "$(sqlite3 "$DB" "SELECT COUNT(*) FROM runs WHERE ended_at IS NULL;")" \
+  "0" "on-demand and loop commands leave no run open"
+printf 'RAW SELECT:\n%s\n' "$CLOSE_SQL"
+printf '%s\n' "$CLOSE_ROWS"
+printf 'RAW SELECT:\n%s\n' "$OPEN_SQL"
+printf '%s\n' "$OPEN_ROWS"
+printf 'PASS: completed run and fail-aborted tick close with distinct statuses\n'
+
+# Recording is best effort even from the EXIT trap. A read-only database in a
+# non-writable runs directory must not change dispatch output or exit status.
+mkdir -p "$WORK/swallow-run" "$WORK/swallow-tick"
+brief swallow-run "swallow-run/" > "$TEST_ROOT/brief.md"
+"$FLOWSH" init-section swallow-run --file "$TEST_ROOT/brief.md" >/dev/null
+brief swallow-tick "swallow-tick/" > "$TEST_ROOT/brief.md"
+"$FLOWSH" init-section swallow-tick --file "$TEST_ROOT/brief.md" >/dev/null
+chmod 444 "$DB"
+chmod 500 "$FLOW/demo/runs"
+set +e
+UNWRITABLE_RUN_OUTPUT="$(PM_FLOW_STUB="$SCOPE" PM_FLOW_SECTION=swallow-run \
+  "$FLOWSH" run --max-ticks 1 2>&1)"
+UNWRITABLE_RUN_EXIT=$?
+UNWRITABLE_TICK_OUTPUT="$(PM_FLOW_STUB="$SCOPE" PM_FLOW_SECTION=swallow-tick \
+  "$FLOWSH" tick 2>&1)"
+UNWRITABLE_TICK_EXIT=$?
+set -e
+chmod 700 "$FLOW/demo/runs"
+chmod 600 "$DB"
+assert_eq "$UNWRITABLE_RUN_EXIT" "0" "run exits zero with unwritable store"
+assert_eq "$UNWRITABLE_TICK_EXIT" "0" "tick exits zero with unwritable store"
+[[ "$UNWRITABLE_RUN_OUTPUT" == *"[tick 1] swallow-run: scope"* ]] || \
+  fail "run did not print normal tick output with unwritable store"
+[[ "$UNWRITABLE_TICK_OUTPUT" == *"result="* ]] || \
+  fail "tick did not print its normal result with unwritable store"
+printf 'UNWRITABLE RUN EXIT: %s\n%s\n' "$UNWRITABLE_RUN_EXIT" "$UNWRITABLE_RUN_OUTPUT"
+printf 'UNWRITABLE TICK EXIT: %s\n%s\n' "$UNWRITABLE_TICK_EXIT" "$UNWRITABLE_TICK_OUTPUT"
+printf 'PASS: run and tick dispatch and exit zero with unwritable store\n'
