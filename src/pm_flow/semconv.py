@@ -1,11 +1,11 @@
 """Pinned OpenTelemetry GenAI semantic-convention names for pm-flow.
 
-The conventions are Development. ``v1.37.0`` was verified against the
+The conventions are Development. ``v1.38.0`` was verified against the
 ``semantic-conventions`` repository's ``model/gen-ai/*.yaml`` at:
-https://github.com/open-telemetry/semantic-conventions/tree/v1.37.0/model/gen-ai
+https://github.com/open-telemetry/semantic-conventions/tree/v1.38.0/model/gen-ai
 
 ``v1.36.0`` is deliberately supported as the comparison pin. Its registry
-uses ``gen_ai.system`` where ``v1.37.0`` uses
+uses ``gen_ai.system`` where ``v1.38.0`` uses
 ``gen_ai.provider.name``; the rename is the observable revision difference
 used to prove that telemetry reads this module rather than an installed copy:
 https://github.com/open-telemetry/semantic-conventions/tree/v1.36.0/model/gen-ai
@@ -13,7 +13,7 @@ https://github.com/open-telemetry/semantic-conventions/tree/v1.36.0/model/gen-ai
 
 from __future__ import annotations
 
-REVISION = "v1.37.0"
+REVISION = "v1.38.0"
 
 SPAN_OPERATIONS = {
     "AGENT": "invoke_agent",
@@ -31,6 +31,15 @@ _ATTRIBUTE_NAMES = {
 _PROVIDER_ATTRIBUTES = {
     "v1.36.0": "gen_ai.system",
     "v1.37.0": "gen_ai.provider.name",
+    "v1.38.0": "gen_ai.provider.name",
+}
+
+_EVALUATION_EVENTS = {
+    "v1.38.0": {
+        "event_name": "gen_ai.evaluation.result",
+        "evaluation_name": "gen_ai.evaluation.name",
+        "score_label": "gen_ai.evaluation.score.label",
+    },
 }
 
 
@@ -59,3 +68,8 @@ def attributes_for(attempt) -> dict:
     # Cost already has a pm-flow attribute in telemetry; preserve thinking here.
     put("pm_flow.thinking", attempt.get("thinking"))
     return attributes
+
+
+def evaluation_event() -> dict | None:
+    """Return evaluation event names for the pin, if that revision defines them."""
+    return _EVALUATION_EVENTS.get(REVISION)

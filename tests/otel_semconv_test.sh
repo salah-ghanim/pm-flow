@@ -802,7 +802,7 @@ assert_jaeger_tree "$PRIMARY_TREE" "$PRIMARY_DB" "$PRIMARY_SEMCONV" "primary"
 
 SECONDARY_SEMCONV="$SECONDARY_TREE/src/pm_flow/semconv.py"
 SECONDARY_TELEMETRY="$SECONDARY_TREE/template/.agentic/pm_flow/telemetry.py"
-sed 's/^REVISION = "v1\.37\.0"$/REVISION = "v1.36.0"/' \
+sed 's/^REVISION = "v1\.38\.0"$/REVISION = "v1.36.0"/' \
   "$SECONDARY_SEMCONV" > "$SECONDARY_SEMCONV.next"
 mv "$SECONDARY_SEMCONV.next" "$SECONDARY_SEMCONV"
 grep -q '^REVISION = "v1.36.0"$' "$SECONDARY_SEMCONV" || \

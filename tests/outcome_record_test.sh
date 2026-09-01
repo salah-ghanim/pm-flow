@@ -40,6 +40,7 @@ assert_eq() {
 WORK="$TEST_ROOT/work"
 mkdir -p "$WORK/.agentic" "$WORK/src" "$WORK/lib" "$WORK/docs" "$WORK/tools"
 cp -R "$REPO_ROOT/template/.agentic/pm_flow" "$WORK/.agentic/pm_flow"
+cp "$REPO_ROOT/src/pm_flow/semconv.py" "$WORK/.agentic/semconv.py"
 FLOW="$WORK/.agentic/pm_flow"
 rm -rf "$FLOW/project"
 mkdir -p "$FLOW/demo/project_state" "$FLOW/demo/sections" "$FLOW/demo/runs"
@@ -182,6 +183,118 @@ assert_eq "$(sqlite3 "$DB" "SELECT COUNT(*) FROM outcomes WHERE source = 'verdic
 printf 'RAW SELECT:\n%s\n' "$JOIN_SQL"
 printf '%s\n' "$JOIN_ROWS"
 printf 'PASS: every parsed decision joins to its producing attempt and run\n'
+
+SEMCONV="$WORK/.agentic/semconv.py"
+EVENT_NAME="$(python3 - "$SEMCONV" <<'PY'
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("outcome_record_semconv", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+print(module.evaluation_event()["event_name"])
+PY
+)"
+VERDICT_COUNT="$(sqlite3 "$DB" "SELECT COUNT(*) FROM outcomes WHERE source = 'verdict';")"
+EVENT_COUNT="$(sqlite3 "$DB" "SELECT COUNT(*) FROM span_events WHERE name = '$EVENT_NAME';")"
+assert_eq "$EVENT_COUNT" "$VERDICT_COUNT" \
+  "evaluation event count equals verdict-row count"
+
+EVENT_SQL="SELECT a.id || '|' || a.span_id || '|' || se.name || '|' || se.attributes FROM span_events se JOIN attempts a ON a.span_id = se.span_id WHERE se.name = '$EVENT_NAME' ORDER BY a.id, se.rowid;"
+EVENT_ROWS="$(sqlite3 "$DB" "$EVENT_SQL")"
+[[ -n "$EVENT_ROWS" ]] || fail "no evaluation events joined to attempts"
+
+OTLP_FILE="$TEST_ROOT/outcome.otlp.jsonl"
+python3 "$FLOW/trace_export.py" --db "$DB" --file "$OTLP_FILE" --replay >/dev/null
+EXPORTED_FRAGMENT="$(python3 - "$DB" "$OTLP_FILE" "$SEMCONV" <<'PY'
+import importlib.util
+import json
+import sqlite3
+import sys
+from collections import Counter
+
+db_path, otlp_path, semconv_path = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("outcome_record_semconv", semconv_path)
+semconv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(semconv)
+names = semconv.evaluation_event()
+if names is None:
+    raise SystemExit("the pinned revision did not provide evaluation event names")
+
+connection = sqlite3.connect(db_path)
+connection.row_factory = sqlite3.Row
+expected = Counter(
+    (row["attempt_id"], row["metric"], row["value_text"])
+    for row in connection.execute(
+        "SELECT attempt_id, metric, value_text FROM outcomes "
+        "WHERE source = 'verdict'"
+    )
+)
+attempt_by_span = {
+    row["span_id"]: row["id"]
+    for row in connection.execute("SELECT id, span_id FROM attempts")
+}
+stored = Counter()
+for row in connection.execute(
+    "SELECT span_id, attributes FROM span_events WHERE name = ?",
+    (names["event_name"],),
+):
+    attributes = json.loads(row["attributes"])
+    wanted = {names["evaluation_name"], names["score_label"]}
+    if set(attributes) != wanted:
+        raise SystemExit(f"unexpected stored evaluation attributes: {attributes!r}")
+    if row["span_id"] not in attempt_by_span:
+        raise SystemExit(f"event is not on an attempt span: {row['span_id']}")
+    stored[(
+        attempt_by_span[row["span_id"]],
+        attributes[names["evaluation_name"]],
+        attributes[names["score_label"]],
+    )] += 1
+if stored != expected:
+    raise SystemExit(f"stored events do not match verdict rows: {stored!r} != {expected!r}")
+
+spans = []
+for line in open(otlp_path, encoding="utf-8"):
+    payload = json.loads(line)
+    for resource in payload.get("resourceSpans", []):
+        for scope in resource.get("scopeSpans", []):
+            spans.extend(scope.get("spans", []))
+
+def decode_attributes(items):
+    decoded = {}
+    for item in items:
+        value = item["value"]
+        decoded[item["key"]] = next(iter(value.values()))
+    return decoded
+
+exported = Counter()
+fragments = []
+for span in spans:
+    matching = [event for event in span.get("events", [])
+                if event.get("name") == names["event_name"]]
+    if not matching:
+        continue
+    if span["spanId"] not in attempt_by_span:
+        raise SystemExit(f"exported event is not on an attempt span: {span['spanId']}")
+    fragments.append({"spanId": span["spanId"], "events": matching})
+    for event in matching:
+        attributes = decode_attributes(event.get("attributes", []))
+        exported[(
+            attempt_by_span[span["spanId"]],
+            attributes.get(names["evaluation_name"]),
+            attributes.get(names["score_label"]),
+        )] += 1
+if exported != expected:
+    raise SystemExit(f"exported events do not match verdict rows: {exported!r} != {expected!r}")
+
+print(json.dumps(fragments, indent=2, sort_keys=True))
+PY
+)"
+
+printf 'RAW SELECT:\n%s\n' "$EVENT_SQL"
+printf '%s\n' "$EVENT_ROWS"
+printf 'EXPORTED JSON FRAGMENT:\n%s\n' "$EXPORTED_FRAGMENT"
+printf 'PASS: every verdict exports one evaluation event on its attempt span\n'
 
 # Prime the two terminal actions without bypassing them. Each tick executes the
 # real complete/abandon caller; only the role response is stubbed.
