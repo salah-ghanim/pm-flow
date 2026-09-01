@@ -467,11 +467,14 @@ def cmd_run_start(args):
 def cmd_run_end(args):
     connection = store.connect(args.db)
     with connection:
-        connection.execute(
-            "UPDATE runs SET ended_at = ?, status = ? WHERE run_key = ? OR id = ?",
+        query = "UPDATE runs SET ended_at = ?, status = ? WHERE (run_key = ? OR id = ?)"
+        if args.only_open:
+            query += " AND ended_at IS NULL"
+        cursor = connection.execute(
+            query,
             (store.now(), args.status, args.run, args.run),
         )
-    if args.span:
+    if args.span and (not args.only_open or cursor.rowcount > 0):
         finish_span(connection, span_id=args.span,
                     status="OK" if args.status in ("ok", "finished") else "ERROR",
                     message=args.message, attributes=parse_attrs(args.attr),
@@ -790,6 +793,7 @@ def build_parser():
     p = sub.add_parser("run-end")
     p.add_argument("--run", required=True); p.add_argument("--span")
     p.add_argument("--status", default="ok"); p.add_argument("--message")
+    p.add_argument("--only-open", action="store_true")
     p.add_argument("--attr", action="append")
     p.set_defaults(func=cmd_run_end)
 
