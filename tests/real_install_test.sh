@@ -124,6 +124,9 @@ wheel_count="$(printf '%s' "$built_wheels" | grep -c . || true)"
   fail "expected exactly one built pm_flow wheel in $DIST, found $wheel_count"
 WHEEL="$built_wheels"
 assert_contains "$WHEEL" "py3-none-any.whl" "the built wheel is platform-independent"
+WHEEL_BASENAME="${WHEEL:t}"
+WHEEL_VERSION="${WHEEL_BASENAME#pm_flow-}"
+WHEEL_VERSION="${WHEEL_VERSION%%-*}"
 
 python3 -m venv "$VENV" >> "$BUILD_LOG" 2>&1 || {
   /bin/cat "$BUILD_LOG" >&2
@@ -226,9 +229,11 @@ printf 'PASS: fixture has four unnamed legacy workspaces and copied engine data\
 NO_KEY_REPO="$TEST_ROOT/no key fixture"
 git clone --quiet "$LEGACY_REPO" "$NO_KEY_REPO"
 RUNBOOK_REPO="$TEST_ROOT/runbook fixture"
+PROVISION_REPO="$TEST_ROOT/provision fixture"
 EMPTY_RESPONSE_REPO="$TEST_ROOT/empty response fixture"
 NEGATIVE_REPO="$TEST_ROOT/unmigrated negative fixture"
 git clone --quiet "$LEGACY_REPO" "$RUNBOOK_REPO"
+git clone --quiet "$LEGACY_REPO" "$PROVISION_REPO"
 git clone --quiet "$LEGACY_REPO" "$EMPTY_RESPONSE_REPO"
 git clone --quiet "$LEGACY_REPO" "$NEGATIVE_REPO"
 
@@ -444,7 +449,7 @@ runbook_output="$("$RUNBOOK_SCRIPT" all \
   --project-key beta \
   --name "Golden Grid Fixture" \
   --install-sh "$REPO_ROOT/install.sh" \
-  --pm-flow "$PM_FLOW" \
+  --wheel "$WHEEL" \
   --out "$RUNBOOK_OUT" \
   --backup-root "$RUNBOOK_BACKUPS" 2>&1)" || \
   fail "the extracted runbook failed over the fixture:"$'\n'"$runbook_output"
@@ -459,6 +464,13 @@ assert_contains "$runbook_output" "projects_md=absent" \
   "the runbook reports the missing legacy project registry"
 assert_contains "$runbook_output" "collision=project" \
   "the runbook reports the workspace and engine-directory collision"
+assert_contains "$runbook_output" "provision=ok" \
+  "the all run provisions the target repository"
+assert_contains "$runbook_output" "pm_flow_version=$WHEEL_VERSION" \
+  "the all run names the version encoded in the supplied wheel"
+[[ -x "$RUNBOOK_REPO/.venv/bin/pm-flow" ]] || \
+  fail "the all run did not create the default pm-flow entry point"
+printf 'PASS: runbook all provisions and uses the default target pm-flow entry point\n'
 for key in "${WORKSPACE_KEYS[@]}"; do
   assert_contains "$runbook_output" \
     "workspace=$key ledger=present rows=3 total=7.5000 empty_response_rows=0" \
@@ -484,11 +496,57 @@ assert_contains "$runbook_output" "verify=ok" \
   "the runbook completes all migration verification"
 assert_contains "$runbook_output" "beta-section" \
   "the runbook runs installed pm-flow status in the migrated repository"
-for phase in survey backup migrate verify; do
+assert_contains "$runbook_output" "status_in_place=ok" \
+  "the runbook completes the bounded in-place status phase"
+in_place_status_output="${runbook_output##*=== phase: status ===}"
+assert_contains "$in_place_status_output" "beta-section" \
+  "the in-place status phase reads the migrated selected section"
+assert_contains "$in_place_status_output" "store=.agentic/pm_flow/beta/runs/pm_flow.db" \
+  "the in-place status phase names its permitted store"
+for phase in survey backup provision migrate verify status; do
   assert_contains "$(/bin/cat "$RUNBOOK_OUT/transcript.txt")" "=== phase: $phase ===" \
     "the transcript carries the $phase phase header"
 done
 printf 'PASS: extracted runbook backs up, migrates, and verifies the fixture end to end\n'
+printf 'PASS: runbook status reads beta-section in place within its store write budget\n'
+
+PROVISION_OUT="$TEST_ROOT/standalone-provision"
+provision_output="$("$RUNBOOK_SCRIPT" provision \
+  --repo "$PROVISION_REPO" \
+  --install-sh "$REPO_ROOT/install.sh" \
+  --out "$PROVISION_OUT" 2>&1)" || \
+  fail "the standalone offline provision failed:"$'\n'"$provision_output"
+assert_contains "$provision_output" "pm_flow_wheel=pm_flow-" \
+  "standalone provision reports the wheel it built"
+assert_contains "$provision_output" "provision=ok" \
+  "standalone provision completes offline"
+[[ -x "$PROVISION_REPO/.venv/bin/pm-flow" ]] || \
+  fail "standalone provision produced no target pm-flow entry point"
+printf 'PASS: standalone provision builds and installs the checkout wheel offline\n'
+
+printf '\nmutation proving status detects project data loss\n' >> \
+  "$RUNBOOK_REPO/.agentic/pm_flow/beta/project_state/plan.md"
+status_mutation_output="$(expect_failure "status after a project-data mutation" \
+  "$RUNBOOK_SCRIPT" status \
+  --repo "$RUNBOOK_REPO" \
+  --project-key beta \
+  --install-sh "$REPO_ROOT/install.sh" \
+  --out "$RUNBOOK_OUT")"
+assert_contains "$status_mutation_output" "beta/project_state/plan.md" \
+  "status names the project-data path whose surveyed digest changed"
+printf 'PASS: status rejects and names a mutated project-data path\n'
+
+missing_pm_flow_output="$(expect_failure "verify without a pm-flow entry point" \
+  "$RUNBOOK_SCRIPT" verify \
+  --repo "$RUNBOOK_REPO" \
+  --project-key beta \
+  --install-sh "$REPO_ROOT/install.sh" \
+  --pm-flow /nonexistent/pm-flow \
+  --out "$RUNBOOK_OUT")"
+assert_contains "$missing_pm_flow_output" \
+  "no pm-flow entry point at /nonexistent/pm-flow; run the provision phase first" \
+  "verify diagnoses the missing binary instead of exiting 127"
+printf 'PASS: verify names a missing pm-flow entry point before invocation\n'
 
 # Add the known hazardous ledger shape only to a throwaway clone. The shared
 # fixture ledgers remain the three-row parity input exercised above.
