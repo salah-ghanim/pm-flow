@@ -1,0 +1,1 @@
+CUT — the request maps one-to-one onto the plan's unserved ticket-tracker completion criterion, nothing on `main` or in any live section covers it, and `boundary-schema` already reserved the export interface for exactly this consumer.

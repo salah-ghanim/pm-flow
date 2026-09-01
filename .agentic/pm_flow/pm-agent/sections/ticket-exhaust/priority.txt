@@ -1,0 +1,2 @@
+must-have
+the plan's completion criterion "a section is visible in an external ticket tracker, GitHub Issues first … the tracker is a view; the files stay the truth" cannot be met by anything else on `main` or in a live section.

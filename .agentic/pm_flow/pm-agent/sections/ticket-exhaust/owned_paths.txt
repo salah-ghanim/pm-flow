@@ -1,0 +1,4 @@
+template/.agentic/pm_flow/ticket_sync.py
+template/.agentic/pm_flow/ticket_sync.zsh
+tests/ticket_exhaust_test.sh
+tests/fixtures/ticket_exhaust/**
