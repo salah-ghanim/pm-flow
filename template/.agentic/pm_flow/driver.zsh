@@ -690,6 +690,8 @@ TELEMETRY_ROOT_SPAN=""
 TELEMETRY_TOPOLOGY=""
 TELEMETRY_ATTEMPT_ID=""
 TELEMETRY_ATTEMPT_SPAN=""
+TELEMETRY_LAST_ATTEMPT_ID=""
+TELEMETRY_LAST_ATTEMPT_SPAN=""
 
 telemetry_store_file() {
   printf '%s/pm_flow.db\n' "${RUNS_DIR:-}"
@@ -792,6 +794,10 @@ telemetry_begin_attempt() {
   local cycle="" output parent
   TELEMETRY_ATTEMPT_ID=""
   TELEMETRY_ATTEMPT_SPAN=""
+  # A decision parsed after this dispatch must never inherit the handle from an
+  # earlier one when opening the new attempt fails or telemetry is disabled.
+  TELEMETRY_LAST_ATTEMPT_ID=""
+  TELEMETRY_LAST_ATTEMPT_SPAN=""
   telemetry_enabled || return 0
   # A dispatch is the first thing worth recording, so it is what opens the run.
   [[ -n "$TELEMETRY_RUN_KEY" ]] || telemetry_begin_run "${PM_FLOW_COMMAND:-tick}"
@@ -840,18 +846,32 @@ telemetry_end_attempt() {
   [[ -z "$output_md" ]] || args+=(--output-file "$output_md")
   [[ ! -f "$events" ]] || args+=(--events "$events")
   python3 "$SCRIPT_DIR/telemetry.py" "${args[@]}" >/dev/null 2>&1 || true
+  # dispatch_role closes the attempt before its caller parses the response.
+  # Preserve the handle long enough for that parse site to attach its outcome.
+  TELEMETRY_LAST_ATTEMPT_ID="$TELEMETRY_ATTEMPT_ID"
+  TELEMETRY_LAST_ATTEMPT_SPAN="$TELEMETRY_ATTEMPT_SPAN"
   TELEMETRY_ATTEMPT_ID=""
   TELEMETRY_ATTEMPT_SPAN=""
   return 0
 }
 
 telemetry_record_outcome() {
-  local section_key="$1" value="$2"
+  local metric="$1" value="$2" section_key="${3:-}"
+  local source="verdict"
   telemetry_enabled || return 0
   [[ -n "$TELEMETRY_RUN_KEY" ]] || return 0
   local args=(--db "$(telemetry_store_file)" outcome
-              --run "$TELEMETRY_RUN_KEY" --task "$section_key"
-              --metric section_status --text "$value" --source derived)
+              --run "$TELEMETRY_RUN_KEY" --metric "$metric" --text "$value")
+  [[ -z "$section_key" ]] || args+=(--task "$section_key")
+  if [[ "$metric" == "section_status" ]]; then
+    source="derived"
+  else
+    # A parsed decision without a dispatch handle is telemetry being
+    # unavailable, not permission to write an unjoinable verdict row.
+    [[ -n "$TELEMETRY_LAST_ATTEMPT_ID" ]] || return 0
+    args+=(--attempt "$TELEMETRY_LAST_ATTEMPT_ID")
+  fi
+  args+=(--source "$source")
   python3 "$SCRIPT_DIR/telemetry.py" "${args[@]}" >/dev/null 2>&1 || true
   return 0
 }
@@ -1222,6 +1242,8 @@ record_cycle_decision() {
   local cycle_dir="$1"
   local source_md="$2"
   local allowed="$3"
+  local metric="$4"
+  local section_key="${5:-}"
   local decision reason
   local staged="$cycle_dir/.decision.txt.staging"
   if ! decision="$(markdown_verdict_parse "$(/bin/cat "$source_md")" "$allowed" 2>"$cycle_dir/.verdict_error.txt")"; then
@@ -1235,6 +1257,7 @@ record_cycle_decision() {
     rm -f "$cycle_dir/.verdict_error.txt"
     printf 'UNPARSED\n' > "$staged"
     mv "$staged" "$cycle_dir/decision.txt"
+    telemetry_record_outcome "$metric" UNPARSED "$section_key" >/dev/null 2>&1 || true
     printf 'UNPARSED\n'
     return 0
   fi
@@ -1242,6 +1265,7 @@ record_cycle_decision() {
   decision="${decision%%$'\n'*}"
   printf '%s\n' "$decision" > "$staged"
   mv "$staged" "$cycle_dir/decision.txt"
+  telemetry_record_outcome "$metric" "$decision" "$section_key" >/dev/null 2>&1 || true
   printf '%s\n' "$decision"
 }
 
@@ -1373,7 +1397,8 @@ $(cycle_history_files "$section_dir" "${cycle_number#0}" "$(scope_history_window
   # that had to act on it, so it stops riding along in every later scope.
   rm -f "$section_dir/portfolio_rescope.txt"
   local decision blocker assignment
-  decision="$(record_cycle_decision "$cycle_dir" "$cycle_dir/scope.md" "ASSIGN,COMPLETE,BLOCKED_EXTERNAL")"
+  decision="$(record_cycle_decision "$cycle_dir" "$cycle_dir/scope.md" \
+    "ASSIGN,COMPLETE,BLOCKED_EXTERNAL" scope_decision "$section_key")"
   case "$decision" in
     ASSIGN)
       rm -f "$cycle_dir/rescope_reason.txt"
@@ -1502,7 +1527,8 @@ do_review() {
   [[ "$review_tree" == "$PROJECT_ROOT" ]] || DISPATCH_READ_DIRS=("$review_tree")
   dispatch_role pm "$prompt" "$cycle_dir/review.md" "" "review $(basename "$section_dir") $cycle_number"
   DISPATCH_READ_DIRS=()
-  decision="$(record_cycle_decision "$cycle_dir" "$cycle_dir/review.md" "GO,GO_WITH_CHANGES,NO_GO")"
+  decision="$(record_cycle_decision "$cycle_dir" "$cycle_dir/review.md" \
+    "GO,GO_WITH_CHANGES,NO_GO" review_verdict "$(basename "$section_dir")")"
   printf 'review %s -> %s (developer said %s; consecutive failures: %s)\n' \
     "$cycle_number" "$decision" "$(first_line_or "$cycle_dir/dev_status.txt" UNSTATED)" \
     "$(consecutive_failures "$section_dir")"
@@ -1514,6 +1540,8 @@ do_review() {
   obstruction="$(extract_markdown_decision "$(/bin/cat "$cycle_dir/review.md")" \
     "NONE,HARNESS,TASK" Obstruction 2>/dev/null || printf 'NONE\n')"
   printf '%s\n' "${obstruction%%$'\n'*}" > "$cycle_dir/obstruction.txt"
+  telemetry_record_outcome obstruction_class "${obstruction%%$'\n'*}" \
+    "$(basename "$section_dir")" >/dev/null 2>&1 || true
   case "$decision" in
     GO|GO_WITH_CHANGES) integrate_section_work "$section_dir" "$cycle_number" ;;
     NO_GO) [[ "${obstruction%%$'\n'*}" != "HARNESS" ]] || \
@@ -2121,7 +2149,7 @@ do_abandon() {
   } > "$escalation_dir/abandon_handoff.md"
   cmd_section_handoff "$(basename "$section_dir")" cancelled "$summary" \
     --file "$escalation_dir/abandon_handoff.md" >/dev/null
-  telemetry_record_outcome "$(basename "$section_dir")" abandoned
+  telemetry_record_outcome section_status abandoned "$(basename "$section_dir")"
   remove_section_worktree "$(basename "$section_dir")"
   printf 'abandon -> section cancelled\n'
 }
@@ -2169,7 +2197,7 @@ $report"
 
   cmd_section_handoff "$section_key" done \
     "Section completed and validated across $newest cycle(s)" --file "$handoff" >/dev/null
-  telemetry_record_outcome "$section_key" complete
+  telemetry_record_outcome section_status complete "$section_key"
   # The section is finished, so its checkout is dead weight. The branch stays:
   # it is the history of how the section got there, and removing a worktree
   # never removes work.
@@ -3430,7 +3458,8 @@ ${handoffs%$'\n'}"
 
   dispatch_role cpo "$prompt" "$review_dir/review.md" "" "portfolio review $index"
 
-  decision="$(record_cycle_decision "$review_dir" "$review_dir/review.md" "ON_TRACK,OFF_TRACK")"
+  decision="$(record_cycle_decision "$review_dir" "$review_dir/review.md" \
+    "ON_TRACK,OFF_TRACK" portfolio_verdict)"
   if [[ "$decision" == "UNPARSED" ]]; then
     printf 'portfolio review %03d -> UNPARSED; it will be re-asked\n' "$index"
     return 0
