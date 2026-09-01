@@ -1,0 +1,14 @@
+# Uncommitted changes left by a failed dispatch
+
+Recorded at 2026-09-01T17:50:29Z for section outcome-record.
+
+The dispatch failed after changing the working tree, and nothing
+committed it. Review and either commit or discard these paths before
+the section is released from quarantine.
+
+```diff
+1c1
+< head 6867da39bca97d2886fc128a9c0deb2c2327ae50
+---
+> head df79dcbd0d4a121fa30c8b31ef8be1b5bce6e8a2
+```

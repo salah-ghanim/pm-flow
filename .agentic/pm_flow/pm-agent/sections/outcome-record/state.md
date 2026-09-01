@@ -2,7 +2,7 @@
 
 ## Current task
 
-- T3 — emit a `gen_ai.evaluation.result` span event per decision.
+- T4 — prove all four scenarios end to end against a real backend.
 
 ## Completed tasks and evidence
 
@@ -24,7 +24,7 @@
     disturb scheduling or control flow.
   - `section_status` is untouched: the derived SELECT still returns
     `section_status|abandoned|derived` and `section_status|complete|derived`,
-    and both callers (`driver.zsh:2152`, `:2200`) moved to the new signature in
+    and both callers (`driver.zsh:2159`, `:2207`) moved to the new signature in
     the same edit.
   - Negative check (`sections/outcome-record/mutation_check.zsh`): on a throwaway
     copy of the tree with `args+=(--attempt "$TELEMETRY_LAST_ATTEMPT_ID")`
@@ -72,7 +72,100 @@
   - `section_status` and the T1 five-row join are unchanged, re-observed in the
     same run.
 
+- **T3 (A2 store/file-export half, A5) — accepted, cycle 003.** Every verdict
+  outcome now also writes a `gen_ai.evaluation.result` `span_events` row on the
+  attempt span that produced the response, and it survives to the exported OTLP
+  JSON. Changed files: `src/pm_flow/semconv.py`,
+  `template/.agentic/pm_flow/telemetry.py`, `tests/outcome_record_test.sh`,
+  `tests/otel_semconv_test.sh` (one sed literal). `driver.zsh` untouched.
+  - `zsh tests/outcome_record_test.sh` — exit 0, run by the PM against the
+    developer worktree. Its raw
+    `SELECT a.id || '|' || a.span_id || '|' || se.name || '|' || se.attributes FROM span_events se JOIN attempts a ON a.span_id = se.span_id WHERE se.name = 'gen_ai.evaluation.result' ORDER BY a.id, se.rowid`
+    returned exactly five rows on four distinct attempt spans — attempt 1
+    `scope_decision/ASSIGN`, attempt 3 `review_verdict/GO_WITH_CHANGES` and
+    `obstruction_class/NONE`, attempt 4 `scope_decision/UNPARSED`, attempt 5
+    `portfolio_verdict/ON_TRACK`. The attribute keys are literally
+    `gen_ai.evaluation.name` and `gen_ai.evaluation.score.label`.
+  - The same five appear in the exported OTLP JSON as `events` entries under
+    those `spanId`s, with `stringValue` attributes. The suite compares
+    `Counter` over `(attempt_id, metric, value_text)` on three sides — outcomes
+    rows with `source = 'verdict'`, `span_events`, exported spans — and requires
+    equality, so a dropped or duplicated event fails. It also raises if any
+    event lands on a span that is not an attempt, or carries any attribute key
+    beyond the two.
+  - `zsh tests/otel_semconv_test.sh` — exit 0, with
+    `PASS: changing only the pin changes the receiver provider attribute` and
+    `PASS: standard GenAI literals are centralised in semconv.py`. In the PM's
+    run Docker was up, so `PASS: a stock backend re-serves the invoke_agent ->
+    chat tree` (A6) also ran, which the developer's run had skipped.
+  - `zsh template/.agentic/pm_flow/tests/run.zsh` — exit 0, "all suites passed",
+    35 + 41 + 32 + 59 + 74 with `fail=0`.
+  - T1 and T2 assertions re-observed unchanged in the same run: the five-row
+    join, `section_status|abandoned|derived` and `section_status|complete|derived`,
+    `run|ok` then `tick|error`, `ended_at IS NULL` at 0, both unwritable-store
+    dispatches at exit 0.
+  - Negative checks (`sections/outcome-record/pm_mutation_probe.zsh` and
+    `pm_export_probe.zsh`), four mutations on throwaway copies, with an
+    unmutated control at exit 0 first:
+    - M1, verdict attribute set to a constant `"GO"` instead of `args.text` →
+      exit 1, `stored events do not match verdict rows`. The attribute carrying
+      the verdict is load-bearing, not just the event's presence.
+    - M2, span lookup replaced by `ORDER BY id LIMIT 1` so all five events land
+      on attempt 1 → exit 1. Span *association* is asserted, not merely that the
+      event sits on some attempt span.
+    - M3, `REVISION` swapped to `v1.36.0` → `evaluation_event()` returns `None`
+      rather than raising, which is the degradation A5 needs.
+    - M4, `trace_export.py` mutated to drop every span event while the store
+      stays correct → exit 1 at `exported events do not match verdict rows`.
+      Needed because M1/M2 trip the store-side comparison first; M4 is what
+      proves the *exported*-JSON half of A2 is independently load-bearing.
+  - Independent `grep -rn 'gen_ai\.'` over `template/` and `src/`: hits only
+    `semconv.py` and the pre-existing comment at `catalog.py:254`. No literal in
+    `driver.zsh`, `telemetry.py` or the suite — the suite reads the name from
+    `semconv.py` at runtime.
+
 ## Active decisions
+
+- **The registry check behind the pin move is reported but not independently
+  verified, and T4 must close that.** Outbound network is refused from the PM's
+  shell (`curl`) and from its fetch tool, so the developer's citations are the
+  only direct reading: `v1.37.0/model/gen-ai/events.yaml` defines only
+  `gen_ai.client.inference.operation.details`; the `v1.38.0` release note says
+  "Introducing `Evaluation Event` in GenAI Semantic Conventions"; the `v1.38.0`
+  registry defines `gen_ai.evaluation.name` and `gen_ai.evaluation.score.label`.
+  That matches what is known of v1.38.0 independently, and the pin move is
+  self-consistent in-tree (the v1.36.0 comparison arm still swaps and still
+  observes the provider rename). Two things stay unverified from here: that
+  `v1.38.0` really is the first revision defining the event, and that
+  `_PROVIDER_ATTRIBUTES["v1.38.0"] = "gen_ai.provider.name"` matches the
+  v1.38.0 registry rather than being carried over from v1.37.0. Re-read both
+  from a networked host during T4 before this pin ships.
+
+- **The event is keyed on `source = 'verdict'`, not on a metric allowlist.**
+  `cmd_outcome` emits for any outcome whose source is `verdict` and whose
+  `--attempt` resolves to a span. `section_status` is `derived`, so it is
+  excluded structurally rather than by name, and a future verdict metric gets an
+  event without a second edit. The suite's three-way `Counter` equality is what
+  holds this honest: a `derived` row that started emitting would break it.
+
+- **The evaluation event degrades in four ways, all silent.** `cmd_outcome`
+  writes and commits the outcomes row first, then returns `0` without an event
+  when `SEMCONV` is `None` (`getattr(SEMCONV, "evaluation_event", None)`), when
+  the revision defines no names, when `--attempt` is absent or `--source` is not
+  `verdict`, or when the attempt has no `span_id`. Anything that still raises is
+  caught by `telemetry.py:893-897`, which prints to stderr and exits 0. So no
+  path exists where the row is lost because the event failed.
+
+- **`outcome_record_test.sh` puts `semconv.py` beside the engine on purpose, and
+  that is the packaged layout.** `_load_semconv`'s first candidate is
+  `<engine>/../semconv.py` (`telemetry.py:55`); the second is
+  `../../../src/pm_flow/semconv.py`, the checkout. `pyproject.toml:51` maps
+  `template/.agentic/pm_flow` to `pm_flow/engine`, so an installed wheel has
+  `pm_flow/engine/telemetry.py` next to `pm_flow/semconv.py` — candidate one,
+  exactly. The suite's `cp ... "$WORK/.agentic/semconv.py"` reproduces the
+  packaged relationship in a temp tree that has no `src/` above it; the dogfood
+  editable install resolves through candidate two. Both live paths load
+  `SEMCONV`, so the event is reachable in production, not only under test.
 
 - **The trap's status is `error`, and that is deliberate.** A process leaving
   through `fail` under `set -euo pipefail` did not finish its work, so `error`
@@ -117,17 +210,25 @@
 
 - **The attempt handle must be stashed by the dispatcher.**
   `telemetry_end_attempt` clears `TELEMETRY_ATTEMPT_ID` and
-  `TELEMETRY_ATTEMPT_SPAN` (`driver.zsh:843-844`) inside `dispatch_role`, which
+  `TELEMETRY_ATTEMPT_SPAN` (`driver.zsh:860-861`) inside `dispatch_role`, which
   returns before `record_cycle_decision` runs at all three call sites
-  (`:1376`, `:1505`, `:3433`). Without a stashed copy, an outcome row cannot
-  carry `attempt_id` and A1's join is impossible.
+  (`:1407`, `:1537`, `:3468`). Without the stash at `:858-859`, an outcome row
+  cannot carry `attempt_id` and A1's join is impossible.
 
 - **`gen_ai.` literals stay in `semconv.py`.**
-  `tests/otel_semconv_test.sh:820-836` greps `template/` and `src/` for
+  `tests/otel_semconv_test.sh:819-836` greps `template/` and `src/` for
   `gen_ai\.` and fails on any hit outside `src/pm_flow/semconv.py` (one
   comment-only `catalog.py` exemption). The evaluation event name and its
   attribute keys must therefore be resolved inside `telemetry.py` from
   `semconv.py`; `driver.zsh` may never spell them.
+
+- **The comparison pin runs a real dispatch, so T3's code executes under
+  `v1.36.0`.** `otel_semconv_test.sh:805` sed-swaps `REVISION` to `v1.36.0` in
+  a second tree, then `drive_dispatch` (`:385`) runs `pm-flow tick`, which
+  reaches a scope decision. `telemetry.py` also tolerates `SEMCONV is None`
+  (`:73`, guarded at `:628`). Both paths must skip the evaluation event and
+  still write the outcomes row; raising would convert an additive record into a
+  dispatch failure and break A5.
 
 - **New metrics cannot disturb `pm-flow compare`.** Both outcome queries in
   `compare.py` (`:468`, `:488`) filter `metric = 'section_status'` explicitly,
@@ -138,9 +239,9 @@
 
 - **The stashed handle is cleared at the start of every dispatch.**
   `telemetry_begin_attempt` now zeroes `TELEMETRY_LAST_ATTEMPT_ID` and
-  `TELEMETRY_LAST_ATTEMPT_SPAN` (`driver.zsh:797-800`), and
-  `telemetry_record_outcome` returns without writing a verdict row when the
-  handle is empty. So a decision parsed after a dispatch whose attempt never
+  `TELEMETRY_LAST_ATTEMPT_SPAN` (`driver.zsh:806-807`), and
+  `telemetry_record_outcome` (`:865`) returns without writing a verdict row
+  when the handle is empty (`:878`). So a decision parsed after a dispatch whose attempt never
   opened is dropped rather than attributed to the previous dispatch. T3 depends
   on the same pair for its span.
 
@@ -150,20 +251,40 @@
   `scope_decision|COMPLETE` row exists in the evidence. Cover it in T4's real
   run rather than adding a case that re-proves the same line.
 
-- **No store schema change is needed.** `outcomes` (`store.py:369-382`)
-  already carries `run_id`, `project_id`, `task_id`, `attempt_id`, `metric`,
-  `value_num`, `value_text`, `source`, and `telemetry.py`'s `outcome` parser
-  (`:839-844`) already exposes every one of them.
+- **No store schema change is needed, for the row or the event.** `outcomes`
+  (`store.py:369-382`) already carries `run_id`, `project_id`, `task_id`,
+  `attempt_id`, `metric`, `value_num`, `value_text`, `source`, and
+  `telemetry.py`'s `outcome` parser (`:843-848`) already exposes every one of
+  them. `span_events (span_id, at, name, attributes)` already exists and
+  `trace_export.py:142-148` already emits every row in it as an OTLP span
+  event, so T3 needs a caller and a name, not an exporter.
+
+- **`cmd_outcome` can resolve the span itself.** It already receives
+  `--attempt` (`telemetry.py:756`) and `attempts.span_id` is the `invoke_agent`
+  parent span written at `:625`. So the evaluation event needs no new handle
+  passed from `driver.zsh` and no second subprocess.
 
 - **`set -euo pipefail` still routes aborts around every straight-line close,
   and the trap is the only thing covering them.** `pm_flow.sh:2` sets
   `-euo pipefail` and `fail()` (`:84`) exits, so `assert_within_budget`
   (`driver.zsh:2851`, `:2929`), `resolve_section_dir` (`:2811`, `:2896`) and
   the unguarded `perform_action | sed` at `:2931` all terminate the process
-  before `telemetry_end_run` at `:2866`/`:2958`. That was candidate leak (b),
-  now observed by mutation and covered. Any future early exit added to
+  before `telemetry_end_run` at `:2866`/`:2958`; the trap is at `:779`. That
+  was candidate leak (b), now observed by mutation and covered. Any future early exit added to
   `cmd_tick` or `cmd_run` is covered by construction; do not add a second
   straight-line close for it.
+
+- **The three new `telemetry_begin_run` calls carry no open-run guard.**
+  Unlike the lazy open at `driver.zsh:810`, the calls at `:3751`, `:3805` and
+  `:3881` lack `[[ -n "$TELEMETRY_RUN_KEY" ]] ||`. All three are top-level
+  command handlers, so nothing today can reach them with a run already open; a
+  future caller that did would orphan the first row. Recorded in cycle 002's
+  review, not worth a change on its own.
+
+- **`--only-open` now makes every run close first-close-wins.** All thirteen
+  `telemetry_end_run` sites close once per path, so nothing depends on a later
+  close overwriting an earlier one. A future path that closes twice and expects
+  the second to win would silently lose it.
 
 ## Blockers
 
@@ -174,11 +295,23 @@
   backfilling those historical rows out of scope. A3 is proved by the two rows
   a T2 case creates inside its own store.
 
+- Not a blocker, and it outlived T3: outbound network is refused from the PM's
+  session in both directions tried — `curl` to `raw.githubusercontent.com` was
+  denied at scope time, and the fetch tool was denied at review time. The
+  developer's session had it too ("Could not resolve host") and used a browser
+  fetch instead. So every claim about the `semantic-conventions` registry in
+  this section rests on the developer's reading, quoted in cycle 003's
+  `result.md` and carried into Active decisions above. T4 runs against a real
+  backend and is the place to re-read the registry from a networked host.
+
 ## Next eligible task
 
-- T3 — emit a `gen_ai.evaluation.result` span event per decision, reusing
-  T1's stashed `TELEMETRY_LAST_ATTEMPT_SPAN`. Its unresolved question is the
-  pin: verify against the `semantic-conventions` repository whether v1.37.0
-  already defines the evaluation event, and move `REVISION` to v1.38.0 only if
-  it does not. T2 left `telemetry.py` with one new flag and no schema change,
-  so nothing in T3 is blocked by it.
+- T4 — prove all four scenarios end to end against a real backend. It is now
+  the only pending task. Three things fold into it that earlier cycles
+  deliberately deferred: the first observation of a `scope_decision|COMPLETE`
+  row, which no stubbed case produces; `runs.command` mislabelling the three
+  on-demand commands as `tick` (fix at `driver.zsh:3751`, `:3805`, `:3881` or
+  record as accepted, since `compare.py:492` groups by it); and the registry
+  re-read behind the `v1.38.0` pin. Docker was up during cycle 003's review and
+  `otel_semconv_test.sh`'s Jaeger assertion (A6) passed, so the backend T4 needs
+  is available on this host.
