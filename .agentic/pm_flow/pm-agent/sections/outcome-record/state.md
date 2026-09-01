@@ -8,6 +8,35 @@
 
 ## Completed tasks and evidence
 
+- **A1–A5 re-verified on merged `main`, cycle 005 scope.** Every prior cycle's
+  evidence was collected in a developer worktree or against the pre-merge tree.
+  Re-run by the PM against the checkout at `main` (`git status --porcelain --
+  tests template src` empty, so no uncommitted engine edit is propping anything
+  up):
+  - `zsh tests/outcome_record_test.sh` — exit 0. The join returns the same six
+    rows including `scope_decision|COMPLETE|verdict|pm|tick` and
+    `portfolio_verdict|ON_TRACK|verdict|cpo|portfolio-review`; six
+    `gen_ai.evaluation.result` `span_events` on five attempt spans; the same six
+    in the exported OTLP JSON; and `PASS: Jaeger re-serves one evaluation event
+    per verdict on its attempt span` against the live container, across five
+    trace ids (e.g. `curl -s
+    'http://localhost:16686/api/traces/b993f62e85b4e40afd2ff07340d6bf7f'`
+    returning span `fc6d31cc1977c3cd` with two `logs` entries,
+    `review_verdict`/`GO_WITH_CHANGES` and `obstruction_class`/`NONE`). Runs
+    table: ten rows, all `closed`, `6|portfolio-review|ok`, `9|run|ok`,
+    `10|tick|error`. `UNWRITABLE RUN EXIT: 0` and `UNWRITABLE TICK EXIT: 0`.
+  - `zsh tests/otel_semconv_test.sh` — exit 0, all six PASS lines including
+    `PASS: changing only the pin changes the receiver provider attribute` and
+    `PASS: standard GenAI literals are centralised in semconv.py`; A6 ran
+    (`PASS: a stock backend re-serves the invoke_agent -> chat tree`).
+  - `zsh template/.agentic/pm_flow/tests/run.zsh` — exit 0, "all suites
+    passed", 35 + 41 + 32 + 59 + 74 with `fail=0`.
+  - Pin confirmed in place on `main`: `src/pm_flow/semconv.py:16` reads
+    `REVISION = "v1.38.0"`. The three on-demand handlers read
+    `${PM_FLOW_COMMAND:-portfolio-review}` (`driver.zsh:3751`),
+    `${PM_FLOW_COMMAND:-section-analysis}` (`:3805`) and
+    `${PM_FLOW_COMMAND:-proposals}` (`:3881`), with the override intact.
+
 - **T1 (A1) — accepted, cycle 001.** Every parsed decision is written as an
   `outcomes` row at its parse site, joined to the attempt and run that produced
   it.
@@ -398,9 +427,10 @@
 
 ## Next eligible task
 
-- None. T1, T2, T3 and T4 are all done and accepted, and every acceptance ID in
-  the brief (A1–A5) is on evidence, including A2's live-backend half. The next
-  scope decision for this section is COMPLETE.
+- None. T1, T2, T3 and T4 are all done and accepted, every acceptance ID in the
+  brief (A1–A5) is on evidence including A2's live-backend half, and all five
+  were re-observed on merged `main` at cycle 005 scope. The section is
+  COMPLETE.
 
 - Carried to whoever picks up the tail, none of it in this brief's scope:
   - `jaeger_reachable` and `ensure_jaeger` are now duplicated verbatim in
