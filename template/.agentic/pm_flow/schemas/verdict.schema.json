@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "verdict.schema.json",
+  "title": "Parsed markdown verdict",
+  "type": "object",
+  "required": ["heading", "token", "value_line"],
+  "properties": {
+    "heading": {
+      "type": "string",
+      "enum": ["Decision"]
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z_]*\\b"
+    },
+    "value_line": {
+      "type": "string"
+    }
+  },
+  "x-heading-name": "Decision",
+  "x-allowed-token-sets": {
+    "scope": ["ASSIGN", "COMPLETE", "BLOCKED_EXTERNAL"],
+    "developer_status": ["DELIVERED", "PARTIAL", "BLOCKED"],
+    "cycle_review": ["GO", "GO_WITH_CHANGES", "NO_GO"],
+    "obstruction": ["NONE", "HARNESS", "TASK"],
+    "convergence_review": ["CONTINUE", "RESCOPE", "BLOCKED_EXTERNAL", "ABANDON"],
+    "maintenance": ["CLEARED", "NOT_PLUMBING", "UNRESOLVED"],
+    "adjudication": ["ADOPT", "ADOPT_PARALLEL", "SYNTHESIZE", "ABANDON"],
+    "portfolio_review": ["ON_TRACK", "OFF_TRACK"],
+    "section_proposal": ["CUT", "DECLINE"]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "handoff.schema.json",
+  "title": "Parsed section handoff",
+  "type": "object",
+  "required": [
+    "outcome",
+    "decisions",
+    "interfaces",
+    "risks",
+    "unproven",
+    "next_action",
+    "word_count",
+    "byte_count"
+  ],
+  "properties": {
+    "outcome": {"type": "string", "title": "Outcome"},
+    "decisions": {"type": "string", "title": "Decisions"},
+    "interfaces": {"type": "string", "title": "Interfaces"},
+    "risks": {"type": "string", "title": "Risks"},
+    "unproven": {"type": "string", "title": "What is unproven"},
+    "next_action": {"type": "string", "title": "Next action"},
+    "word_count": {
+      "type": "integer",
+      "maximum": 500
+    },
+    "byte_count": {
+      "type": "integer",
+      "maximum": 8192
+    }
+  }
+}

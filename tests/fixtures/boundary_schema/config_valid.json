@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "domain": "generic",
+  "roles": {
+    "developer": {
+      "cli": "acp",
+      "model": "example-model",
+      "difficulty": "high"
+    },
+    "consultant": [
+      {
+        "cli": "claude",
+        "model": "example-model",
+        "difficulty": "xhigh"
+      },
+      {
+        "cli": "codex",
+        "model": "example-model",
+        "difficulty": "max"
+      }
+    ]
+  },
+  "access": {
+    "write_roles": ["developer"],
+    "scoped_roles": [],
+    "scoped_write_paths": [],
+    "scoped_isolate_settings": true
+  },
+  "isolation": {
+    "worktrees": true
+  },
+  "telemetry": {
+    "enabled": 1,
+    "otlp_endpoint": "",
+    "headers": {}
+  },
+  "budget": {
+    "max_usd": 0,
+    "max_usd_per_section": 0
+  },
+  "governance": {
+    "portfolio_review_dispatches": 12,
+    "portfolio_review_usd": 20,
+    "portfolio_review_idle_cycles": 8
+  },
+  "escalation": {
+    "failures_before_consultant": 2,
+    "max_rescue_attempts": 1,
+    "cycles_before_convergence_review": 6,
+    "scope_history_cycles": 1,
+    "failure_brief_cycles": 3,
+    "max_maintenance_attempts": 2
+  },
+  "supervision": {
+    "heartbeat_stall_seconds": 900,
+    "silent_stall_seconds": 3600,
+    "max_attempt_seconds": 10800,
+    "max_attempts": 4,
+    "max_step_claims": 3,
+    "retry_backoff_seconds": 30,
+    "usage_limit_pause_seconds": 1800
+  }
+}

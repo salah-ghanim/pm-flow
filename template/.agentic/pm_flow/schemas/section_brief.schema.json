@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "section_brief.schema.json",
+  "title": "Parsed section brief",
+  "type": "object",
+  "required": ["shape", "headings", "acceptance_ids", "priority"],
+  "properties": {
+    "shape": {
+      "type": "string",
+      "enum": ["legacy", "full"]
+    },
+    "headings": {
+      "type": "object"
+    },
+    "acceptance_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["must-have", "nice-to-have"]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "shape": {
+          "enum": ["legacy"]
+        },
+        "headings": {
+          "required": [
+            "Objective",
+            "Scope",
+            "Priority",
+            "Owned paths",
+            "Dependencies",
+            "Acceptance",
+            "Rejection conditions"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "shape": {
+          "enum": ["full"]
+        },
+        "headings": {
+          "required": [
+            "Objective",
+            "Current baseline",
+            "Deliverables",
+            "User-visible scenarios",
+            "Interfaces produced",
+            "Interfaces consumed",
+            "Scope",
+            "Non-goals",
+            "Priority",
+            "Owned paths",
+            "Dependencies",
+            "Constraints and fixed decisions",
+            "Acceptance",
+            "Rejection conditions",
+            "Open questions"
+          ]
+        },
+        "acceptance_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^`?A[0-9]+`?\\s*[:.—-]"
+          }
+        }
+      }
+    }
+  ]
+}
