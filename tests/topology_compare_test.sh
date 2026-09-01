@@ -914,9 +914,9 @@ grep -F 'cost.import_legacy(project_dir)' "$FLOW/compare.py" >/dev/null || \
 ! grep -F 'topology_comparison' "$FLOW/compare.py" >/dev/null || \
   fail "report reads cost from topology_comparison"
 driver_source="$(<"$FLOW/driver.zsh")"
-[[ "$driver_source" == *'telemetry_record_outcome "$(basename "$section_dir")" abandoned'* ]] || \
+[[ "$driver_source" == *'telemetry_record_outcome section_status abandoned "$(basename "$section_dir")"'* ]] || \
   fail "abandonment does not emit section_status"
-[[ "$driver_source" == *'telemetry_record_outcome "$section_key" complete'* ]] || \
+[[ "$driver_source" == *'telemetry_record_outcome section_status complete "$section_key"'* ]] || \
   fail "completion does not emit section_status"
 
 printf 'PASS: topology compare reports literal metrics, limits, personas, and copy retention\n'
