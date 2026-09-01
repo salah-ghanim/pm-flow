@@ -2,10 +2,56 @@
 
 ## Current task
 
-- T3 — golden-grid migrated, with the run recorded. T1 and T2 are accepted; A1
-  is complete. T3 cannot start until golden-grid is reachable (see Blockers).
+- T4 — golden-grid surveyed, backed up and migrated. T1-T3 are accepted; A1 is
+  complete and A2's method is fixed and executable. T4 is not dispatchable in the
+  role sandbox by construction (see Blockers); it needs the operator to run the
+  published runbook and paste the transcript back into `docs/real-install.md`.
 
 ## Completed tasks and evidence
+
+- T3 (A2's method — the transcript format and the checks A2 will be read from;
+  A2 itself still needs T4's real output) — accepted cycle 003.
+  - `zsh /Users/salah/code/personal/.pm-flow-worktrees/pm-flow/pm-agent/real-install/tests/real_install_test.sh`
+    exits 0 with 13 PASS, adding four to T2's nine: `runbook survey reports the
+    legacy layout and independent ledger arithmetic`; `extracted runbook backs
+    up, migrates, and verifies the fixture end to end`; `runbook survey counts
+    empty legacy response fields without importing them`; `runbook negative
+    controls reject unmigrated verification and unbacked migration`.
+  - `zsh …/tests/packaged_layout_test.sh` exits 0 with 13 PASS.
+  - The published text is the executed text, proved by mutation rather than by
+    reading the extraction line (`sections/real-install/probe_doc_coupling_003.zsh`):
+    one string changed inside the fence of a *copy* of `docs/real-install.md`
+    (`print 'verify=ok'` → `print 'verify=PROBE_MUTATION'`) drops the suite from
+    13 PASS to 10 and exits 1 with `FAIL: the runbook completes all migration
+    verification: expected to find 'verify=ok'`. Drift between the published and
+    the executed commands now breaks the build.
+  - `verify` has teeth, proved by three mutations against throwaway fixtures
+    (`sections/real-install/probe_runbook_003.zsh`):
+    - Data loss: rewriting `alpha/project_state/plan.md` between `backup` and
+      `migrate` makes `verify` exit 1 with `ERROR: surveyed project data was lost
+      or rewritten: alpha/project_state/plan.md`.
+    - Surviving engine: replanting `pm_flow.sh` in the *migrated* flow dir makes
+      `verify` print `copied_engine_remaining=pm_flow.sh` and exit 1 with
+      `copied engine survives migration`. The suite's own negative control covers
+      the unmigrated tree.
+    - `migrate` with a fresh `--out` exits 1 with `ERROR: missing verified backup
+      manifest`.
+  - `survey` is read-only under `--repo`, measured rather than asserted: a
+    sha256 manifest of every file in the fixture repository, taken by the probe
+    before and after the survey phase, compares equal. `verify` proves the same
+    property about itself in-band, digesting `--repo` at its start and end and
+    failing on any difference.
+  - The survey reads the copied-engine names out of `install.sh` and restates
+    none: `copied_engine_present=` printed all 22 files and 10 dirs including
+    `export.py` and `schemas`, with `collision=project` naming the workspace key
+    that shadows a `COPIED_ENGINE_DIRS` entry. `git_worktree=true` comes from the
+    printed `rev-parse` value, not its exit status.
+  - The fixture's shared ledgers are untouched — T2's `rows=3 total=7.5000`
+    parity block still passes, and the two empty-response rows are appended to a
+    throwaway clone inside the suite, which reports
+    `workspace=alpha ledger=present rows=5 total=10.5000 empty_response_rows=2`.
+  - `docs/real-install.md` states no golden-grid figure as observed; every value
+    is marked a placeholder pending T4, and the suite never names the real path.
 
 - T2 (A1, installed-tick half — A1 complete; fixes the arithmetic method A4
   later applies to golden-grid) — accepted cycle 002.
@@ -86,9 +132,33 @@ cycle 002; evidence above. One new defect, in an unowned file, replaces them.
     honest and green either way.
   - Consequence for this section: A4's independent arithmetic will disagree with
     `cost.py total` on any golden-grid workspace whose legacy TSV has more than
-    one empty-response row. This must be escalated through `handoff.md` and
-    settled before T5, and golden-grid's real TSVs should be scanned for empty
-    response fields as part of T3's survey rather than discovered at T5.
+    one empty-response row. This is escalated through `handoff.md` and must be
+    settled before T6; the runbook's survey phase (T3) counts empty response
+    fields per ledger, so T4's run reports the exposure instead of T6 meeting it
+    as a surprise over real money.
+
+- Carried into T4 from cycle 003, not a defect in the runbook but a limit of it:
+  `verify`'s status step does not exercise golden-grid's own path resolution.
+  `pm-flow status` imports legacy costs and writes the store at
+  `runs/pm_flow.db` (`src/pm_flow/paths.py:46,161`), which is under `--repo`, so
+  a phase that must leave `--repo` byte-identical cannot run it there. The
+  runbook resolves this honestly and says so in a comment: cwd is `$repo`, but
+  `PM_FLOW_REPO_ROOT` (`src/pm_flow/paths.py:82`) points at an exact copy of the
+  migrated flow dir under `--out`. That proves the venv's binary reads the
+  migrated data; it does not prove scenario 1 in place. T4 must therefore record
+  a separate, direct `.venv/bin/pm-flow status` run in golden-grid *after*
+  `verify` returns `verify=ok` — a legitimate write under the brief's
+  golden-grid constraint — or A2 is settled only for a copy.
+
+- Two smaller hazards to watch when the runbook first meets real data, neither
+  worth a change against the fixture:
+  - `empty_response_rows` counts every ledger line with `NF < 6`, so a genuine
+    blank line inside a legacy TSV inflates the count by one. It cannot deflate
+    it, so it stays a safe over-report of the `cost.py` exposure.
+  - `verify` exempts the refreshed `task_contract.md`, `start.md` and
+    `resume.md` only when `--project-key` is passed. Run standalone without it,
+    `verify` would report the selected workspace's own refreshed files as lost.
+    The documented path (`all` with `--project-key`) is unaffected.
 
 ## Active decisions
 
@@ -105,7 +175,14 @@ cycle 002; evidence above. One new defect, in an unowned file, replaces them.
   the suite also pins the no-key failure message from 460-463.
 - A full backup of golden-grid is taken and verified before `install.sh` runs
   there, and its location is recorded in `docs/real-install.md`. This settles
-  the brief's first open question.
+  the brief's first open question. The runbook enforces it: `migrate` refuses to
+  run unless a verified backup manifest exists.
+- The operator's commands live in `docs/real-install.md` as one extractable
+  script, and `tests/real_install_test.sh` extracts and runs *that text* against
+  the fixture. A runbook nobody executes rots; this way an edit that breaks it
+  breaks the suite. Running it over the fixture proves the script works and
+  proves nothing about golden-grid — A2 stays settled by the committed real
+  transcript alone.
 - Independent arithmetic for A4 is computed from the TSV bytes by a formula
   written down in `docs/real-install.md`, never by reading `cost.py`'s own
   output back. Copying the tool's figure is a stated rejection condition.
@@ -120,25 +197,45 @@ cycle 002; evidence above. One new defect, in an unowned file, replaces them.
 
 ## Blockers
 
-- None external. golden-grid is not reachable from this role's sandbox — probed
-  this cycle, `ls /Users/salah/code/personal/golden-grid` refused with "Claude
-  Code may only list files in the allowed working directories for this session:
-  '/Users/salah/code/personal/pm-flow'". T1 and T2 are fully executable here;
-  the grant (`DISPATCH_EXTRA_DIRS`, `driver.zsh:2539-2557`) or an operator run
-  is needed only before T3.
+- None external, and the reachability question is now closed rather than open.
+  The driver's extra-dir grant is not configurable: `dispatch_role` passes
+  `--work-root` and each `DISPATCH_EXTRA_DIRS` entry (`driver.zsh:1076-1082`),
+  and the only caller that populates them, `driver.zsh:1476`, passes the section
+  directory and nothing else. No dispatched developer can be granted
+  `/Users/salah/code/personal/golden-grid` without editing `driver.zsh`, which
+  this section does not own and will not touch. Re-probed for the record this
+  cycle: `ls /Users/salah/code/personal/golden-grid` refused with "Claude Code
+  may only list files in the allowed working directories for this session:
+  '/Users/salah/code/personal/pm-flow'".
+- Consequence, and the reason for the re-cut: A2, A3, A4 and A5 are settled by
+  an operator run, which is the brief's own second route ("an operator-run probe
+  whose output is committed"). T3 is fully executable in the sandbox and makes
+  that run one tested command; T4-T6 then need the operator, not a code change.
+  This is escalated through `handoff.md` as a request for an operator run, not
+  as an external blocker.
 
 ## Open questions
 
-- Which golden-grid workspace hosts the real cycle (T4). Answered by the T3
-  probe output, not by guessing from here.
+- Which golden-grid workspace hosts the real cycle (T5). Answered by T4's survey
+  output, not by guessing from here.
 - Whether golden-grid's ten workspaces include a name colliding with
-  `COPIED_ENGINE_DIRS` (`install.sh:74-84`). The T3 listing settles it; T1
-  assumes at least one collision and proves the workspace survives regardless.
+  `COPIED_ENGINE_DIRS` (`install.sh:75-86`). T4's survey settles it; T1 assumes
+  at least one collision and proves the workspace survives regardless.
+- Whether golden-grid is a git work tree with `agentic/` tracked. If it is not,
+  `migrate_legacy_flow_dir` falls to plain `mv` (`install.sh:279-284`) and
+  scenario 2's "recorded rename" cannot be produced; the survey must report this
+  before `migrate` runs, not after.
 
 ## Next eligible task
 
-- T3 — golden-grid migrated, with the run recorded. Not dispatchable from this
-  role's sandbox until the driver grants `/Users/salah/code/personal/golden-grid`
-  via `DISPATCH_EXTRA_DIRS` (`driver.zsh:2539-2557`) or the operator runs the T3
-  runbook and its output is committed. T3's survey must also record which
-  golden-grid ledgers carry empty response fields (see Carried defects).
+- T4 — golden-grid surveyed, backed up and migrated. Nothing in this sandbox
+  advances it: the work is one operator command, already published and tested.
+  From a pm-flow checkout, extract the script between the `runbook:begin` /
+  `runbook:end` markers of `docs/real-install.md` and run it as
+  `<script> all --repo /Users/salah/code/personal/golden-grid --project-key
+  <key> --name "Golden Grid"`, then commit the transcript into that document's
+  `Golden-grid evidence` section, replacing the placeholders. `migrate` refuses
+  without a verified backup, so a single `all` run cannot skip the rollback copy.
+  The survey answers all three open questions below before `install.sh` touches
+  anything, and T4 must add the direct in-place `pm-flow status` run named under
+  Carried defects.

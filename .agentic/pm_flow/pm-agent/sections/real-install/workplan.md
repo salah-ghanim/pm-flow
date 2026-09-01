@@ -49,10 +49,28 @@ the captured output of each run, committed in this repository. Independent
 arithmetic for A4 is computed from the TSV bytes by a formula written in the
 doc, never by reading `cost.py`'s own answer back.
 
+Cycle 003 settles *how* that operator run happens, because the sandbox question
+is now answered in code rather than by probe. A dispatched role is granted
+`--work-root` plus `DISPATCH_EXTRA_DIRS`, and the only caller,
+`driver.zsh:1476`, passes exactly one extra directory — the section directory
+(`begin_worktree_dispatch "$(basename "$section_dir")" "$section_dir"`). There
+is no configuration that adds another path, so no dispatched developer will ever
+reach `/Users/salah/code/personal/golden-grid` without a change to `driver.zsh`,
+which this section does not own. The brief's second route is therefore the route:
+an operator-run probe whose output is committed. What makes that honest evidence
+rather than prose is that the operator runs a *script this repository ships and
+tests* — the runbook in `docs/real-install.md`, extracted and executed by the
+suite against the fixture, so the doc cannot drift from what actually runs. The
+fixture proves the runbook executes; only the operator's captured golden-grid
+transcript settles A2.
+
 ## Interfaces and data changes
 
 - New: `tests/real_install_test.sh`, `tests/fixtures/real_install/**`,
   `docs/real-install.md`. No change to any existing test's contract.
+- `docs/real-install.md` is two things at once from T3 on: the evidence record,
+  and the executable runbook the suite extracts and runs. Its extraction markers
+  are therefore load-bearing text, not formatting.
 - `install.sh` behaviour change expected under T1: which workspaces migration
   treats as named, and what `projects.md` lists afterwards. Both are additive
   — a single-workspace install with a `.project-key` must behave exactly as it
@@ -122,28 +140,63 @@ doc, never by reading `cost.py`'s own answer back.
   `zsh tests/packaged_layout_test.sh` still 13 PASS.
 - Depends on: T1.
 
-## Task T3 — golden-grid migrated, with the run recorded
+## Task T3 — the golden-grid runbook, executable by the operator and tested here
 
-- Status: pending
-- Outcome: `install.sh` has run against `/Users/salah/code/personal/
-  golden-grid`; its flow dir holds no copied-engine name, its venv's `pm-flow`
-  reports status, its ten workspaces and run history survive, and
-  `docs/real-install.md` carries the runbook plus the verbatim output of the
-  backup, the install, and the after-state probes.
+- Status: done (cycle 003; the runbook is published in `docs/real-install.md`
+  between the extraction markers and executed from there by the suite, which is
+  now at 13 PASS. One carried requirement into T4: `verify` runs `pm-flow
+  status` against a snapshot copy under `--out`, so scenario 1 still needs a
+  direct `.venv/bin/pm-flow status` in golden-grid — see `state.md`.)
+- Outcome: `docs/real-install.md` exists and carries, between extraction
+  markers, one runnable zsh script with four phases — `survey` (read-only),
+  `backup` (copy and verify), `migrate` (`install.sh` only), `verify` —
+  that an operator runs against `/Users/salah/code/personal/golden-grid` in one
+  command and that prints a transcript fit to be pasted back into the same
+  document as A2's evidence. `tests/real_install_test.sh` extracts that same
+  script out of the document and runs it against a copy of the legacy fixture,
+  so the published commands are the executed commands, plus a negative control
+  showing `verify` fails on an unmigrated tree.
+- Paths: `docs/real-install.md`, `tests/real_install_test.sh`,
+  `tests/fixtures/real_install/**`, `README.md`.
+- Reuse: the suite's `install_array_names` sed parse of `COPIED_ENGINE_FILES` /
+  `COPIED_ENGINE_DIRS` (`tests/real_install_test.sh:284-301`) — the runbook
+  reads the same arrays out of `install.sh` and never restates them; the
+  `digest_tree.py` manifest and `assert_digest_lines_present` pattern (149-162,
+  42-49) for the survive-the-migration comparison; the independent ledger
+  arithmetic `awk -F '\t' 'NF >= 5 { count += 1; total += $5 }'` (308-310);
+  the rename check against `git diff --cached -M --name-status` (245-249);
+  `tests/fixtures/real_install/build_fixture.sh` for the tree to self-test on.
+- Acceptance IDs: A2's method (the transcript format and the checks A2 will be
+  read from). A2 itself is settled only by T4's real output.
+- Validation: `zsh tests/real_install_test.sh` exits 0, with new PASS lines for
+  the runbook survey, the full runbook run over the fixture, and the negative
+  control; `zsh tests/packaged_layout_test.sh` still 13 PASS.
+- Depends on: T2.
+
+## Task T4 — golden-grid surveyed, backed up and migrated
+
+- Status: pending (needs the operator to run T3's runbook; not dispatchable in
+  the role sandbox — see Risks)
+- Outcome: the runbook has run against `/Users/salah/code/personal/
+  golden-grid`; a verified backup exists, `install.sh` has run, the flow dir
+  holds no copied-engine name, its venv's `pm-flow` reports status, its ten
+  workspaces and run history survive, and `docs/real-install.md` carries the
+  verbatim transcript of all four phases.
 - Paths: `docs/real-install.md`, `install.sh` (only if the real tree forces a
   fix the fixture did not), `tests/real_install_test.sh` and
   `tests/fixtures/real_install/**` (extend the fixture with any shape
-  golden-grid turns out to have that T1 did not reproduce).
-- Reuse: the T1/T2 command sequence, run against the real path; the
-  `COPIED_ENGINE_*` lists as the checklist for the absence probe.
+  golden-grid turns out to have that T1-T3 did not reproduce, and re-run the
+  suite over it).
+- Reuse: T3's runbook verbatim; the `COPIED_ENGINE_*` arrays as the checklist.
 - Acceptance IDs: A2.
-- Validation: the committed output in `docs/real-install.md` shows
-  `removed_copied_engine=N` and the recorded rename, then
-  `git -C golden-grid status --short` naming only migration paths, and
-  `.venv/bin/pm-flow status` naming the project.
-- Depends on: T2.
+- Validation: the committed transcript shows `removed_copied_engine=N`,
+  `migrated=agentic -> .agentic` with the `R` rename lines from
+  `git diff --cached -M --name-status`, `git -C golden-grid status --short`
+  naming only migration paths, the before/after workspace manifests agreeing,
+  and `.venv/bin/pm-flow status` naming the project.
+- Depends on: T3.
 
-## Task T4 — one real cycle in golden-grid
+## Task T5 — one real cycle in golden-grid
 
 - Status: pending
 - Outcome: a section cycle ran there through the installed command, and
@@ -157,11 +210,11 @@ doc, never by reading `cost.py`'s own answer back.
 - Validation: committed `git -C golden-grid log --oneline -n 3` showing the
   driver commit, and the `pm-flow status` output for the same section before
   and after.
-- Depends on: T3.
+- Depends on: T4.
 
 ## Integration and end-to-end validation
 
-## Task T5 — parity and traces from the real install, scenarios 1-6 in one pass
+## Task T6 — parity and traces from the real install, scenarios 1-6 in one pass
 
 - Status: pending
 - Outcome: `docs/real-install.md` is complete evidence: per-workspace
@@ -170,28 +223,41 @@ doc, never by reading `cost.py`'s own answer back.
   successful `trace export` containing golden-grid spans, and a final recorded
   pass of scenarios 1-6 in order. `README.md` points at the document.
 - Paths: `docs/real-install.md`, `README.md`.
-- Reuse: the arithmetic formula fixed in T2; `pm-flow trace status|export` as
-  proved by `tests/trace_commands_test.sh:825-860`.
+- Reuse: the arithmetic formula fixed in T2 and re-published in T3's runbook
+  survey; the survey's per-workspace empty-response row count, which says in
+  advance where `cost.py`'s drop will make the two figures disagree;
+  `pm-flow trace status|export` as proved by
+  `tests/trace_commands_test.sh:825-860`.
 - Acceptance IDs: A4, A5 (and the recorded re-pass of A1-A3).
 - Validation: the committed block shows, per workspace, the TSV-derived total
   and the `cost.py total` figure agreeing; the export command exiting 0 with
   golden-grid span names in its output; `zsh tests/real_install_test.sh`
   exiting 0 on `main`.
-- Depends on: T4.
+- Depends on: T5.
 
 ## Risks and rollback
 
-- golden-grid is unreachable from the dispatch sandbox (probed this cycle:
-  `ls /Users/salah/code/personal/golden-grid` is refused, "Claude Code may only
-  list files in the allowed working directories"). T1 and T2 do not need it.
-  Before T3 is assigned, the driver must grant it via `DISPATCH_EXTRA_DIRS`
-  (`driver.zsh:2539-2557`) or the operator runs the T3 runbook and the output
-  is committed. Substituting the fixture is a rejection condition, not a
-  fallback.
-- Data loss during T3 is the one irreversible risk. Rollback: a full copy of
-  golden-grid taken and verified *before* `install.sh` runs, with the copy's
-  location and a listing recorded in `docs/real-install.md` (settles the
-  brief's first open question: yes, always).
+- golden-grid is unreachable from the dispatch sandbox, and this is now
+  structural rather than incidental. `dispatch_role` grants `--work-root` plus
+  `DISPATCH_EXTRA_DIRS` (`driver.zsh:1076-1082`); the only caller that sets
+  those, `driver.zsh:1476`, passes the section directory and nothing else, and
+  no configuration widens it. Re-probed this cycle for the record:
+  `ls /Users/salah/code/personal/golden-grid` is refused with "Claude Code may
+  only list files in the allowed working directories for this session:
+  '/Users/salah/code/personal/pm-flow'". So T4-T6 are operator-run by
+  construction, and T3 exists to make that run one tested command instead of a
+  pasted sequence. Substituting the fixture for the real install remains a
+  rejection condition, not a fallback.
+- Data loss during T4 is the one irreversible risk. Rollback: a full copy of
+  golden-grid taken and verified *before* `install.sh` runs — the runbook's
+  `backup` phase, which `migrate` refuses to run without — with the copy's
+  location and manifest recorded in `docs/real-install.md` (settles the brief's
+  first open question: yes, always).
+- A runbook that is published but never executed is the failure mode of every
+  runbook. Guard: the suite extracts the script from `docs/real-install.md`
+  itself and runs it, so an edit to the document that breaks the script breaks
+  the build, and a `verify` phase that would pass on anything is caught by the
+  negative control against an unmigrated tree.
 - `cost.py`'s dedupe keys on `response_path` (`cost.py:176-203`), so several
   ledger rows with an empty response field collapse to the single key `""` and
   all but the first are dropped — a plausible shape in a legacy TSV, and it
@@ -214,7 +280,7 @@ doc, never by reading `cost.py`'s own answer back.
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
 | A1 | T1, T2 | `zsh tests/real_install_test.sh` exits 0 over a fixture with `agentic/`-rooted pre-sections `pm_flow.sh`, ≥3 workspaces, no `.project-key`, legacy TSVs; an installed tick after migration |
-| A2 | T3 | Committed operator output: `removed_copied_engine=N`, recorded rename, no copied-engine name left, `pm-flow status` from golden-grid's venv, workspaces and history intact |
-| A3 | T4 | Committed driver commit SHA in golden-grid's `git log` and the advanced-cycle `pm-flow status` |
-| A4 | T5 | Per-workspace `imported=N`, `imported=0` on re-run, `cost.py total` equal to arithmetic computed from the TSV independently |
-| A5 | T5 | `pm-flow trace status` listing spans and a `trace export` exiting 0 with golden-grid spans in its output |
+| A2 | T3 (method), T4 (evidence) | T3: the runbook in `docs/real-install.md` runs end to end over the fixture from the suite, and its `verify` phase fails on an unmigrated tree. T4: the operator's committed golden-grid transcript — `removed_copied_engine=N`, the recorded rename, no copied-engine name left, `pm-flow status` from golden-grid's venv, workspaces and history intact |
+| A3 | T5 | Committed driver commit SHA in golden-grid's `git log` and the advanced-cycle `pm-flow status` |
+| A4 | T6 | Per-workspace `imported=N`, `imported=0` on re-run, `cost.py total` equal to arithmetic computed from the TSV independently, with T3's survey having named the workspaces where empty response fields make disagreement expected |
+| A5 | T6 | `pm-flow trace status` listing spans and a `trace export` exiting 0 with golden-grid spans in its output |
