@@ -613,9 +613,11 @@ PY
 refresh_sections_index() {
   ensure_state_dir
   mkdir -p "$SECTIONS_DIR"
-  python3 - "$PROJECT_ROOT" "$PROJECT_DIR" "$SECTIONS_DIR" "$SECTIONS_INDEX_FILE" "$SECTIONS_DIR/.index.lock" <<'PY'
+  python3 - "$PROJECT_ROOT" "$PROJECT_DIR" "$SECTIONS_DIR" "$SECTIONS_INDEX_FILE" \
+    "$SECTIONS_DIR/.index.lock" "$SCRIPT_DIR/schemas/handoff.schema.json" <<'PY'
 from pathlib import Path
 import fcntl
+import json
 import os
 import sys
 
@@ -626,8 +628,28 @@ index_path = Path(sys.argv[4]).resolve()
 # The mutex lives beside the data it guards. Under tempfile.gettempdir() two
 # workers with different TMPDIR values lock different files and exclude nothing.
 lock_path = Path(sys.argv[5])
+schema_path = Path(sys.argv[6])
 lock_path.parent.mkdir(parents=True, exist_ok=True)
 lock_path.touch(exist_ok=True)
+
+try:
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    properties = schema["properties"]
+    word_max = properties["word_count"]["maximum"]
+    byte_max = properties["byte_count"]["maximum"]
+    handoff_fields = [
+        properties[field]["title"].lower()
+        for field in schema["required"]
+        if "title" in properties[field]
+    ]
+except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+    raise SystemExit(f"cannot load handoff schema at {schema_path}: {error}")
+
+field_summary = ", ".join(handoff_fields[:-1]) + f", and {handoff_fields[-1]}"
+handoff_summary = (
+    f"A handoff is capped at {word_max} words and {byte_max} bytes and carries "
+    f"only {field_summary}."
+)
 
 def first_line(path: Path, default: str) -> str:
     if not path.is_file():
@@ -673,7 +695,7 @@ with lock_path.open("a+") as lock:
         "",
         "Allowed statuses: `planned`, `active`, `blocked`, `done`, `cancelled`.",
         "Priority is `must-have` or `nice-to-have`; a section created before priorities existed reads as `must-have`.",
-        "A handoff is capped at 500 words and 8192 bytes and carries only outcomes, decisions, interfaces, risks, what is unproven, and the next action.",
+        handoff_summary,
         "A handoff is a claim. Check the artifact it names before acting on it.",
         "",
     ])
@@ -915,93 +937,15 @@ assert_matches() {
   printf '%s\n' "$haystack" | python3 -c 'import re, sys; sys.exit(0 if re.search(sys.argv[1], sys.stdin.read(), re.MULTILINE) else 1)' "$pattern" || fail "content missing valid $label"
 }
 
-# Parse a verdict section out of a role's markdown response.
-#
-# The response has already been paid for by the time this runs, so the parser is
-# deliberately forgiving about presentation and strict only about the verdict
-# token. It accepts atx headings, bare heading lines, numbered headings, bold
-# headings, a verdict on the heading line itself, and value lines that arrive
-# blockquoted, bulleted, numbered or emphasised. More than one section with the
-# heading is no longer an error: the last one that carries a legal token wins,
-# because a role that restates its verdict at the end means the last statement.
-#
+# Parse a verdict section out of a role's markdown response. The parser lives in
+# export.py so the shell and schema checker cannot drift apart.
 # Prints two lines: the verdict token, then the whole value line it came from.
 markdown_verdict_parse() {
   local response="$1"
   local allowed_csv="$2"
   local heading="${3:-Decision}"
-  printf '%s\n' "$response" | python3 -c '
-import re
-import sys
-
-allowed = set(sys.argv[1].split(","))
-heading_name = sys.argv[2]
-lines = sys.stdin.read().splitlines()
-
-heading_re = re.compile(
-    r"^[\s>]*"
-    r"(?:#{1,6}\s*)?"
-    r"(?:\d+[.)]\s*)?"
-    r"(?:\*{1,3}|_{1,3})?\s*"
-    + re.escape(heading_name)
-    + r"\s*(?:\*{1,3}|_{1,3})?"
-    r"\s*(?:[:\-]+[ \t]*(?P<inline>.*?))?\s*$",
-    re.IGNORECASE,
-)
-next_heading_re = re.compile(r"^[\s>]*#{1,6}\s+\S")
-
-
-def clean(value):
-    value = re.sub(r"^[\s>]*", "", value)
-    value = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", value)
-    return value.strip().strip("*_` \t")
-
-
-sections = []
-index = 0
-while index < len(lines):
-    match = heading_re.match(lines[index])
-    if not match:
-        index += 1
-        continue
-    values = []
-    inline = clean(match.group("inline") or "")
-    if inline:
-        values.append(inline)
-    index += 1
-    while index < len(lines):
-        line = lines[index]
-        if next_heading_re.match(line) or heading_re.match(line):
-            break
-        candidate = clean(line)
-        if candidate:
-            values.append(candidate)
-        index += 1
-    sections.append(values)
-
-if not sections:
-    raise SystemExit(f"response has no {heading_name} section")
-
-token_re = re.compile(r"^([A-Z][A-Z_]*)\b")
-last_seen = None
-for values in reversed(sections):
-    if not values:
-        continue
-    last_seen = values[0]
-    token = token_re.match(values[0])
-    verdict = token.group(1) if token else values[0]
-    if verdict in allowed:
-        print(verdict)
-        print(values[0])
-        break
-else:
-    if last_seen is None:
-        raise SystemExit(f"response {heading_name} section is empty")
-    raise SystemExit(
-        f"response {heading_name} must begin with one of {sorted(allowed)}, "
-        f"got {last_seen!r}"
-    )
-' "$allowed_csv" "$heading"
+  printf '%s\n' "$response" | \
+    python3 "$SCRIPT_DIR/export.py" verdict --allowed "$allowed_csv" --heading "$heading"
 }
 
 extract_markdown_decision() {
@@ -1141,43 +1085,69 @@ cmd_prompt_audit() {
     --repo-root "$PROJECT_ROOT" "$target"
 }
 
-# The seven legacy headings are always required. A brief in the full shape -
-# recognised by its `Deliverables` heading - is held to the whole contract:
-# every heading present, and every Acceptance bullet opening with its stable
-# ID, because a workplan maps tasks to those IDs and a bullet without one
-# cannot be covered or retired visibly.
+# The legacy headings are always required. A brief in the full shape is held to
+# the whole schema contract, including stable IDs on its acceptance bullets.
 validate_section_brief() {
   local brief="$1"
-  assert_matches "$brief" '(?im)^#{1,6}\s+Objective\s*$' "section Objective heading"
-  assert_matches "$brief" '(?im)^#{1,6}\s+Scope\s*$' "section Scope heading"
-  assert_matches "$brief" '(?im)^#{1,6}\s+Priority\s*$' "section Priority heading"
-  assert_matches "$brief" '(?im)^#{1,6}\s+Owned paths\s*$' "section Owned paths heading"
-  assert_matches "$brief" '(?im)^#{1,6}\s+Dependencies\s*$' "section Dependencies heading"
-  assert_matches "$brief" '(?im)^#{1,6}\s+Acceptance\s*$' "section Acceptance heading"
-  assert_matches "$brief" '(?im)^#{1,6}\s+Rejection conditions\s*$' "section Rejection conditions heading"
+  local schema_path="$SCRIPT_DIR/schemas/section_brief.schema.json"
   local problems
-  problems="$(BRIEF_TEXT="$brief" python3 - <<'PY'
+  if ! problems="$(BRIEF_TEXT="$brief" python3 - "$schema_path" 2>&1 <<'PY'
+import json
 import os
 import re
+import sys
 
 text = os.environ["BRIEF_TEXT"]
+schema_path = sys.argv[1]
+try:
+    with open(schema_path, encoding="utf-8") as source:
+        schema = json.load(source)
+    arms = {
+        arm["properties"]["shape"]["enum"][0]: arm
+        for arm in schema["oneOf"]
+    }
+    legacy_headings = arms["legacy"]["properties"]["headings"]["required"]
+    full_properties = arms["full"]["properties"]
+    full_headings = full_properties["headings"]["required"]
+    acceptance_pattern = full_properties["acceptance_ids"]["items"]["pattern"]
+    full_shape_heading = schema["x-full-shape-heading"]
+    acceptance_heading = schema["x-acceptance-heading"]
+    if not all(isinstance(item, str) for item in legacy_headings + full_headings):
+        raise TypeError("required headings must be strings")
+    re.compile(acceptance_pattern)
+except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError, re.error) as error:
+    raise SystemExit(f"cannot load section brief schema at {schema_path}: {error}")
+
+def has_heading(heading):
+    return re.search(rf"(?im)^#{{1,6}}\s+{re.escape(heading)}\s*$", text)
+
+for heading in legacy_headings:
+    if not has_heading(heading):
+        print(f"content missing valid section {heading} heading")
+        raise SystemExit(0)
+
 problems = []
-if re.search(r"(?im)^#{1,6}\s+Deliverables\s*$", text):
-    for heading in ("Current baseline", "User-visible scenarios", "Interfaces produced",
-                    "Interfaces consumed", "Non-goals", "Constraints and fixed decisions",
-                    "Open questions"):
+if has_heading(full_shape_heading):
+    for heading in full_headings:
+        if heading in legacy_headings:
+            continue
         if not re.search(rf"(?im)^#{{1,6}}\s+{re.escape(heading)}\s*$", text):
             problems.append(f"a full-shape brief needs the {heading!r} heading")
-    block = re.search(r"(?ims)^#{1,6}\s+Acceptance\s*$(.*?)(?=^#{1,6}\s|\Z)", text)
+    block = re.search(
+        rf"(?ims)^#{{1,6}}\s+{re.escape(acceptance_heading)}\s*$(.*?)(?=^#{{1,6}}\s|\Z)",
+        text,
+    )
     bullets = re.findall(r"(?m)^\s*[-*]\s+(.*)$", block.group(1)) if block else []
     if not bullets:
         problems.append("Acceptance has no bullets")
     for bullet in bullets:
-        if not re.match(r"`?A[0-9]+`?\s*[:.\u2014-]", bullet):
+        if not re.match(acceptance_pattern, bullet):
             problems.append("Acceptance bullet lacks a stable ID such as `A1:` - " + bullet[:60])
 print("\n".join(problems))
 PY
-)"
+  )"; then
+    fail "$problems"
+  fi
   [[ -z "$problems" ]] || fail "$problems"
 }
 
@@ -1451,20 +1421,59 @@ PY
 
 validate_handoff() {
   local handoff="$1"
-  local word_count byte_count
-  word_count="$(printf '%s\n' "$handoff" | wc -w | tr -d '[:space:]')"
-  byte_count="$(printf '%s\n' "$handoff" | LC_ALL=C wc -c | tr -d '[:space:]')"
-  [[ "$word_count" -le 500 ]] || fail "section handoff exceeds the 500-word context budget ($word_count words)"
-  [[ "$byte_count" -le 8192 ]] || fail "section handoff exceeds the 8192-byte context budget ($byte_count bytes)"
-  assert_matches "$handoff" '(?im)^#{1,6}\s+Outcome\s*$' "handoff Outcome heading"
-  assert_matches "$handoff" '(?im)^#{1,6}\s+Decisions\s*$' "handoff Decisions heading"
-  assert_matches "$handoff" '(?im)^#{1,6}\s+Interfaces\s*$' "handoff Interfaces heading"
-  assert_matches "$handoff" '(?im)^#{1,6}\s+Risks\s*$' "handoff Risks heading"
-  # The heading that would have surfaced a client proven only against a fake at
-  # cycle 003 instead of never. A handoff without it reports outcomes with no
-  # stated distance left to run.
-  assert_matches "$handoff" '(?im)^#{1,6}\s+What is unproven\s*$' "handoff What is unproven heading"
-  assert_matches "$handoff" '(?im)^#{1,6}\s+Next action\s*$' "handoff Next action heading"
+  local schema_path="$SCRIPT_DIR/schemas/handoff.schema.json"
+  local problem
+  if ! problem="$(HANDOFF_TEXT="$handoff" python3 - "$schema_path" 2>&1 <<'PY'
+import json
+import os
+import re
+import sys
+
+schema_path = sys.argv[1]
+try:
+    with open(schema_path, encoding="utf-8") as source:
+        schema = json.load(source)
+    properties = schema["properties"]
+    word_max = properties["word_count"]["maximum"]
+    byte_max = properties["byte_count"]["maximum"]
+    headings = [
+        properties[field]["title"]
+        for field in schema["required"]
+        if "title" in properties[field]
+    ]
+    if not all(isinstance(item, str) for item in headings):
+        raise TypeError("handoff heading titles must be strings")
+    if not isinstance(word_max, int) or not isinstance(byte_max, int):
+        raise TypeError("handoff budget maxima must be integers")
+except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+    raise SystemExit(f"cannot load handoff schema at {schema_path}: {error}")
+
+text = os.environ["HANDOFF_TEXT"] + "\n"
+word_count = len(text.split())
+byte_count = len(text.encode("utf-8", errors="replace"))
+if word_count > word_max:
+    print(
+        f"section handoff exceeds the {word_max}-word context budget "
+        f"({word_count} words)"
+    )
+    raise SystemExit(0)
+if byte_count > byte_max:
+    print(
+        f"section handoff exceeds the {byte_max}-byte context budget "
+        f"({byte_count} bytes)"
+    )
+    raise SystemExit(0)
+for heading in headings:
+    if not re.search(
+        rf"^#{{1,6}}\s+{re.escape(heading)}\s*$", text, re.MULTILINE | re.IGNORECASE
+    ):
+        print(f"content missing valid handoff {heading} heading")
+        raise SystemExit(0)
+PY
+  )"; then
+    fail "$problem"
+  fi
+  [[ -z "$problem" ]] || fail "$problem"
 }
 
 # The same checks as validate_handoff, reported instead of enforced. A handoff
@@ -1473,31 +1482,58 @@ validate_handoff() {
 # cycle. The caller feeds this text back to the role.
 handoff_budget_report() {
   local handoff="$1"
-  printf '%s\n' "$handoff" | python3 -c '
+  local schema_path="$SCRIPT_DIR/schemas/handoff.schema.json"
+  local report
+  if ! report="$(HANDOFF_TEXT="$handoff" python3 - "$schema_path" 2>&1 <<'PY'
+import json
+import os
 import re
 import sys
 
-text = sys.stdin.read()
+schema_path = sys.argv[1]
+try:
+    with open(schema_path, encoding="utf-8") as source:
+        schema = json.load(source)
+    properties = schema["properties"]
+    word_max = properties["word_count"]["maximum"]
+    byte_max = properties["byte_count"]["maximum"]
+    headings = [
+        properties[field]["title"]
+        for field in schema["required"]
+        if "title" in properties[field]
+    ]
+    if not all(isinstance(item, str) for item in headings):
+        raise TypeError("handoff heading titles must be strings")
+    if not isinstance(word_max, int) or not isinstance(byte_max, int):
+        raise TypeError("handoff budget maxima must be integers")
+except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+    raise SystemExit(f"cannot load handoff schema at {schema_path}: {error}")
+
+text = os.environ["HANDOFF_TEXT"] + "\n"
 words = len(text.split())
 byte_count = len(text.encode("utf-8", errors="replace"))
 problems = []
-if words > 500:
+if words > word_max:
     problems.append(
-        f"It is {words} words; the cap is 500. Cut roughly {words - 500} words."
+        f"It is {words} words; the cap is {word_max}. Cut roughly "
+        f"{words - word_max} words."
     )
-if byte_count > 8192:
+if byte_count > byte_max:
     problems.append(
-        f"It is {byte_count} bytes; the cap is 8192. Cut roughly "
-        f"{byte_count - 8192} bytes."
+        f"It is {byte_count} bytes; the cap is {byte_max}. Cut roughly "
+        f"{byte_count - byte_max} bytes."
     )
-for heading in ("Outcome", "Decisions", "Interfaces", "Risks",
-                "What is unproven", "Next action"):
+for heading in headings:
     if not re.search(rf"^#{{1,6}}\s+{re.escape(heading)}\s*$", text,
                      re.MULTILINE | re.IGNORECASE):
         problems.append(f"The `## {heading}` heading is missing or misspelled.")
 if problems:
     print("\n".join(f"- {problem}" for problem in problems))
-'
+PY
+  )"; then
+    fail "$report"
+  fi
+  [[ -z "$report" ]] || printf '%s\n' "$report"
 }
 
 # Brief-authoring checks that catch a cycle-wasting brief before any dispatch.
@@ -1723,15 +1759,33 @@ cmd_init_section() {
     printf '## Blockers\n\n- None observed.\n\n'
     printf '## Next eligible task\n\n- T1 after the workplan template has been replaced with section-specific detail.\n'
   } > "$SECTION_DIR/state.md"
-  {
-    printf '# %s section handoff\n\n' "$SECTION_NAME"
-    printf '## Outcome\n\n- Section initialized; no implementation outcome yet.\n\n'
-    printf '## Decisions\n\n- None yet.\n\n'
-    printf '## Interfaces\n\n- None identified yet.\n\n'
-    printf '## Risks\n\n- No implementation evidence exists yet.\n\n'
-    printf '## What is unproven\n\n- Everything in the brief; nothing has been attempted yet.\n\n'
-    printf '## Next action\n\n- Awaiting the first scoped assignment.\n'
-  } > "$SECTION_DIR/handoff.md"
+  python3 - "$SCRIPT_DIR/schemas/handoff.schema.json" "$SECTION_NAME" \
+    > "$SECTION_DIR/handoff.md" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+schema_path = Path(sys.argv[1])
+section_name = sys.argv[2]
+defaults = {
+    "outcome": "Section initialized; no implementation outcome yet.",
+    "decisions": "None yet.",
+    "interfaces": "None identified yet.",
+    "risks": "No implementation evidence exists yet.",
+    "unproven": "Everything in the brief; nothing has been attempted yet.",
+    "next_action": "Awaiting the first scoped assignment.",
+}
+try:
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    properties = schema["properties"]
+    blocks = [f"# {section_name} section handoff"]
+    for field in schema["required"]:
+        if "title" in properties[field]:
+            blocks.append(f"## {properties[field]['title']}\n\n- {defaults[field]}")
+except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+    raise SystemExit(f"cannot load handoff schema at {schema_path}: {error}")
+print("\n\n".join(blocks))
+PY
 
   create_run "$SECTION_NAME" "$section_brief" "0"
   printf '%s\n' "$(repo_relative_path "$RUN_DIR")" > "$SECTION_DIR/run_path.txt"
