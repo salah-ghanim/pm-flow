@@ -1,0 +1,5 @@
+WARNING: section alpha brief: owned path does not exist in the working tree: src/alpha.txt
+WARNING: section beta brief: owned path does not exist in the working tree: src/beta.txt
+WARNING: section gamma brief: owned path does not exist in the working tree: src/gamma.txt
+WARNING: section delta brief: owned path does not exist in the working tree: src/delta.txt
+WARNING: section epsilon brief: owned path does not exist in the working tree: src/epsilon.txt

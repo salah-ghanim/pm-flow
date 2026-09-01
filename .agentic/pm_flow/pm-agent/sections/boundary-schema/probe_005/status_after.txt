@@ -1,0 +1,15 @@
+ M .agentic/pm_flow/pm-agent/project_state/sections.md
+ M .agentic/pm_flow/pm-agent/sections/boundary-schema/last_dispatch.txt
+ M .agentic/pm_flow/pm-agent/sections/boundary-schema/summary.txt
+ M .agentic/pm_flow/pm-agent/sections/boundary-schema/updated_at.txt
+ M .agentic/pm_flow/pm-agent/sections/outcome-record/last_dispatch.txt
+ M .agentic/pm_flow/pm-agent/sections/outcome-record/state.md
+ M .agentic/pm_flow/pm-agent/sections/outcome-record/summary.txt
+ M .agentic/pm_flow/pm-agent/sections/outcome-record/updated_at.txt
+ M .agentic/pm_flow/pm-agent/sections/outcome-record/workplan.md
+?? .agentic/pm_flow/pm-agent/sections/boundary-schema/probe_005/
+?? .agentic/pm_flow/pm-agent/sections/boundary-schema/probe_005_check.py
+?? .agentic/pm_flow/pm-agent/sections/boundary-schema/probe_complete_005.zsh
+?? docs/os-agents-mvp-architecture.md
+?? resume_claude.log
+?? resume_claude.sh

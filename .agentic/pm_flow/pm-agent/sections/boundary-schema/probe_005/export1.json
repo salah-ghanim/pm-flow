@@ -1,0 +1,1044 @@
+{
+  "project": "pm-agent",
+  "sections": [
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "open"
+        },
+        {
+          "id": "A2",
+          "state": "open"
+        },
+        {
+          "id": "A3",
+          "state": "open"
+        },
+        {
+          "id": "A4",
+          "state": "open"
+        },
+        {
+          "id": "A5",
+          "state": "open"
+        },
+        {
+          "id": "A6",
+          "state": "open"
+        },
+        {
+          "id": "A7",
+          "state": "open"
+        }
+      ],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/agent-bindings/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 898,
+        "decisions": "- The product officer decided this in a portfolio review, against the\n  mission and the evidence it probed, not against this section reporting.",
+        "interfaces": "- Nothing new. Any section expecting this capability must be reconciled\n  without it.",
+        "next_action": "- Reconcile the product plan without this section.",
+        "outcome": "- Cut by a portfolio review: no plan bullet names A2A (the binding criterion is ACP); waits on an unstarted section; its own stated risk is an unauthenticated endpoint that spends budget. Product no longer guarantees an A2A-bound seat.",
+        "risks": "- no plan bullet names A2A (the binding criterion is ACP); waits on an unstarted section; its own stated risk is an unauthenticated endpoint that spends budget. Product no longer guarantees an A2A-bound seat.",
+        "unproven": "- Everything this section was to deliver; it was cut before proving any of it.",
+        "word_count": 147
+      },
+      "key": "a2a-binding",
+      "name": "a2a-binding",
+      "owned_paths": [
+        "src/pm_flow/a2a.py",
+        "tests/a2a_binding_test.sh"
+      ],
+      "priority": "nice-to-have",
+      "status": "cancelled",
+      "summary": "Cut by a portfolio review: no plan bullet names A2A (the binding criterion is ACP); waits on an unstarted section; its own stated risk is an unauthenticated endpoint that spends budget. Product no ...",
+      "updated_at": "2026-08-23T13:50:53Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        },
+        {
+          "id": "A6",
+          "state": "met"
+        }
+      ],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/store-ledger/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 3447,
+        "decisions": "- Transport identity is `bindings.cli` plus `cli_params`; no store schema change. `cli_params` enters `agent_exec.sh` as a 13th resolver field.\n- Every tier, `read` included, is enforceable only if the agent declared a sandbox capability at `initialize`.\n- `acp.py` returns one JSON line on stdout; the arm maps `failure_reason` to a retry class itself and never consults `classify_failure`.\n- The MCP server is a stdlib-only fa\u00e7ade over the installed command. Protocol faults are JSON-RPC errors; a child that ran and exited non-zero is a `tools/call` result with `isError`. Lock and budget are always the second kind.",
+        "interfaces": "- `python -m pm_flow.mcp_server`: tools `status`, `next`, `tick` (`project`, `section`), `list_sections`, `cost`, each `additionalProperties: false`.\n- Binding `{\"cli\": \"acp\", \"cli_params\": {\"command\": [...]}}` in `config.json`. A fourth ACP-speaking agent is config, not a new `case` arm.\n- `acp.py` needs `max_attempt_seconds` and `silent_stall_seconds` in `params`, else `acp_invalid_params`.\n- For `catalog.py`'s owner: `catalog.py:703` stores that binding as `cli_params={\"cli_params\":{...}}`. Nothing here depends on it \u2014 the arm reads `config.json`.",
+        "next_action": "Driver merges `9a683f4` into `main`. Then bind one shipped ACP agent and one stock MCP client to settle the two claims above. `a2a-binding` can consume the `acp` arm unchanged.",
+        "outcome": "All evidence sits on branch `pm-flow/pm-agent/agent-bindings`, tip `9a683f4`; not yet in `main`.\n\n- **A1** \u2014 `zsh tests/agent_bindings_test.sh` \u2192 exit 0, `PASS: ACP developer completes a public driver cycle to GO`, driven through a wheel-installed `pm-flow`.\n- **A2** \u2014 `pm_flow_test.sh` 10 PASS; `template/.agentic/pm_flow/tests/run.zsh` `all suites passed`, 35/41/32/58/74, fail=0; `packaged_layout_test.sh` 13 PASS. `cycles/002/argv_probe.zsh` shows claude/codex/copilot argv byte-identical to the pre-change engine.\n- **A3** \u2014 `PASS: enforced ACP access is recorded before work` and its prompt-level twin; the marker is snapshotted at `session/prompt`, so ordering is asserted, not presence.\n- **A4** \u2014 `PASS: MCP lists exactly five tools and drives a section to done` and `PASS: MCP targets one named section and leaves the other unchanged`; a `_command_for` that drops `--section` fails the suite.\n- **A5** \u2014 `PASS: cost distinguishes ACP and claude transports`: `ATTEMPT` field 6 `acp`, fields 8/9 `17`/`5`, beside `claude` `11`/`3`.\n- **A6** \u2014 exit 0, 33 PASS.",
+        "risks": "- Unmerged. `git diff --stat main pm-flow/pm-agent/agent-bindings` still lists `mcp_server.py` +188, absent from `main`; until the driver merges, `main` exercises neither surface.\n- The server passes stdin through. A future interactive engine command would eat pipelined client frames \u2014 re-check the `read` sites in `pm_flow.sh`/`driver.zsh`.\n- The suite's AST guard matches `subprocess.*`/`os.*` by name; `from subprocess import run` evades it.",
+        "unproven": "- No real ACP agent has connected \u2014 every exchange was with the suite's Python test agent. Bind a shipped ACP agent to `developer` and run one cycle.\n- No stock MCP SDK client has connected; A4 used the brief's permitted equivalent JSON-RPC script.\n- ACP token accounting is untested: the test agent's `usage` is context occupancy, so A5's `17`/`5` are not real tokens.\n- `acp_attempt_timeout`, `acp_silent_stall`, `acp_rpc_error` are defined but never exercised.",
+        "word_count": 485
+      },
+      "key": "agent-bindings",
+      "name": "agent-bindings",
+      "owned_paths": [
+        "src/pm_flow/acp.py",
+        "src/pm_flow/mcp_server.py",
+        "template/.agentic/pm_flow/agent_exec.sh",
+        "tests/agent_bindings_test.sh"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Section completed and validated across 006 cycle(s)",
+      "updated_at": "2026-08-24T11:29:06Z"
+    },
+    {
+      "acceptance": [],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/installer/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 2953,
+        "decisions": "- `template/AGENTS.md` owns the complete instructions; `template/CLAUDE.md` is compatibility-only.\n- Both files use one file-neutral installer path and `merge_managed_block`. Existing text outside `<!-- pm-flow:begin -->` / `<!-- pm-flow:end -->` survives; each original file is backed up once.\n- Both instruction templates are manifest `seed` files so post-render engine synchronization cannot overwrite rendered values with raw placeholders.\n- The two failed development cycles were caused by worktrees under `.git`, not product behavior. The worktree-placement and manifest path-exclusion defects are already fixed on `main`; no consultant work remains.",
+        "interfaces": "- Other sections may depend on root `AGENTS.md` containing the rendered router, invariants, and project task-contract path.\n- Vendor-specific tooling may depend on root `CLAUDE.md` containing `@AGENTS.md`.\n- Installer/packaging must preserve the managed markers, backup names (`AGENTS.pre-pm-flow.md`, `CLAUDE.pre-pm-flow.md`), seed classification, and AGENTS-before-CLAUDE installation order.",
+        "next_action": "Close `agents-md`; when packaging reconciles its shared paths, require the post-merge checks named under Risks before release.",
+        "outcome": "Section `agents-md` is complete on `main` at `4b53d0e`. Installed `AGENTS.md` is the sole full copy of the four-role router and repo-wide invariants; installed `CLAUDE.md` imports it with `@AGENTS.md` and does not duplicate those rules. README names `AGENTS.md` as the instructions file.\n\nIndependent validation installed this checkout into fresh Git repositories and repositories with pre-existing instruction files. It proved preservation, one-time backups, managed-block replacement, and same-version reinstall idempotence. Router-removal and rule-duplication mutations were both detected. `zsh tests/pm_flow_test.sh` completed all 10 PASS groups, and `python3 tools/manifest.py --check` reported 77 current files.",
+        "risks": "- `packaging` also changes `install.sh` and `MANIFEST`; conflict resolution could drop this contract. Re-running the manifest check, full suite, focused install probes, and both mutations after its merge would reveal regression.\n- Installs retain `*.pm-flow.template.md` prefetch artifacts. This predates the section and is symmetric across both files; packaging should decide whether release cleanup is required.",
+        "unproven": "- No configured real agent CLI was launched to prove automatic `AGENTS.md` discovery or that a CLAUDE-only client follows `@AGENTS.md`. Launch each supported CLI in an installed repository without injecting either file and observe it follow a unique managed instruction.\n- Migration from an actual previously released CLAUDE-only pm-flow install was not exercised. Install the prior release, add user content outside its managed block, upgrade with current `install.sh`, and observe preservation plus a single current block in each instruction file.",
+        "word_count": 386
+      },
+      "key": "agents-md",
+      "name": "agents-md",
+      "owned_paths": [
+        "template/CLAUDE.md",
+        "template/AGENTS.md",
+        "README.md",
+        "install.sh",
+        "MANIFEST"
+      ],
+      "priority": "nice-to-have",
+      "status": "done",
+      "summary": "Section completed and validated across 003 cycle(s)",
+      "updated_at": "2026-08-23T08:48:34Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        },
+        {
+          "id": "A6",
+          "state": "met"
+        }
+      ],
+      "dependencies": [],
+      "handoff": {
+        "byte_count": 3267,
+        "decisions": "- No composite score; dimensions stay separate, ranked by finding count then overage.\n- Ranking is its own process: no `tick`/`dispatch_role` hook; `cli.py`, `pm_flow.sh`, `driver.zsh` and `prompt_quality.py` unedited. A `pm-flow quality` arm belongs to whoever owns `cli.py`.\n- `quality.py` loads `prompt_quality.py` by path (`spec_from_file_location` from `paths.engine_root()`) because `pm_flow/engine/` has no `__init__.py` and sits outside `src/` in a checkout. The 12-word echo rule stays owned there.\n- Live dimension counts drift as sections write: diff two builds over one tree rather than a remembered count, and measure `boundaries` by token, not by file.",
+        "interfaces": "- `python -m pm_flow.quality rank [--project <key>] [--out <dir>]`; `show [--project <key>]` reprints the record and exits non-zero naming the directory when absent.\n- `.agentic/pm_flow/<project>/quality/{latest.md,latest.json,<utc>.json}` \u2014 gitignored by `.gitignore:24`.\n- `template/.agentic/pm_flow/artifact_quality.md` \u2014 budgets parsed at runtime from its `| File | Word budget |` table, so changing a budget needs no code change.\n- `tests/artifact_quality_test.sh`.",
+        "next_action": "- None. The workplan is closed and no section depends on further work here. A `pm-flow quality` CLI arm, a `tick` gate or model-graded clarity would each need a new section.",
+        "outcome": "- A1 \u2014 `rank` prints one line per artifact, worst first, each naming the file and any of `length`/`echo`/`shape`/`boundaries`/`stale`; on `main`, 65 lines for 65 artifacts, `grep -Ec 'composite|quality:[0-9]|score[=:][0-9]'` \u2192 0. `bbf704c`, `adba805`.\n- A2 \u2014 `git status --porcelain` before vs after `rank` \u2192 `cmp` exit 0; `find sections \\( -name 'quality*' -o -name '*.score' \\)` empty. `67d200c`.\n- A3 \u2014 the run wrote `quality/latest.md`, `latest.json` and a `<utc>.json` snapshot; `show` stdout vs `rank` stdout and vs `latest.md` both `cmp` exit 0. `67d200c`, `1fb989b`.\n- A4 \u2014 fixture echo finding flips with the copied paragraph; disabling echo detection fails that assertion. `bbf704c`.\n- A5 \u2014 fixture shape (uncovered `A2`) and stale findings flip likewise, mutation-proven. `bbf704c`.\n- A6 \u2014 on `main`: `artifact_quality_test.sh` exit 0 (11 PASS), `pm_flow_test.sh` exit 0, `template/.agentic/pm_flow/tests/run.zsh` exit 0 (`pass=74 fail=0`). `1fb989b`.",
+        "risks": "- `resolve_record_dir` treats `git check-ignore` exit 128 (outside repository) as permission, so `--out` into another checkout writes into its tracked tree. Observed; kept because the fixture needs it.\n- ~3% of flagged `boundaries` tokens are slash-bearing non-paths. Settled by census at scope 003; a census above ~10% reopens it.\n- Rollback: delete the three owned paths; records are untracked.",
+        "unproven": "- `echo` and `stale` are fixture-only: no live artifact has produced either finding in any cycle. A real repeated paragraph or pasted design summary surfacing in `rank` would settle it.\n- The developer's sandbox denies writes to the host `quality/` directory, so the host write branch was only ever exercised from PM probes.\n- One mutation (`--out` bypassing `resolve_record_dir`) trips the absence assertion before the refusal one, so the suite catches that bypass under the wrong name.",
+        "word_count": 464
+      },
+      "key": "artifact-quality",
+      "name": "artifact-quality",
+      "owned_paths": [
+        "src/pm_flow/quality.py",
+        "template/.agentic/pm_flow/artifact_quality.md",
+        "tests/artifact_quality_test.sh"
+      ],
+      "priority": "nice-to-have",
+      "status": "done",
+      "summary": "Section completed and validated across 005 cycle(s)",
+      "updated_at": "2026-08-24T22:35:00Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        }
+      ],
+      "dependencies": [],
+      "handoff": {
+        "byte_count": 357,
+        "decisions": "- None yet.",
+        "interfaces": "- None identified yet.",
+        "next_action": "- Awaiting the first scoped assignment.",
+        "outcome": "- Section initialized; no implementation outcome yet.",
+        "risks": "- No implementation evidence exists yet.",
+        "unproven": "- Everything in the brief; nothing has been attempted yet.",
+        "word_count": 55
+      },
+      "key": "boundary-schema",
+      "name": "boundary-schema",
+      "owned_paths": [
+        "template/.agentic/pm_flow/schemas/**",
+        "template/.agentic/pm_flow/export.py",
+        "template/.agentic/pm_flow/pm_flow.sh",
+        "template/.agentic/pm_flow/topology.py",
+        "template/.agentic/pm_flow/agent_exec.sh",
+        "tests/boundary_schema_test.sh",
+        "tests/fixtures/boundary_schema/**"
+      ],
+      "priority": "must-have",
+      "status": "active",
+      "summary": "Cycle 004; last action scope.",
+      "updated_at": "2026-09-01T20:53:26Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        },
+        {
+          "id": "A6",
+          "state": "met"
+        }
+      ],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/green-suite/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 3531,
+        "decisions": "- Codex usage comes from `turn.completed.usage` only; `total_token_usage` is never read.\n- The event stream lives in `<response>.events.jsonl` and never enters the attempt log, the response envelope, or `classify_failure`.\n- Tests reach the checkout engine via `PM_FLOW_ENGINE_ROOT`/`PM_FLOW_FLOW_DIR`/`PM_FLOW_REPO_ROOT` and `zsh -f pm_flow.sh`, after unsetting every inherited `PM_FLOW_*`.\n- A stub's scope answer must satisfy `validate_scoped_assignment`: `## Workplan task` naming one `T<n>`, scaffold marker retired.",
+        "interfaces": "- `attempts` rows with `cli=codex` carry `input_tokens`, `output_tokens`, `cache_read_tokens`, `reasoning_tokens`, `total_tokens` (store-ledger).\n- `<response>.events.jsonl` beside every Codex response envelope.\n- `tests/fixtures/codex_events_real.jsonl`: pinned real stream, never regenerated.\n- `tests/codex_usage_test.sh`: stub-`codex` pattern with modes `replay`/`slow-events`/`silent`/`fail-events`/`fail-stderr`.",
+        "next_action": "- Product officer: unblock store-ledger A2 against `attempts` rows 3/7/15/18 in the pm-agent store.\n- After any Codex CLI upgrade, run `zsh .agentic/pm_flow/pm-agent/sections/codex-usage/cycles/006/pm_probe_store.zsh`; recapture the fixture only on a mismatch.",
+        "outcome": "- A1: live probe `cycles/006/pm_probe_store.zsh` prints `\"match\": true` for real Codex developer attempts 3, 7, 15, 18; attempt 18 stores 1202445/11665/1142528/5210/1214110, equal to its own `cycles/007/result.response.events.jsonl` `turn.completed` usage. Engine on `main` since `07848d3`.\n- A2: retired; store-ledger A2 reads the row this section stores.\n- A3: `zsh tests/codex_usage_test.sh` rc=0 on `main` (`8c6a9cb`), replaying `tests/fixtures/codex_events_real.jsonl`; rows 1/3/6 store 13937/5/12032/0/13942; removing `telemetry_end_attempt` leaves `running|None\u2026`, reading only `total_token_usage` leaves `ok|None\u2026`, both asserted. Test at `3660ae7`, merged `09cded8`.\n- A4: same run: silent dispatch \u2192 `error|stall` at 3s; event-only dispatch runs 6\u20137s past the budget and completes `ok` with fixture tokens. `3660ae7`.\n- A5: same run: `cmp`-identical event streams store `unknown` with empty stderr and `usage_limit` with stderr `rate limit exceeded`. `3660ae7`.\n- A6: `zsh tests/pm_flow_test.sh` rc=0, ten `PASS:`; `zsh template/.agentic/pm_flow/tests/run.zsh` rc=0, `pass=73 fail=0`. `09cded8`.",
+        "risks": "- Codex event-schema drift: the replay keeps passing while live dispatches store nothing. Revealed by the probe printing `\"match\": false` or a fresh Codex attempt with `None` tokens.\n- The stub's ASSIGN text is copied from `stub_success.zsh`, not shared; a scope-parser change surfaces as `UNPARSED` in tick 1.\n- `file_mtime` is 1s-granular: a `heartbeat_stall_seconds` below 3 makes the liveness assertion flaky. The test takes ~60s.",
+        "unproven": "- A4 and A5 were demonstrated only against the stub `codex`: no real Codex run was observed emitting events past the stall budget or failure strings on stdout. Settled by a live dispatch whose `.events.jsonl` grows past `heartbeat_stall_seconds` with `heartbeat.txt` free of `stalled`.\n- Reasoning tokens: the fixture carries `reasoning_output_tokens: 0`, so the test cannot catch a parser dropping that field; the live rows (5210, 8239, 9565, 14032) are the only evidence.\n- `pm-flow cost` output for these rows was not exercised here; A1 rests on a direct `attempts` read.\n- The `PM_FLOW_*` unset was inferred from the mktemp store path; `printenv` in the reviewer's shell was denied.",
+        "word_count": 445
+      },
+      "key": "codex-usage",
+      "name": "codex-usage",
+      "owned_paths": [
+        "tests/codex_usage_test.sh",
+        "tests/fixtures/codex_events_real.jsonl"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Section completed and validated across 008 cycle(s)",
+      "updated_at": "2026-08-23T19:37:09Z"
+    },
+    {
+      "acceptance": [],
+      "dependencies": [],
+      "handoff": {
+        "byte_count": 2282,
+        "decisions": "Both recorded hypotheses for the dispatch-output guard were wrong, and so was\nthe brief. `assert_output_not_writable` has no defect and `driver.zsh` was not\nmodified. The guard was never called: project work preempts section work in\n`cmd_tick`, and by the guard fixture's tick, 13 dispatches had accrued against\na portfolio-review threshold of 12, so the tick spent itself on a review and\nreturned before `do_develop`. The assertion read the review's output.\n\nThree further defects, all in the fixtures and all older than this section:\n\n- No stub could answer `Task: review the portfolio`, so every review came back\n  UNPARSED and was re-asked to the claim ceiling.\n- `stub_decompose.zsh` omitted the `### Priority` heading that\n  `split_section_blocks` requires, killing the decomposition run.\n- A non-zero run inside `$(...)` under `set -e` killed the suite silently. That\n  is why this read as \"the suite stops after the driver tests\".",
+        "interfaces": "`drain_project_work` and `driver_tick` in the suite. Any assertion on a single\nsection tick must go through `driver_tick`, or it will eventually read a\nportfolio review's output instead. Stub portfolio verdicts are derived from the\nsections on disk, so a new section needs no fixture change.",
+        "next_action": "worktree-isolation, by hand. Then packaging. An unparseable portfolio review\nstill costs four cpo dispatches and starves sections for four ticks before the\nclaim ceiling gives up; bounding that belongs to whoever owns driver.zsh\nscheduling.",
+        "outcome": "`zsh tests/pm_flow_test.sh` exits 0 and runs to completion. Six PASS labels,\nstable across three consecutive runs: dependency scheduling and blocked\nsections; headless driver, escalation and parallel rescue; product\ndecomposition and a full headless project run; section-scoped PM flow; role\npersonas, agent dispatch and supervision; independent consultant panel and CPO\nadjudication. Every brief's \"the suite still passes\" now means something.",
+        "risks": "The stubs read `$PROJECT_ROOT/.agentic/pm_flow/.project-key`. A test that\ninstalls with `--project-key` and then dispatches will glob every workspace;\nunknown keys make a review unparseable.",
+        "unproven": "Nothing above. Each was demonstrated by a full suite run.",
+        "word_count": 333
+      },
+      "key": "green-suite",
+      "name": "green-suite",
+      "owned_paths": [
+        "tests/**",
+        "template/.agentic/pm_flow/driver.zsh"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Suite runs to completion and exits zero; the guard was never broken, it was never called.",
+      "updated_at": "2026-08-22T17:21:33Z"
+    },
+    {
+      "acceptance": [],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/green-suite/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 2067,
+        "decisions": "The store is gitignored deliberately. It is local, it is rewritten on every\ndispatch, and committing it recreates exactly the churn the store exists to\nremove. Definitions are committed; records are not.\n\nTelemetry packages are optional and recording never depends on them. A missing\nimport must cost an observation, not a dispatch \u2014 so `trace export --file`\nneeds nothing installed at all, and only `--otlp` needs the SDK.\n\nInstallation became MANIFEST-driven rather than a hand-maintained copy list,\nwhich is why \"add four modules\" did not turn into a fifth place to forget them.",
+        "interfaces": "`install.sh <target> [--name] [--project-key] [--domain] [--add-project]`.\nReinstalling into an existing target refreshes the shared engine and preserves\nconfig.json, the recorded domain, the plan and run history \u2014 asserted by the\nsuite, not assumed.",
+        "next_action": "packaging. Its acceptance deletes most of what this section shipped \u2014 MANIFEST,\n`upgrade.py` and the file-lifecycle machinery exist to manage N copies of the\nengine, and packaging removes the copying. That is not waste: the installer is\nwhat makes today's flow reproducible, and packaging cannot be verified without\na working install to migrate from.",
+        "outcome": "A stock install produces a complete flow directory. Verified by hand against a\nfresh empty target rather than by reading install.sh: seven python modules land\n(`catalog.py`, `cost.py`, `store.py`, `telemetry.py`, `trace_export.py`,\n`upgrade.py`, `watch.py`), `requirements-telemetry.txt` names the two\nOpenTelemetry packages, and the installed `.gitignore` ignores the store\n(`*/runs/pm_flow.db{,-wal,-shm}`) and `__pycache__/`.",
+        "risks": "Installing a second project workspace refreshes the shared scripts for every\nworkspace in that flow directory but only refreshes the selected workspace's\ncontract and prompts. The installer warns and names the others; the suite\ncovers that path.",
+        "unproven": "Nothing above. Each claim was checked against a real install performed for this\nreview.",
+        "word_count": 297
+      },
+      "key": "installer",
+      "name": "installer",
+      "owned_paths": [
+        "install.sh",
+        ".gitignore"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "A stock install lands every module, ignores the store and bytecode, and preserves state on reinstall.",
+      "updated_at": "2026-08-22T18:14:05Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        },
+        {
+          "id": "A6",
+          "state": "met"
+        },
+        {
+          "id": "A7",
+          "state": "met"
+        }
+      ],
+      "dependencies": [],
+      "handoff": {
+        "byte_count": 3346,
+        "decisions": "- `telemetry.py` loads `semconv.py` by path from `__file__`, never `import pm_flow.semconv`: the engine runs under plain `python3`, and an installed import would defeat A5.\n- `telemetry.py` writes the `chat` child itself, since `driver.zsh` is not owned here. The printed `span_id`, the traceparent and the `attempt-end` lookup are unchanged, and `attempts.span_id` still points at the parent.\n- Aggregatable and bulky keys (`llm.token_count.*`, `pm_flow.cost_usd|cache_*|reasoning_tokens`, `input.value`, `output.value`) stay on the parent only, so a backend summing a trace cannot double-count.\n- Where no `semconv.py` resolves (engine copied alone), no GenAI names and no `chat` child are written.",
+        "interfaces": "- `src/pm_flow/semconv.py`: `REVISION`, `SPAN_OPERATIONS`, `attributes_for(attempt)`. Bumping the pin is a one-file edit.\n- `pm_flow.semconv.revision` on every span; `gen_ai.operation.name` is `invoke_agent` or `chat`.\n- `zsh tests/otel_semconv_test.sh` \u2014 needs `curl`; reuses a Jaeger already on 16686 and removes only one it started.",
+        "next_action": "`persona-cards` rewords the `gen_ai.*` comment at `template/.agentic/pm_flow/catalog.py:254`; then delete the one-file A4 exemption in `tests/otel_semconv_test.sh`.",
+        "outcome": "- A1 \u2014 an independent OTLP receiver decodes one `invoke_agent` per dispatch with exactly one `chat` child (`TREE primary: 5f25ebfe5c8e5e03 -> f30666db7b2e1142`), green twice in a row.\n- A2 \u2014 the child's `gen_ai.usage.*` equals the `attempts` row (31/13) via `spans.parent_span_id = attempts.span_id`; an off-by-one mutation fails the suite.\n- A3 \u2014 `pm_flow.semconv.revision` on every span, stamped once in `insert_span`; an absent tag fails, root span included.\n- A4 \u2014 the grep matches only `src/pm_flow/semconv.py`, plus one exempted comment at `template/.agentic/pm_flow/catalog.py:254`.\n- A5 \u2014 a tree pinned `v1.36.0` emits `gen_ai.system`, the primary `gen_ai.provider.name`; `REVISION` is the only edit.\n- A6 \u2014 Jaeger re-serves this run's own trace at `/api/traces/<traceID>` with that tree, usage and revision; live, not skipped.\n- A7 \u2014 `otel_semconv_test.sh`, `pm_flow_test.sh` (10 PASS) and `store_ledger_test.sh` all exit 0.\n\nAll at commit `2afd3d1` on `main`, re-verified there at cycle 008 rather than inherited.",
+        "risks": "- `attributes_for` still emits `gen_ai.usage.*` for any `span_kind`; the chat gate lives in its caller. A second caller would put usage back on the parent \u2014 the receiver's parent assertion reveals it.\n- The GenAI conventions are Development. A bump renames keys and breaks dashboards keyed on the old ones; the pin confines the edit, not the consequence.\n- Every A6 run adds one trace to whatever Jaeger answers on 16686.",
+        "unproven": "- `pm_flow.cache_read_tokens`, `pm_flow.cache_write_tokens` and `pm_flow.reasoning_tokens` on the parent: the stub emits no such usage, so only a cycle-004 probe showed them. A dispatch with a real cache/reasoning usage block settles it.\n- `trace_export.py --protocol grpc` is never exercised \u2014 the SDK is absent here. Installing it and exporting over grpc settles it.\n- The suite drives one stub dispatch; multi-dispatch behaviour is only ambient (100 `invoke_agent`\u2192`chat` pairs from real runs in the user's Jaeger), not asserted.\n- Jaeger is the only backend that has read these spans.",
+        "word_count": 465
+      },
+      "key": "otel-semconv",
+      "name": "otel-semconv",
+      "owned_paths": [
+        "src/pm_flow/semconv.py",
+        "template/.agentic/pm_flow/telemetry.py",
+        "tests/otel_semconv_test.sh"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Section completed and validated across 008 cycle(s)",
+      "updated_at": "2026-08-25T09:34:00Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        }
+      ],
+      "dependencies": [],
+      "handoff": {
+        "byte_count": 356,
+        "decisions": "- None yet.",
+        "interfaces": "- None identified yet.",
+        "next_action": "- Awaiting the first scoped assignment.",
+        "outcome": "- Section initialized; no implementation outcome yet.",
+        "risks": "- No implementation evidence exists yet.",
+        "unproven": "- Everything in the brief; nothing has been attempted yet.",
+        "word_count": 55
+      },
+      "key": "outcome-record",
+      "name": "outcome-record",
+      "owned_paths": [
+        "template/.agentic/pm_flow/telemetry.py",
+        "template/.agentic/pm_flow/driver.zsh",
+        "src/pm_flow/semconv.py",
+        "tests/otel_semconv_test.sh",
+        "tests/outcome_record_test.sh",
+        "tests/fixtures/outcome_record/**"
+      ],
+      "priority": "must-have",
+      "status": "active",
+      "summary": "Cycle 004; last action develop.",
+      "updated_at": "2026-09-01T20:47:50Z"
+    },
+    {
+      "acceptance": [],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/green-suite/handoff.md",
+        ".agentic/pm_flow/pm-agent/sections/worktree-isolation/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 3451,
+        "decisions": "- `install.sh` stays in the checkout, not the wheel; `pm-flow` has no `init`.\n  The README's install line names the checkout path.\n- `*.pm-flow.template.md` is not project data; `install.sh` renders it in a\n  temp cache only. agents-md's backup and marker contract is unchanged.",
+        "interfaces": "- `pm-flow` resolves the engine from the venv and project data from the\n  invoking repository; `src/pm_flow/paths.py` is the shared layout.\n- The wheel force-includes `template/.agentic/pm_flow`; engine edits there\n  need no packaging change.\n- `tests/packaged_layout_test.sh`: offline hashed wheelhouse, separate build\n  and runtime venvs, data-only fixtures. Sections touching install, layout or\n  personas extend it; no copy-based fixtures.",
+        "next_action": "Re-cut the blocked sections against the packaged layout. Before their first\nreview, grant `zsh tests/*` to the scoped tier and fix the worktree heartbeat\npath.",
+        "outcome": "Complete on `main` at `c2438b4`. The engine is an installed package; a\nrepository holds project data only.\n\n- The pm-flow wheel in a project `.venv` gives a working `.venv/bin/pm-flow`;\n  nothing is copied into the repository.\n- Two repositories pin `0.7.1` and `0.7.2` and run their own versions;\n  upgrading one leaves its `.agentic/` byte-identical and the other untouched.\n- `.agentic/pm_flow/<project>/roles/<role>.md` overlays the packaged persona;\n  the run record names base, domain and local layers.\n- A copied-engine install migrates through `install.sh`: state, store attempts\n  and the open cycle survive; the installed command takes the next step.\n- `MANIFEST`, `upgrade.py` and `tools/manifest.py` are deleted; the suite runs\n  the README's install, status and tick lines through the wheel.\n- `tests/pm_flow_test.sh` (10 PASS) and `tests/packaged_layout_test.sh`\n  (13 PASS) exit 0, plain and under a hostile environment.",
+        "risks": "- A user with only `pip install pm-flow` cannot create project data. Revealed\n  by following the README without a checkout.\n- The scoped tier denies `zsh tests/*` (`DEFAULT_SCOPED_BASH` lists pytest\n  only; no `access.scoped_bash` in `config.json`). No PM review here has run\n  the suite; 008 and 009 rest on the recorded event stream.\n- Developer heartbeats fail under worktree isolation: `heartbeat.sh` writes\n  into the main checkout from a worktree-rooted sandbox; all four 009 calls\n  exited 1. A dispatch past the silent-stall budget dies unheard.",
+        "unproven": "- `pip install pm-flow` from an index. Every proof installs a locally built\n  wheel; `pypi.org` is unreachable from this role, so the name is unverified.\n  Settled by `pip index versions pm-flow` naming this project, or a first\n  publish; `uv tool install` never ran.\n- Migration of a real install. The legacy fixture is today's template plus\n  `MANIFEST` and `upgrade.py`. The one real install (golden-grid, surveyed\n  2026-07-28: pre-sections `pm_flow.sh`, ten workspaces, no `.project-key`)\n  is unmigrated. Settled by running `install.sh` against a copy of it and\n  driving a tick.\n- Upgrade across a behavioural change: the pinned wheels differ only by\n  version stamp. Settled by upgrading across a driver-changing release.\n- Install onto a pre-existing `AGENTS.md`; the root-listing assertion covers\n  only a pre-existing `CLAUDE.md` (same merge path).\n- A reviewer's own suite run. Settled by granting `zsh tests/*` to the scoped\n  tier and re-running the acceptance commands.",
+        "word_count": 495
+      },
+      "key": "packaging",
+      "name": "packaging",
+      "owned_paths": [
+        "pyproject.toml",
+        "src/pm_flow/cli.py",
+        "src/pm_flow/paths.py",
+        "src/pm_flow/__init__.py",
+        "install.sh",
+        "MANIFEST",
+        "template/.agentic/pm_flow/pm_flow.sh",
+        "template/.agentic/pm_flow/upgrade.py",
+        "template/.agentic/pm_flow/.gitignore",
+        "tests/pm_flow_test.sh",
+        "tests/packaged_layout_test.sh",
+        "tests/fixtures/stub_*.zsh",
+        ".gitignore",
+        "tools/manifest.py",
+        "README.md"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Installed-package boundary complete; all A1-A8 evidence is on main.",
+      "updated_at": "2026-08-23T12:35:30Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        },
+        {
+          "id": "A6",
+          "state": "met"
+        },
+        {
+          "id": "A7",
+          "state": "met"
+        }
+      ],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/persona-packs/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 3403,
+        "decisions": "- Identity half of the Agent Card only; forbidden fields are refused by the card's own vocabulary, not the pack's `FORBIDDEN_KEYS`.\n- No store DDL: the validated card is stored verbatim at `metadata.card`; `author`/`version` reuse existing columns.\n- Identity is `(key, card author)`, grouped on `COALESCE(json_extract(p.metadata,'$.card.author'),'')`, never `p.author`; an ambiguous key is refused.\n- No printed author is rewritten; the claim label is enforced at parse.\n- Packaged cards attach during `sync`, base layer only, validated before any write, so a bad card stops every tick.",
+        "interfaces": "- `src/pm_flow/persona_card.py`: `parse`/`validate`/`export`, `PersonaCardError`, `CLAIM_PREFIX`, `FORBIDDEN_CARD_KEYS`.\n- `python3 <flow>/catalog.py --db <store> persona show|list|export|swap [--author]`; no `pm-flow persona` wrapper exists.\n- Manifest `card:` key naming a pack-relative JSON file; `template/.agentic/pm_flow/cards/<role>.card.json` and the pinned `a2a-agent-skill.schema.json`.\n- `personas.metadata.card`; the `(key, content_hash)` in `attempts.persona_stack` addresses exactly one card.",
+        "next_action": "- None in this section. `compare.py`'s owner renders card identity in `arm_personas`; `pm_flow.sh`/`cli.py`'s owner adds the `persona` wrapper the brief's scenarios spell.",
+        "outcome": "- **A1** \u2014 `persona show <key>` prints author, purpose, skills, version from the store alone; `attempts`/`spans` counts unchanged across the call (`2 4 -> 2 4`). a0bb325, re-observed on shipped cards in ecc8dc3.\n- **A2** \u2014 `model`/`vendor`/`transport`/`url`/`endpoint` refused with `card field \"<name>\" is not allowed on a persona`, nested `skills[0].endpoint` included; row sets of `personas`/`persona_packs`/`seat_personas` byte-identical after refusal. e7a30fb, a0bb325.\n- **A3** \u2014 two `reviewer`s by different authors list as two rows; `show`/`swap`/`export` refuse a bare key, `--author` selects; a real two-arm `compare report` resolves each arm to a distinct card. 7db802e.\n- **A4** \u2014 a real exported pack reinstalled into a second store; `metadata.card` compared field by field with set-equality guards, `content_hash` identical. 7db802e.\n- **A5** \u2014 uncarded pack installs, lists, shows `no card`, and dispatches through two real ticks (persona-packs 011 `acceptance.sh` exit 0). a0bb325, ecc8dc3.\n- **A6** \u2014 exported skills validate against the pinned A2A `AgentSkill` schema by a walker importing nothing from `persona_card`. e7a30fb.\n- **A7** \u2014 both suites exit 0 under venv and non-venv `python3` (ecc8dc3), and again on merged `main` at cycle 005.",
+        "risks": "- `compare.py:arm_personas` still prints `role=key`, so a reader trusting that column sees no card; one line for that file's owner fixes it.\n- A change to `pyproject.toml`'s force-include, `load_persona_card_module` or `cards/` can stop every tick of an installed pm-flow with no suite failing.\n- `cmd_persona_export` detects card errors via `\"card_module\" in locals()` \u2014 fragile to any refactor there.",
+        "unproven": "- `load_persona_card_module`'s wheel-layout branch: no test covers it since cycle 004 deleted the staging copy. Hand-probed at cycle 005 under `python3 -S` \u2014 `sync` and `persona show pm` both succeeded \u2014 so it works today; a staged-layout case in the suite would settle it.\n- Otherwise none: every claim above ran against a real store, a real `sync` or real ticks.",
+        "word_count": 465
+      },
+      "key": "persona-cards",
+      "name": "persona-cards",
+      "owned_paths": [
+        "src/pm_flow/persona_card.py",
+        "template/.agentic/pm_flow/cards/**",
+        "template/.agentic/pm_flow/catalog.py",
+        "tests/persona_cards_test.sh"
+      ],
+      "priority": "nice-to-have",
+      "status": "done",
+      "summary": "Section completed and validated across 005 cycle(s)",
+      "updated_at": "2026-08-24T23:31:54Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        }
+      ],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/installer/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 3452,
+        "decisions": "- A pack is one JSON index plus Markdown files; nothing from a pack executes at install (a pack `install.sh` marker never fires).\n- A persona carrying a CLI, model or tool grant is refused and the pack rolls back; cross-pack collisions reject the whole install atomically.\n- Versions are immutable rows keyed `(key, content_hash)`. Identical content from a richer source (path \u2192 Git URL) is adoption: same row id, provenance refreshed, `persona_packs.source_url`/`.ref` move to the URL and commit.\n- `persona update` re-acquires from `persona_packs.source_url`; a failed pack is named, changes nothing, and the command exits 1 after trying the rest.\n- A swap records a key in `topology_agents.overrides`, not a version id; the next dispatch after an update carries the new version.",
+        "interfaces": "- `python3 <flow>/catalog.py --db <store> persona add <path|git-url>`, `persona list`, `persona update [pack-name]`, `persona swap <role> <persona-key> [--project K] [--topology T]`.\n- `personas`: `source_url`, `source_path`, `content_hash`, `metadata.git_commit`; `persona_packs`: `source_url`, `ref`.\n- `attempts.persona_stack` names each layer's key and `content_hash`, joinable to `personas` after any number of updates.\n- Regression harness: `cycles/011/{acceptance.sh,assertions.py,regressions.sh}` \u2014 gitignored project data, not on `main`.",
+        "next_action": "Mark the section complete. `persona-cards` takes `catalog.py` next and should run `cycles/011/acceptance.sh` and `regressions.sh` around its first edit. A `persona` subcommand in `pm_flow.sh` is a one-line wrapper for whichever section owns that file.",
+        "outcome": "- A1: one store, `persona add <dir>` then `persona add file://<same repo>`: the path row is adopted (same id, hash `701d0151\u2026`), `source_url` \u2192 URL, `metadata.git_commit` = C1, `persona_packs` = (URL, C1), no checkout left. Local install `aaaf4b9`, Git cycle 006; chain proof cycle 011 at `2038254`.\n- A2: `persona swap pm update-manager` changed exactly one `seat_personas` row (pm, base); domain/style rows, other seats, `bindings`, `tool_grants` identical; the next `tick` prompt carried the new wording in base<domain<style order. `dc38523`.\n- A3: after commit C2, `persona update` exit 0 \u2192 `^ update-manager (new version; the previous one is kept)`; list shows H2/C2; v1 row field-identical; `persona_packs.ref` = C2. `e2eb511`.\n- A4: readback from `attempts.persona_stack` printed `1 H1 1 C1` / `2 H2 15 C2`, both live rows; no-op `persona update update-crafts` \u2192 `=`, 15\u219215 rows. `e2eb511`.\n- A5: `zsh tests/pm_flow_test.sh` ten `PASS:`, `suite_exit=0`; cycles 008\u2013010 regressions exit 0; re-verified at `39a1fe4`, owned paths unchanged since `2038254`.\n\nMutants (update rewrites in place; Git add inserts, not adopts) fail the named assertions.",
+        "risks": "- The brief's `pm-flow persona \u2026` spelling is not delivered: `pm_flow.sh` has no `persona` subcommand and is outside owned paths. Running it shows the gap.\n- Inherited `PM_FLOW_*` variables misroute a standalone catalog run; harnesses `env -u` them. A suite failure outside the harness reveals it.\n- A manifest-only change (version/summary) is reported `~` and refreshes provenance in place, no new row; a caller expecting a row per version bump will not get one.",
+        "unproven": "- HTTPS/SSH Git transports: only `file://` was exercised (real Git CLI, same code path). Settled by `persona add` against a remote repository.",
+        "word_count": 492
+      },
+      "key": "persona-packs",
+      "name": "persona-packs",
+      "owned_paths": [
+        "template/.agentic/pm_flow/catalog.py",
+        "template/.agentic/pm_flow/store.py"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Section completed and validated across 012 cycle(s)",
+      "updated_at": "2026-08-23T18:05:37Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "open"
+        },
+        {
+          "id": "A2",
+          "state": "open"
+        },
+        {
+          "id": "A3",
+          "state": "open"
+        },
+        {
+          "id": "A4",
+          "state": "open"
+        },
+        {
+          "id": "A5",
+          "state": "open"
+        },
+        {
+          "id": "A6",
+          "state": "open"
+        }
+      ],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/boundary-schema/handoff.md",
+        ".agentic/pm_flow/pm-agent/sections/outcome-record/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 352,
+        "decisions": "- None yet.",
+        "interfaces": "- None identified yet.",
+        "next_action": "- Awaiting the first scoped assignment.",
+        "outcome": "- Section initialized; no implementation outcome yet.",
+        "risks": "- No implementation evidence exists yet.",
+        "unproven": "- Everything in the brief; nothing has been attempted yet.",
+        "word_count": 55
+      },
+      "key": "plan-inbox",
+      "name": "plan-inbox",
+      "owned_paths": [
+        "template/.agentic/pm_flow/inbox.zsh",
+        "tests/plan_inbox_test.sh",
+        "tests/fixtures/plan_inbox/**"
+      ],
+      "priority": "must-have",
+      "status": "planned",
+      "summary": "Section created; its PM sub-agent has not been launched yet.",
+      "updated_at": "2026-08-25T10:00:20Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "open"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "open"
+        }
+      ],
+      "dependencies": [],
+      "handoff": {
+        "byte_count": 1011,
+        "decisions": "- The section manager opened no assignment: the next workplan task\n  cannot be done until the dependency above is resolved.",
+        "interfaces": "- Nothing new. Dependent sections must assume this capability is unavailable.",
+        "next_action": "- Resolve the external dependency, then reopen this section with an\n  `active` handoff.",
+        "outcome": "- Blocked on an external dependency: A2\u2013A5 need a run against `/Users/salah/code/personal/golden-grid`, which no session in this loop can reach (probe above); unblocked by either a session whose allowed working directories include that path, or the operator running the command block at `docs/real-install.md:11-20` and committing the transcript over `transcript=PLACEHOLDER` (line 709).",
+        "risks": "- The dependency may never arrive, in which case the section must be rescoped\n  or abandoned as a product decision.",
+        "unproven": "- Every acceptance criterion behind the blocked dependency. Nothing here has\n  been demonstrated against the real system.",
+        "word_count": 147
+      },
+      "key": "real-install",
+      "name": "real-install",
+      "owned_paths": [
+        "install.sh",
+        "tests/real_install_test.sh",
+        "tests/fixtures/real_install/**",
+        "docs/real-install.md",
+        "README.md"
+      ],
+      "priority": "must-have",
+      "status": "blocked",
+      "summary": "Blocked on an external dependency: A2\u2013A5 need a run against `/Users/salah/code/personal/golden-grid`, which no session in this loop can reach (probe above); unblocked by either a session whose allo...",
+      "updated_at": "2026-09-01T20:41:18Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "open"
+        },
+        {
+          "id": "A2",
+          "state": "open"
+        },
+        {
+          "id": "A3",
+          "state": "open"
+        },
+        {
+          "id": "A4",
+          "state": "open"
+        },
+        {
+          "id": "A5",
+          "state": "open"
+        },
+        {
+          "id": "A6",
+          "state": "open"
+        },
+        {
+          "id": "A7",
+          "state": "open"
+        }
+      ],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/packaging/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 1034,
+        "decisions": "- The product officer decided this in a portfolio review, against the\n  mission and the evidence it probed, not against this section reporting.",
+        "interfaces": "- Nothing new. Any section expecting this capability must be reconciled\n  without it.",
+        "next_action": "- Reconcile the product plan without this section.",
+        "outcome": "- Cut by a portfolio review: advances no plan bullet; the driver already writes Conventional Commits; its failure mode (hook refusing the driver's subject) stops the flow. Product no longer guarantees a commit-message hook or an install registry. Reopen with a planned handoff once the must-haves close.",
+        "risks": "- advances no plan bullet; the driver already writes Conventional Commits; its failure mode (hook refusing the driver's subject) stops the flow. Product no longer guarantees a commit-message hook or an install registry. Reopen with a planned handoff once the must-haves close.",
+        "unproven": "- Everything this section was to deliver; it was cut before proving any of it.",
+        "word_count": 163
+      },
+      "key": "repo-hooks",
+      "name": "repo-hooks",
+      "owned_paths": [
+        ".githooks/**",
+        "tools/hooks/**",
+        ".releaserc.json",
+        "tests/repo_hooks_test.sh"
+      ],
+      "priority": "nice-to-have",
+      "status": "cancelled",
+      "summary": "Cut by a portfolio review: advances no plan bullet; the driver already writes Conventional Commits; its failure mode (hook refusing the driver's subject) stops the flow. Product no longer guarantee...",
+      "updated_at": "2026-08-23T13:50:53Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        },
+        {
+          "id": "A6",
+          "state": "met"
+        },
+        {
+          "id": "A7",
+          "state": "met"
+        },
+        {
+          "id": "A8",
+          "state": "met"
+        }
+      ],
+      "dependencies": [],
+      "handoff": {
+        "byte_count": 3435,
+        "decisions": "- One tick = `run --max-ticks 1`; the between-tick gap is the only stop point. The driver's loop, locks and attempt classification are untouched.\n- Detachment is `python3 -c 'os.setsid(); os.execvp(\u2026)'` \u2014 no nohup, setsid binary, tmux or launchd. Signal disposition cannot be inherited across `agent_exec.sh`'s vendor CLI.\n- Stop is graceful only: the sole `kill` is a `kill -0` liveness probe; no trap.\n- Any new file under `template/.agentic/pm_flow/` must be registered in `install.sh`'s `COPIED_ENGINE_FILES`/`_DIRS` or migration strands it. Standing cost, not a one-off.",
+        "interfaces": "- `pm-flow run-detach start [--max-ticks N] [--section KEY] | stop | status`; `start` prints `pid=` and `log=`. `--section` is accepted on `start` only.\n- Runtime under `$RUNS_DIR`: `run-detach.pid`, `.state`, `.stop`, `run-detach-<UTC>.log`; already gitignored by `*/runs/*`.\n- `template/.agentic/pm_flow/run_detach.zsh`, `docs/run-detach.md`, `tests/run_detach_test.sh`, `tests/fixtures/stub_detach{,_stop}.zsh`.\n- `install.sh:67,68,83` now registers `run_detach.zsh`, `artifact_quality.md`, `cards`.",
+        "next_action": "- None here. Portfolio: the `packaged_layout_test.sh:670-675` array copy needs an owner.",
+        "outcome": "- A1 \u2014 launcher's process group is SIGHUPed; supervisor and in-flight dispatch survive and the cycle records the stub's normal status. `PASS: launcher process-group SIGHUP leaves supervisor and dispatch alive`; deleting `os.setsid()` turns it red. `9a2a1e7`.\n- A2 \u2014 `PASS: live, idle, and stale-pid status reporting`; a pid file whose process is gone reads `idle`, exit 0. `9a2a1e7`.\n- A3 \u2014 stop mid-dispatch records the result, starts no tick, last log line `run-detach stopped by request after tick 1`, `status` idle \u2014 at `--max-ticks 4`, so the budget is not doing the work. `605e2f8`.\n- A4 \u2014 `PASS: duplicate start refusal preserves tick state`: non-zero exit, live pid and log printed. `9a2a1e7`.\n- A5 \u2014 `next` named `develop` pre-stop, `review` post-stop; the restart's log runs `review` and the pre-stop `result.md` mtime is unchanged. `605e2f8`.\n- A6 \u2014 fixture porcelain empty after start, stop and restart; no `run-detach*` outside `<project>/runs/`. `605e2f8`, `3c5ae8f`.\n- A7 \u2014 `pm-flow run-detach` routes and appears in `help` (`pm_flow.sh:1932`, `:50`); `packaged_layout_test.sh` exits 0, 13/13. `3c5ae8f`, `99fe986`.\n- A8 \u2014 all three suites exit 0 (9/9, 10/10, 13/13), re-measured on merged `main` at `9afcf0f`; the new suite opens with the `PM_FLOW_*` guard.",
+        "risks": "- `tests/packaged_layout_test.sh:670-675` keeps a shorter private copy of both registry arrays, now further out of step with `install.sh`; `assert_data_only` therefore checks fewer names than it could. The strict `ls -A` at `:1018-1020` covers the gap. Bringing the copy to parity would reveal any divergence.\n- A hard-killed supervisor leaves `run-detach.stop` behind; `start` clears it. A regression shows as a run stopping after one tick.",
+        "unproven": "- `resolve_project`'s no-`--project` fallthrough to `$PM_FLOW_FLOW_DIR/$PROJECT_KEY/runs` is unexercised \u2014 the test's `engine_command` always passes `--project`. Settled by one routed `start` with it omitted.\n- Only stub agents were dispatched; no real vendor CLI has been hung up mid-dispatch. Settled by a real detached run whose terminal is closed.\n- Linux is claimed in the brief but every run was macOS. Settled by the suite on Linux.",
+        "word_count": 482
+      },
+      "key": "run-detach",
+      "name": "run-detach",
+      "owned_paths": [
+        "template/.agentic/pm_flow/run_detach.zsh",
+        "tests/run_detach_test.sh",
+        "tests/fixtures/stub_detach*.zsh",
+        "docs/run-detach.md",
+        "template/.agentic/pm_flow/pm_flow.sh",
+        "install.sh"
+      ],
+      "priority": "nice-to-have",
+      "status": "done",
+      "summary": "Section completed and validated across 006 cycle(s)",
+      "updated_at": "2026-08-25T08:34:56Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        }
+      ],
+      "dependencies": [],
+      "handoff": {
+        "byte_count": 3779,
+        "decisions": "- Section = `attempts.task_id \u2192 tasks.key`, `(project)` when NULL. Readers\n  never filter `project_id`: the importer keys on `basename(project_dir)`, the\n  driver on `PROJECT_KEY`, and a filter reads zero.\n- Import keys on `response_path`. A TSV row wins for its path even with a\n  blank cost; only envelopes the TSV lacks are priced. Sums are\n  `COALESCE(cost_usd,0)` over every `status`.\n- `record_dispatch_cost` is a no-op whose call (`driver.zsh:1036`) sits\n  outside the five owned functions; nothing may import before\n  `telemetry_end_attempt` (`:1056`).",
+        "interfaces": "- `cost.py total <dir> [section]` \u2192 one number; `report <dir>` \u2192 section\n  lines, `TOTAL`,\n  `ATTEMPT\\t<started_at>\\t<section>\\t<role>\\t<label>\\t<cli>\\t<cost>\\t<in>\\t<out>`;\n  `import <dir>` \u2192 `imported=N`. The `.tsv` arities exit 2.\n- Store: `<dir>/runs/pm_flow.db` (`store.default_path`), ignored by\n  `*/runs/*`. `pm-flow cost`, `spent_usd`, `dispatch_count`, `watch.py` read\n  it; count dispatches as `^ATTEMPT` lines.\n- Fixtures seed spend via `telemetry.py attempt-start|attempt-end`\n  (`governance.zsh:198`); a TSV registers nowhere.",
+        "next_action": "- Portfolio review: decide whether `assert_within_budget`\n  (`driver.zsh:610-624`) must fail closed \u2014 outside these five functions, so\n  it needs a boundary extension.\n- Import the real installs before trusting their spend figures.",
+        "outcome": "- **A1** `installed --project legacy-two cost` prints `TOTAL\\t4.3750`,\n  computed by `awk`/`python3` from the TSV and the envelope-only file, not by\n  `cost.py`; the blank-cost row's `7.777` envelope stays out. `558837f`,\n  `c6c3c3b`, `79b7dd9`.\n- **A2** `pm_flow.cli.main` prints\n  `ATTEMPT\u2026alpha developer codex-one codex 0.0400 13937 5`,\n  `grep -c cost_ledger watch.py` \u2192 `0`. `c6c3c3b`, `915911a`, `79b7dd9`.\n- **A3** Two runs byte-identical (`cmp`), a later `cost.py import` \u2192\n  `imported=0`, no `response_path` twice. `558837f`, `79b7dd9`.\n- **A4** One CLI dispatch adds one `ATTEMPT` at `0.5000`, `runs/` holds\n  `pm_flow.db`, no `cost_ledger.tsv`, `grep -c cost_ledger_file driver.zsh`\n  \u2192 `0`; at the ceiling the next prints `project budget exhausted`, count\n  unchanged, no fallback warning. `1c5a301`, `79b7dd9`.\n- **A5** Four suites exit 0 (`store ledger tests passed`, 10 `PASS:`,\n  `all suites passed` 35/41/32/58/74, 13 `PASS:`) on `main` `75462bd`.",
+        "risks": "- `spent_usd` fails open (`9452a80`): a broken reader returns `0` and\n  re-authorises the whole budget \u2014 the brief's first rejection condition by\n  another route. Truncate a store and tick.\n- `pm-flow status|cost` between the envelope landing and `attempt-end`\n  (`:1041-1056`) counts it twice \u2014 two rows share a `response_path`.\n- `spent_usd` globs `**/*.response.json`, so tick latency grows with envelope\n  count; `watch.py` shows `$0.00` on any `sqlite3.Error`, display only.",
+        "unproven": "- No real install imported; every parity figure is a 3-5 row fixture. Settle:\n  `cost.py import` on `pm-agent` and each golden-grid workspace, against its\n  own TSV arithmetic.\n- \"Installed\" means `pm_flow.cli.main` with `PM_FLOW_ENGINE_ROOT` at the\n  suite's stubbed copy, not a pip wheel. Settle: `pm-flow cost` from a venv\n  wheel on a legacy-TSV project.\n- No priced row came from a live agent \u2014 stub `0.5000` or fixture, Codex\n  tokens replayed from `tests/fixtures/codex_events_real.jsonl`. Settle: one\n  real dispatch against the billed figure.\n- A4's `git status | grep runs/` cannot fail under `*/runs/*`; A4 rests on\n  `ls \"$PROJECT_DIR/runs\"`. Settle: unignore `runs/` in a fixture. Live sign\n  only: `pm-agent`'s `cost_ledger.tsv` mtime stopped at T4's merge while\n  `pm_flow.db` kept growing.\n- The double-count window and fail-open path are recorded, never exercised.",
+        "word_count": 498
+      },
+      "key": "store-ledger",
+      "name": "store-ledger",
+      "owned_paths": [
+        "template/.agentic/pm_flow/cost.py",
+        "template/.agentic/pm_flow/watch.py",
+        "template/.agentic/pm_flow/driver.zsh",
+        "tests/store_ledger_test.sh",
+        "template/.agentic/pm_flow/tests/transitions.zsh",
+        "template/.agentic/pm_flow/tests/on_demand.zsh",
+        "template/.agentic/pm_flow/tests/governance.zsh",
+        "template/.agentic/pm_flow/README.md"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Section completed and validated across 007 cycle(s)",
+      "updated_at": "2026-08-24T08:33:28Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "open"
+        },
+        {
+          "id": "A2",
+          "state": "open"
+        },
+        {
+          "id": "A3",
+          "state": "open"
+        },
+        {
+          "id": "A4",
+          "state": "open"
+        },
+        {
+          "id": "A5",
+          "state": "open"
+        },
+        {
+          "id": "A6",
+          "state": "open"
+        }
+      ],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/boundary-schema/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 356,
+        "decisions": "- None yet.",
+        "interfaces": "- None identified yet.",
+        "next_action": "- Awaiting the first scoped assignment.",
+        "outcome": "- Section initialized; no implementation outcome yet.",
+        "risks": "- No implementation evidence exists yet.",
+        "unproven": "- Everything in the brief; nothing has been attempted yet.",
+        "word_count": 55
+      },
+      "key": "ticket-exhaust",
+      "name": "ticket-exhaust",
+      "owned_paths": [
+        "template/.agentic/pm_flow/ticket_sync.py",
+        "template/.agentic/pm_flow/ticket_sync.zsh",
+        "tests/ticket_exhaust_test.sh",
+        "tests/fixtures/ticket_exhaust/**"
+      ],
+      "priority": "must-have",
+      "status": "planned",
+      "summary": "Section created; its PM sub-agent has not been launched yet.",
+      "updated_at": "2026-09-01T14:17:29Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        },
+        {
+          "id": "A6",
+          "state": "met"
+        }
+      ],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/store-ledger/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 3502,
+        "decisions": "- Engine Python lives in `template/.agentic/pm_flow/`, not `src/pm_flow/`; the brief's owned paths are wrong.\n- Packaged `topologies`/`roles`/`domains` resolve flow-first, engine-second, never copied into a repository.\n- One accounting: `cost_usd` from `cost.py`; the `topology_comparison` view gives attempts, tokens, duration only.\n- Persona swaps are an operator argument (`--persona t:role=persona`), never implicit.\n- A `runs` row is one `run`/`tick` invocation, not one dispatch \u2014 that is `n_runs`.\n- New files under `template/.agentic/pm_flow/` must join `install.sh`'s `COPIED_ENGINE_*` lists the same cycle.",
+        "interfaces": "- `pm-flow compare <a> <b> [--max-ticks n] [--persona t:role=p] [--keep-copies]`; `pm-flow compare --report <run-a> <run-b>`.\n- Topology documents: `<flow>/topologies/<key>.json`, else the wheel's `pm_flow/engine/topologies/`.\n- Columns, in order: cost_usd, tokens, cycles_to_done, rescue_rate, abandon_rate, escalation_depth, wall_clock_s, n_runs; then per-arm persona lines; then the limits sentence.\n- Breaking: `pm-flow cost`'s `ATTEMPT` line is now ten tab fields, field 10 the run's topology key (`-` if none); fields 1-9 unchanged. It edits `store-ledger`'s `cost.py`.",
+        "next_action": "- Product officer: fix the brief's owned paths. `store-ledger` and any `pm-flow cost` reader: adopt the ten-field `ATTEMPT` line. Open a task for the `fail`-path run if it must be measurable.",
+        "outcome": "- A1 \u2014 wheel-driven `pm-flow compare lean heavy --max-ticks 6`: store reads exactly `heavy|wheel-topology-project` / `lean|wheel-topology-project`, arm `copy_path`s differ, `starting_commit` equals fixture HEAD.\n- A2 \u2014 eight contract columns in order against a hand-computed fixture (`cost_usd 4.0000 2.5000`, `tokens 310 250`, \u2026), reconciled to `cost.py total` `6.5000`; driven `wall_clock_s` non-zero.\n- A3 \u2014 last line `Limits: lean n=1; heavy n=1. No difference between the arms can be inferred.`; deleting it turns the suite red, and per-topology run counts are asserted separately, so it counts runs not dispatches.\n- A4 \u2014 `compare heavy missing`, run after a successful compare, exits non-zero, prints no stdout, names both flow and engine document paths, and leaves a non-zero attempt count unchanged.\n- A5 \u2014 `--persona lean:pm=cpo` yields `lean|cpo` / `heavy|pm` in `attempts.persona_stack` and in the report; neutralising the swap turns the suite red.\n- A6 \u2014 six suites exit 0 post-merge: `topology_compare_test.sh`, `pm_flow_test.sh`, `packaged_layout_test.sh`, `store_ledger_test.sh`, `prompt_quality_test.sh`, `agent_bindings_test.sh`.\n- Every ID's evidence lives on `main` at `a81a9a0`/`b5e667a`.",
+        "risks": "- Arm wall clock is unbounded \u2014 702.4s vs 4.4s at cycle 005, 49s at 006. A suite timeout reveals it; bound the arm rather than loosening `wall_clock_s > 0`.\n- `rescue_rate` keys on `role_key='10x_developer'`, `abandon_rate` on `outcomes` rows emitted at `do_abandon`/`do_complete`; a new rescue site or moved abandon path silently zeroes a column.",
+        "unproven": "- Budget-exhausted runs: `assert_within_budget` exits via `fail` after `telemetry_begin_run`, so `runs.ended_at` stays NULL and that run drops out of `wall_clock_s`. An arm hitting the cap would settle it; the fix is an `EXIT` trap at driver top level.\n- Arms only ever compared at 5-6 ticks on stub projects; no real multi-section project has run both arms.\n- Field 10 was confirmed by a data probe, not a source mutation \u2014 a PM does not edit source.",
+        "word_count": 487
+      },
+      "key": "topology-compare",
+      "name": "topology-compare",
+      "owned_paths": [
+        "src/pm_flow/topology.py",
+        "src/pm_flow/compare.py",
+        "src/pm_flow/cli.py",
+        "tests/topology_compare_test.sh",
+        "template/.agentic/pm_flow/topologies/**"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Section completed and validated across 007 cycle(s)",
+      "updated_at": "2026-08-24T19:10:05Z"
+    },
+    {
+      "acceptance": [
+        {
+          "id": "A1",
+          "state": "met"
+        },
+        {
+          "id": "A2",
+          "state": "met"
+        },
+        {
+          "id": "A3",
+          "state": "met"
+        },
+        {
+          "id": "A4",
+          "state": "met"
+        },
+        {
+          "id": "A5",
+          "state": "met"
+        }
+      ],
+      "dependencies": [],
+      "handoff": {
+        "byte_count": 3184,
+        "decisions": "- A 2xx acknowledgement, not an attempt, marks a span exported; stdout reports spans *marked*, not acknowledged.\n- HTTP delivery is a stdlib `urllib` POST of OTLP/JSON. The SDK's `export()` reports only SUCCESS/FAILURE and cannot witness the 2xx A1/A3 are written against; `--protocol grpc` still uses the SDK.\n- `pm_flow.sh` is owned for the `trace` routing and its usage lines only.\n- No vendor endpoint is defaulted; `telemetry.otlp_endpoint` is empty in shipped config.\n- The suite's `--offline` flag is opt-in and says on stdout which cases were skipped. Nothing may invoke the suite with it \u2014 receiver-backed cases would go silently absent.",
+        "interfaces": "- `pm-flow trace export --otlp <url> [--header k=v] | --file <path>`, `pm-flow trace status` (5 lines now: `recording:`, `endpoint:`, `unexported spans:`, `in-flight spans:`, `exported spans:`).\n- `config.json` `telemetry: {enabled, otlp_endpoint, headers}` at lines 59-63.\n- `trace_export.py` consumes `spans`/`span_events` and `spans.exported_at`; `otel-semconv` owns the attribute names.",
+        "next_action": "- None here. Route the never-closed span to `otel-semconv`.",
+        "outcome": "- **A1** \u2014 Packaged `pm-flow trace export --otlp` printed `exported 1 span(s)`, the receiver body carried the tick's exact span id `99b2d34aaedd17bc`, `exported_at IS NOT NULL` equalled 1, and the rerun printed 0 with the request count unmoved (c79f7c2, merged e93b937).\n- **A2** \u2014 In a `--no-deps` wheel venv where `import opentelemetry` exits non-zero, `--file` wrote a line accepted by both `validate_otlp_json` and the suite's independent JSON-Schema checker (c79f7c2).\n- **A3** \u2014 503, a 0.05 s timeout and partial success each leave every `exported_at` null and a later 200 delivers the same span ids; unchanged by cycle 003 (cycle 002 work, still passing at e8d846b).\n- **A4** \u2014 A packaged `telemetry.enabled: false` tick exits 0 with the span count unchanged and `status` prints `recording: disabled`; with recording on, `unexported spans:` equals what the next export ships and open spans appear on a new `in-flight spans:` line (c79f7c2).\n- **A5** \u2014 `trace_commands_test.sh` (full mode), `pm_flow_test.sh` and `packaged_layout_test.sh` each exit 0 on `main` at e8d846b.",
+        "risks": "- **`otel-semconv` action:** a completed tick leaves one span with `ended_at IS NULL`. A span that never closes never exports, so the objective is not true of it. `telemetry.py finish_span` owns when a span closes. `trace status`'s in-flight count reveals it.\n- `fetch_spans` orders by `started_at ASC` while the test expects `started_at, span_id`. Two finished spans sharing a `started_at` would flap the id assertion.",
+        "unproven": "- Multi-span batching through the installed command: the packaged round trip ships a single-span payload because that is all one stub tick records. Batching is proven only against three SQL-seeded spans in the checkout block. A tick recording two or more finished spans would settle it.\n- `--protocol grpc` is untested against any receiver; no case imports the SDK.\n- Phoenix, Jaeger and Langfuse are documented but never contacted; only the loopback `http.server` receiver has answered.",
+        "word_count": 474
+      },
+      "key": "trace-commands",
+      "name": "trace-commands",
+      "owned_paths": [
+        "template/.agentic/pm_flow/pm_flow.sh",
+        "template/.agentic/pm_flow/config.json",
+        "template/.agentic/pm_flow/trace_export.py",
+        "tests/trace_commands_test.sh"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Section completed and validated across 004 cycle(s)",
+      "updated_at": "2026-08-24T10:32:16Z"
+    },
+    {
+      "acceptance": [],
+      "dependencies": [
+        ".agentic/pm_flow/pm-agent/sections/green-suite/handoff.md"
+      ],
+      "handoff": {
+        "byte_count": 2304,
+        "decisions": "The merge is tested with `git merge-tree --write-tree` before anything is\ntouched. A merge attempted without that check leaves conflict markers in the\nmain working tree, which is the one failure this section was forbidden to cause.\nOn a conflict, or on a main tree with changes the merge would overwrite, nothing\nis merged and `merge_blocked.txt` is written beside the section.\n\nParallel rescue gives each path its own worktree and does **not** merge them\ntogether when several deliver: they are independent attempts at one problem, and\ncombining them produces a tree no author wrote. The branches are named in\n`rescue_branches.txt` and a human chooses.\n\nOrchestration state stays in the main tree. `agent_exec.sh` gained `--work-root`\n(the workspace moves, the installation does not) and `--extra-dir` (the cycle\ndirectory travels with the dispatch as an explicit grant).",
+        "interfaces": "`isolation.worktrees` in `config.json`, default true. Off automatically when the\nproject is not a git repository, and the flow then behaves exactly as before.\n`begin_worktree_dispatch` / `end_worktree_dispatch` bracket any dispatch that\nshould run in a section's tree.",
+        "next_action": "packaging, then re-cut the remaining five sections against the packaged layout.",
+        "outcome": "Every section now runs its dispatches in its own git worktree under\n`.git/pm-flow/worktrees/<project>/<section>`, on branch\n`pm-flow/<project>/<section>`. Accepted cycles commit there and merge back into\nwhatever branch the main tree has checked out; rejected ones merge nothing and\nleave their work on the branch for the next cycle. The suite proves it from the\ninside: the developer stub records its own `$PWD`, and the assertion is on that,\nnot on the driver's report of where it dispatched.",
+        "risks": "Never write `local path` in zsh: the name is tied to `PATH`, and declaring it\nlocal empties `PATH` for the rest of the function, so `git` stops being findable.\nThat is what made the first working implementation silently do nothing.",
+        "unproven": "\"Concurrently\" is interleaved, not simultaneous. The driver ticks one section at\na time, so what the suite proves is separate trees and non-colliding merge-backs,\nnot two dispatches in flight at once. Nothing else here is unproven.",
+        "word_count": 351
+      },
+      "key": "worktree-isolation",
+      "name": "worktree-isolation",
+      "owned_paths": [
+        "template/.agentic/pm_flow/driver.zsh",
+        "template/.agentic/pm_flow/agent_exec.sh",
+        "template/.agentic/pm_flow/config.json",
+        "template/.agentic/pm_flow/README.md",
+        "tests/**",
+        "MANIFEST"
+      ],
+      "priority": "must-have",
+      "status": "done",
+      "summary": "Each section dispatches in its own git worktree; accepted work merges back, rejected work never reaches the main tree.",
+      "updated_at": "2026-08-22T18:12:36Z"
+    }
+  ]
+}

@@ -2,9 +2,57 @@
 
 ## Current task
 
-- None. T4 was accepted at cycle 004 and it was the last task in the workplan. All
-  four tasks are done and all five brief acceptance criteria (A1-A5) are met, so the
-  section is ready to be marked `done` once the driver has merged cycle 004.
+- None. T1-T4 are all done, cycle 004 is merged (`50ec3b2`), and all five brief
+  acceptance criteria are met on merged `main` — re-observed by the PM at cycle 005
+  scoping rather than inherited from the cycle-004 review. The section is complete.
+
+## Verified complete on merged main, cycle 005
+
+Probes `sections/boundary-schema/probe_complete_005.zsh` (with
+`probe_005_check.py`) and `probe_005_refuse.zsh`; outputs under
+`sections/boundary-schema/probe_005/`. Run at head `50ec3b2` with no tracked
+modification outside `.agentic/`.
+
+- A1, the installed verb, no env override. `pm-flow export --json` typed in the
+  repository exits 0 — the cycle-004 `unknown command: export` is gone now that the
+  merge has landed. `export keys=22 dirs=22 identical=True` against the directory
+  listing, `json-tool-exit=0`, `stable=YES` (`cmp` of two consecutive runs),
+  `git-status-identical=YES`. Top-level keys are `['project', 'sections']`; each
+  section carries `key, name, status, priority, owned_paths, dependencies,
+  acceptance, handoff, summary, updated_at`.
+- A1, spot-checked on a different section than cycle 004 used — this one.
+  `boundary-schema`: `status active` = `status.txt`, `priority must-have` = line 1
+  of `priority.txt`, `owned_paths` equal to the seven lines of `owned_paths.txt`,
+  `dependencies []`, `acceptance` the five bare IDs `A1`-`A5` all `met`, and all six
+  handoff fields present verbatim in `handoff.md` (plus `word_count`/`byte_count`).
+- A2, end to end on a copy of the live project (`probe_005_refuse.zsh`): the copy
+  exports clean (`sections=22 project=pm-agent`), then deleting `## What is
+  unproven` from `otel-semconv/handoff.md` makes the same command exit 1 with
+  `stdout bytes=0` and `export failed:
+  export.sections[otel-semconv].handoff.What is unproven is required` — section and
+  field both named. `export.py check --kind handoff` rejects the same file on its
+  own (`handoff.What is unproven is required`, exit 1).
+- A3, from the suite's own output on main: eleven markdown fixtures each with two
+  agreeing verdicts (5 ACCEPT pairs, 6 REJECT pairs), two missing-schema rows
+  showing the shell rejects with `cannot load … schema at …` rather than falling
+  back, `project export: sections=3 stable=yes fields=fixture-matched`, and
+  `handoff title mutation: export=REJECT stdout=empty` — the one-definition check
+  now lives inside the suite, so a green suite is the proof.
+- A4: `config_valid.json: pm-flow=ACCEPT topology=ACCEPT agent-exec=ACCEPT` (its
+  `developer` role is bound to cli `acp`), `config_valid.json:
+  store-clis=claude,codex,copilot topology-exit=0`, `config_unknown_cli.json:
+  pm-flow=REJECT topology=REJECT agent-exec=REJECT`, and
+  `config.schema.json missing: pm-flow=REJECT topology=REJECT agent-exec=REJECT`.
+  The enum is still written once, at `config.schema.json:10`.
+- A5, on the current checkout: `boundary_schema_test.sh`, `pm_flow_test.sh`,
+  `topology_compare_test.sh`, `agent_bindings_test.sh` and
+  `template/.agentic/pm_flow/tests/verdict_parser.zsh` (`pass=35 fail=0`) each
+  exit 0.
+- Live shape of the export, for whoever consumes it: 102 acceptance entries across
+  the project, 74 `met` and 28 `open`; five sections emit `acceptance: []` —
+  `agents-md`, `green-suite`, `installer`, `packaging`, `worktree-isolation` —
+  because their legacy briefs carry no `A<n>` token to derive a state for. Faithful
+  to the source; adding IDs belongs to those sections' owners.
 
 ## Completed tasks and evidence
 
@@ -235,13 +283,14 @@
   is local to the developer's shell, not to either tree. Keep demanding the exact
   command, cwd and full output before acting on it.
 
-## Carried into T3 and T4
+## Standing facts for anyone touching these files again
 
 - `template/.agentic/pm_flow/tests/verdict_parser.zsh` is the in-engine regression
   guard for anything touching the verdict path: it extracts `markdown_verdict_parse`
   and four neighbours by regex (`verdict_parser.zsh:19-33`), sets `SCRIPT_DIR` to the
   engine root (`:18`), and exercises 35 presentation cases. Baseline `pass=35 fail=0`
-  at cycle 002. Keep it in the A5 list for every remaining task.
+  at cycle 002, still `pass=35 fail=0` on main at cycle 005. Run it for any future
+  edit to the verdict path; `tests/` alone does not cover it.
 - `validate_section_brief` has a wide blast radius: eleven suites build briefs
   inline (`artifact_quality`, `store_ledger`, `packaged_layout`, `run_detach`,
   `otel_semconv`, `topology_compare`, `codex_usage`, `agent_bindings`,
@@ -368,15 +417,22 @@ checkout with T3 merged.
   their owners, not here.
 - The verb resolves the engine from `PM_FLOW_ENGINE_ROOT`
   (`pm_flow.sh:16`, set by `src/pm_flow/paths.py:244`), which on this machine is the
-  source tree's `template/.agentic/pm_flow`. So `pm-flow export --json` typed in the
-  repo answers `unknown command: export` until the driver merges cycle 004, and
-  works the moment it does. That is the editable install dogfooding the template,
-  not a gap in the work; the PM verified the verb end to end against the live
-  project by pointing `PM_FLOW_ENGINE_ROOT` at the checkout.
+  source tree's `template/.agentic/pm_flow`. The developer's `unknown command:
+  export` was that editable install pointing at an unmerged worktree, not a gap in
+  the work: cycle 004 merged at `50ec3b2` and `pm-flow export --json` typed in the
+  repository now exits 0 with no override, confirmed at cycle 005.
+- The export arm passes the flow directory explicitly —
+  `python3 "$SCRIPT_DIR/export.py" emit "$@" "$FLOW_DIR" "$PROJECT_KEY"`
+  (`pm_flow.sh:2031-2033`), with `FLOW_DIR` from `PM_FLOW_FLOW_DIR` falling back to
+  the engine's own directory (`:17`) and the key from `resolve_project_key`
+  (`:172`), which reads `<flow>/.project-key`. So exporting a copy of the project
+  means copying `.agentic/pm_flow` whole and setting `PM_FLOW_FLOW_DIR`; copying
+  only the `pm-agent` directory loses the key file.
 
 ## Next eligible task
 
-- None in this workplan; T1-T4 are all done. The section's remaining obligation is
-  the bounded `handoff.md`, and its interfaces — `schemas/*.json`, the
-  `pm-flow export --json` output shape, and `export.py check` — are what the future
-  ticket-integration section consumes.
+- None. T1-T4 are done and A1-A5 are met on merged `main`; the workplan is closed
+  and the section is complete. What it leaves behind for the ticket-integration
+  section is `template/.agentic/pm_flow/schemas/*.json`, the stable
+  `pm-flow export --json` output shape, and `export.py check --kind
+  {brief|handoff|verdict|config|export}`.

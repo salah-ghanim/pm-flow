@@ -1,0 +1,53 @@
+PASS  plain atx heading                              -> GO
+PASS  numbered atx heading                           -> GO
+PASS  numbered paren heading                         -> NO_GO
+PASS  bold heading                                   -> GO
+PASS  bold heading with colon                        -> NO_GO
+PASS  same-line dash verdict                         -> GO
+PASS  same-line colon verdict                        -> GO_WITH_CHANGES
+PASS  same-line em-ish double dash                   -> GO
+PASS  blockquoted value                              -> NO_GO
+PASS  bulleted value                                 -> GO
+PASS  numbered value                                 -> GO
+PASS  bold value                                     -> NO_GO
+PASS  backticked value                               -> GO
+PASS  bare heading line no hashes                    -> GO
+PASS  duplicate sections, last wins                  -> NO_GO
+PASS  prose mention then real one                    -> GO
+PASS  trailing justification                         -> GO
+PASS  scope ASSIGN                                   -> ASSIGN
+PASS  scope BLOCKED_EXTERNAL                         -> BLOCKED_EXTERNAL
+PASS  developer Status heading                       -> PARTIAL
+PASS  reject unknown token                           -> <REJECT>
+PASS  reject missing section                         -> <REJECT>
+PASS  reject empty section                           -> <REJECT>
+PASS  GO not GO_WITH_CHANGES prefix                  -> GO_WITH_CHANGES
+
+--- decision line extraction ---
+line=BLOCKED_EXTERNAL the IB paper gateway has no credentials on this host
+
+--- assignment extraction (F20) ---
+## Assignment
+
+Write the probe script.
+
+## Acceptance
+
+- `.venv/bin/python -m pytest -q tests/x.py` exits 0
+
+## Rejection conditions
+
+- The probe is mocked.
+PASS  bare id                                        -> ACCEPT
+PASS  backticked id                                  -> ACCEPT
+PASS  bulleted id                                    -> ACCEPT
+PASS  id with title                                  -> ACCEPT
+PASS  Task prefix                                    -> ACCEPT
+PASS  bold id                                        -> ACCEPT
+PASS  id with colon                                  -> ACCEPT
+PASS  undefined id                                   -> REJECT
+PASS  two ids                                        -> REJECT
+PASS  empty                                          -> REJECT
+PASS  scaffold workplan                              -> REJECT
+
+totals: pass=35 fail=0

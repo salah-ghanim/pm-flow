@@ -210,3 +210,8 @@
 | A3 | T1, T2 | suite output showing identical accept/reject from shell validator and checker on every shared fixture |
 | A4 | T3 | an `acp` binding passing all three consumers; an unknown cli failing all three |
 | A5 | T1-T4 | `boundary_schema_test.sh`, `pm_flow_test.sh`, `topology_compare_test.sh`, `agent_bindings_test.sh` all exit 0 |
+
+All four tasks are `done` and every row above has evidence re-observed on merged
+`main` at cycle 005 scoping (`probe_complete_005.zsh`, `probe_005_refuse.zsh`;
+outputs under `sections/boundary-schema/probe_005/`). No task remains; the
+workplan is closed.
