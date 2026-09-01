@@ -3,7 +3,10 @@
 Extract the script below from a pm-flow checkout and run it from that checkout.
 Replace `GOLDEN_GRID_PROJECT_KEY` with the workspace selected for the migration;
 all reported golden-grid values remain placeholders until the operator transcript
-is captured in the next task.
+is captured in the next task. The `all` command runs `survey`, `backup`,
+`provision`, `migrate`, `verify`, and `status`, in that order. Provisioning builds
+the checkout's wheel from `tests/packaging-build-wheelhouse` without using a
+package index, then installs it into the target repository's `.venv`.
 
 ```zsh
 cd /path/to/pm-flow-checkout
@@ -18,7 +21,8 @@ chmod +x "$RUNBOOK"
 
 Keep the printed backup path and transcript path. Do not run `migrate` by itself:
 the script refuses it until the same output directory contains the manifest from
-a verified `backup` phase.
+a verified `backup` phase. Pass `--wheel /path/to/pm_flow-*.whl` to use an
+already-built wheel while keeping the install offline.
 
 <!-- runbook:begin -->
 ```zsh
@@ -26,7 +30,7 @@ a verified `backup` phase.
 set -uo pipefail
 
 usage() {
-  print -u2 'usage: real-install-runbook.zsh <survey|backup|migrate|verify|all> --repo <path> [--project-key <key>] [--name <name>] [--install-sh <path>] [--pm-flow <path>] [--backup-root <path>] [--out <path>]'
+  print -u2 'usage: real-install-runbook.zsh <survey|backup|provision|migrate|verify|status|all> --repo <path> [--project-key <key>] [--name <name>] [--install-sh <path>] [--pm-flow <path>] [--wheel <path>] [--backup-root <path>] [--out <path>]'
   return 2
 }
 
@@ -125,19 +129,44 @@ PY_PROJECT_DIGEST
 }
 
 write_full_manifest() {
-  local base="$1" destination="$2"
-  python3 - "$base" > "$destination" <<'PY_FULL_DIGEST'
+  local base="$1" destination="$2" excluded_top="${3:-}"
+  python3 - "$base" "$excluded_top" > "$destination" <<'PY_FULL_DIGEST'
 import hashlib
 import sys
 from pathlib import Path
 
 base = Path(sys.argv[1])
+excluded_top = sys.argv[2]
 for path in sorted(base.rglob("*")):
     if not path.is_file():
         continue
+    relative = path.relative_to(base)
+    if excluded_top and relative.parts[0] == excluded_top:
+        continue
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    print(f"{digest}  {path.relative_to(base)}")
+    print(f"{digest}  {relative}")
 PY_FULL_DIGEST
+}
+
+write_manifest_differences() {
+  local before="$1" after="$2" destination="$3"
+  python3 - "$before" "$after" > "$destination" <<'PY_DIGEST_DIFF'
+import sys
+from pathlib import Path
+
+def read_manifest(path):
+    entries = {}
+    for line in Path(path).read_text().splitlines():
+        digest, relative = line.split("  ", 1)
+        entries[relative] = digest
+    return entries
+
+before = read_manifest(sys.argv[1])
+after = read_manifest(sys.argv[2])
+for relative in sorted(before.keys() | after.keys()):
+    if before.get(relative) != after.get(relative):
+        print(relative)
+PY_DIGEST_DIFF
 }
 
 load_engine_arrays() {
@@ -267,17 +296,21 @@ backup_phase() {
   [[ ! -e "$backup" ]] || { fail "backup destination already exists: $backup"; return 1; }
   mkdir -p "$backup_root"
 
-  run_logged /bin/cp -R "$repo" "$backup" || return 1
+  mkdir -p "$backup"
+  local -a backup_entries=("$repo"/*(DN))
+  backup_entries=("${(@)backup_entries:#$repo/.venv}")
+  (( ${#backup_entries[@]} > 0 )) || { fail "repository has no files to back up: $repo"; return 1; }
+  run_logged /bin/cp -R "${backup_entries[@]}" "$backup" || return 1
 
   local source_manifest="$out/backup-source-manifest.txt"
   local copied_manifest="$out/backup-copy-manifest.txt"
   print_command python3 full-digest-manifest "$repo" "$source_manifest"
-  write_full_manifest "$repo" "$source_manifest"
+  write_full_manifest "$repo" "$source_manifest" .venv
   local source_code=$?
   print -r -- "exit=$source_code"
   (( source_code == 0 )) || return "$source_code"
   print_command python3 full-digest-manifest "$backup" "$copied_manifest"
-  write_full_manifest "$backup" "$copied_manifest"
+  write_full_manifest "$backup" "$copied_manifest" .venv
   local copied_code=$?
   print -r -- "exit=$copied_code"
   (( copied_code == 0 )) || return "$copied_code"
@@ -293,6 +326,56 @@ backup_phase() {
   print 'backup_verified=yes'
 }
 
+provision_phase() {
+  phase_header provision
+  local checkout="${install_sh:h}"
+  local wheelhouse="$checkout/tests/packaging-build-wheelhouse"
+  local build_requirements="$wheelhouse/build-requirements.txt"
+  [[ -d "$wheelhouse" ]] || { fail "missing wheelhouse: $wheelhouse"; return 1; }
+  [[ -f "$build_requirements" ]] || { fail "missing build requirements: $build_requirements"; return 1; }
+
+  if [[ -n "$wheel" ]]; then
+    [[ -f "$wheel" ]] || { fail "wheel does not exist: $wheel"; return 1; }
+  else
+    local build_venv="$out/build-venv"
+    local dist="$out/dist"
+    mkdir -p "$dist"
+    run_logged python3 -m venv "$build_venv" || return 1
+    run_logged "$build_venv/bin/python" -m pip install \
+      --no-index --find-links "$wheelhouse" -r "$build_requirements" || return 1
+    run_logged "$build_venv/bin/python" -m pip wheel \
+      --no-index --no-build-isolation --no-deps \
+      --find-links "$wheelhouse" --wheel-dir "$dist" "$checkout" || return 1
+    local -a built_wheels=("$dist"/pm_flow-*.whl(N))
+    (( ${#built_wheels[@]} == 1 )) || {
+      fail "expected exactly one pm_flow wheel in $dist, found ${#built_wheels[@]}"
+      return 1
+    }
+    wheel="${built_wheels[1]}"
+  fi
+
+  local venv="${pm_flow:h:h}"
+  if [[ ! -x "$venv/bin/python" ]]; then
+    run_logged python3 -m venv "$venv" || return 1
+  fi
+  run_logged "$venv/bin/python" -m pip install \
+    --no-index --force-reinstall "$wheel" || return 1
+
+  local wheel_name="${wheel:t}"
+  local wheel_version="${wheel_name#pm_flow-}"
+  wheel_version="${wheel_version%%-*}"
+  local pip_path="${pm_flow:h}/pip"
+  run_captured "$pip_path" show pm-flow || return 1
+  local version_output="$REPLY"
+  local installed_version="$(print -r -- "$version_output" | sed -n 's/^Version:[[:space:]]*//p' | head -n 1)"
+  print -r -- "pm_flow_wheel=$wheel_name"
+  print -r -- "pm_flow_version=$installed_version"
+  check_result 'installed version matches wheel filename' \
+    "$([[ -n "$installed_version" && "$installed_version" == "$wheel_version" ]] && print yes || print no)" \
+    "installed pm-flow version ${installed_version:-absent} does not match wheel version $wheel_version" || return 1
+  print 'provision=ok'
+}
+
 migrate_phase() {
   phase_header migrate
   check_result 'verified backup manifest exists' \
@@ -306,6 +389,10 @@ migrate_phase() {
 
 verify_phase() {
   phase_header verify
+  [[ -x "$pm_flow" ]] || {
+    fail "no pm-flow entry point at $pm_flow; run the provision phase first"
+    return 1
+  }
   load_engine_arrays || return 1
   local repo_before="$out/verify-repo-before.txt"
   local repo_after="$out/verify-repo-after.txt"
@@ -404,9 +491,9 @@ verify_phase() {
 
   run_logged git --no-optional-locks -C "$repo" status --short || return 1
 
-  # `pm-flow status` imports legacy costs into its SQLite store. Run it with the
-  # real repository as cwd, but point path resolution at an exact data snapshot
-  # under --out so this verification phase remains read-only under --repo.
+  # `pm-flow status` imports legacy costs into its SQLite store. The separate
+  # status phase is the in-place proof; here an exact snapshot under --out keeps
+  # migration verification read-only under --repo.
   local status_repo="$(mktemp -d "$out/status-repository.XXXXXX")"
   mkdir -p "$status_repo/.agentic"
   run_logged /bin/cp -R "$current" "$status_repo/.agentic/pm_flow" || return 1
@@ -428,12 +515,105 @@ verify_phase() {
   print 'verify=ok'
 }
 
+status_phase() {
+  phase_header status
+  [[ -x "$pm_flow" ]] || {
+    fail "no pm-flow entry point at $pm_flow; run the provision phase first"
+    return 1
+  }
+
+  local current="$repo/.agentic/pm_flow"
+  [[ -d "$current" ]] || { fail "migrated flow directory is absent: $current"; return 1; }
+  check_result 'survey manifest exists' \
+    "$([[ -s "$survey_manifest" && -s "$survey_workspaces" ]] && print yes || print no)" \
+    "missing survey evidence in $out" || return 1
+
+  local before="$out/status-repo-before.txt"
+  local after="$out/status-repo-after.txt"
+  local differences="$out/status-differences.txt"
+  print_command python3 full-digest-manifest "$repo" "$before"
+  write_full_manifest "$repo" "$before"
+  local manifest_code=$?
+  print -r -- "exit=$manifest_code"
+  (( manifest_code == 0 )) || return "$manifest_code"
+
+  print -r -- '$ cd' "${(q)repo}" '&&' "${(q)pm_flow}" status
+  (cd "$repo" && "$pm_flow" status)
+  local status_code=$?
+  print -r -- "exit=$status_code"
+
+  print_command python3 full-digest-manifest "$repo" "$after"
+  write_full_manifest "$repo" "$after"
+  manifest_code=$?
+  print -r -- "exit=$manifest_code"
+  (( manifest_code == 0 )) || return "$manifest_code"
+  print_command python3 manifest-differences "$before" "$after" "$differences"
+  write_manifest_differences "$before" "$after" "$differences"
+  local diff_code=$?
+  print -r -- "exit=$diff_code"
+  (( diff_code == 0 )) || return "$diff_code"
+
+  local selected_key="$(head -n 1 "$current/.project-key")"
+  local store_relative="${current#$repo/}/$selected_key/runs/pm_flow.db"
+  local -a changed_paths=("${(@f)$(<"$differences")}")
+  changed_paths=("${(@)changed_paths:#}")
+  local changed_path writes_ok=yes first_invalid=''
+  for changed_path in "${changed_paths[@]}"; do
+    print -r -- "status_wrote=$changed_path"
+    case "$changed_path" in
+      "$store_relative"|"$store_relative-wal"|"$store_relative-shm") ;;
+      *)
+        writes_ok=no
+        [[ -n "$first_invalid" ]] || first_invalid="$changed_path"
+        ;;
+    esac
+  done
+  [[ "$writes_ok" == yes ]] || {
+    fail "status wrote outside the store: $first_invalid"
+    return 1
+  }
+  (( status_code == 0 )) || return "$status_code"
+
+  local -a workspace_keys=("${(@f)$(<"$survey_workspaces")}")
+  workspace_keys=("${(@)workspace_keys:#}")
+  local status_manifest="$out/status-project-manifest.txt"
+  print_command python3 project-data-manifest "$current" "$status_manifest"
+  write_project_manifest "$current" "$status_manifest" "${workspace_keys[@]}"
+  manifest_code=$?
+  print -r -- "exit=$manifest_code"
+  (( manifest_code == 0 )) || return "$manifest_code"
+
+  local line digest relative expected_path expected_line preservation_ok=yes
+  while IFS= read -r line; do
+    digest="${line%% *}"
+    relative="${line#*  }"
+    [[ -n "$relative" ]] || continue
+    expected_path="$relative"
+    if [[ -n "$project_key" && "$relative" == "$project_key/task_contract.md" ]]; then
+      continue
+    elif [[ -n "$project_key" && "$relative" == "$project_key/project_state/start.md" ]]; then
+      expected_path="$project_key/project_state/start.pre-sections.md"
+    elif [[ -n "$project_key" && "$relative" == "$project_key/project_state/resume.md" ]]; then
+      expected_path="$project_key/project_state/resume.pre-sections.md"
+    fi
+    expected_line="$digest  $expected_path"
+    grep -Fqx -- "$expected_line" "$status_manifest" || {
+      print -u2 -r -- "ERROR: surveyed project data was lost or rewritten: $relative"
+      preservation_ok=no
+    }
+  done < "$survey_manifest"
+  check_result 'surveyed project data digests still match after status' "$preservation_ok" || return 1
+
+  print -r -- "store=$store_relative"
+  print 'status_in_place=ok'
+}
+
 main() {
   (( $# >= 1 )) || { usage; return $?; }
   phase="$1"
   shift
   case "$phase" in
-    survey|backup|migrate|verify|all) ;;
+    survey|backup|provision|migrate|verify|status|all) ;;
     *) usage; return $? ;;
   esac
 
@@ -442,11 +622,12 @@ main() {
   project_name=''
   install_sh="${PWD:A}/install.sh"
   pm_flow=''
+  wheel=''
   backup_root="$HOME/pm-flow-backups"
   out=''
   while (( $# > 0 )); do
     case "$1" in
-      --repo|--project-key|--name|--install-sh|--pm-flow|--backup-root|--out)
+      --repo|--project-key|--name|--install-sh|--pm-flow|--wheel|--backup-root|--out)
         (( $# >= 2 )) || { usage; return $?; }
         local option="$1" value="$2"
         shift 2
@@ -456,6 +637,7 @@ main() {
           --name) project_name="$value" ;;
           --install-sh) install_sh="$value" ;;
           --pm-flow) pm_flow="$value" ;;
+          --wheel) wheel="$value" ;;
           --backup-root) backup_root="$value" ;;
           --out) out="$value" ;;
         esac
@@ -471,6 +653,7 @@ main() {
   [[ -f "$install_sh" ]] || { fail "install.sh does not exist: $install_sh"; return 1; }
   [[ -n "$pm_flow" ]] || pm_flow="$repo/.venv/bin/pm-flow"
   pm_flow="${pm_flow:A}"
+  [[ -z "$wheel" ]] || wheel="${wheel:A}"
   backup_root="${backup_root:A}"
   [[ -n "$out" ]] || out="$(mktemp -d "${TMPDIR:-/tmp}/pm-flow-real-install.XXXXXX")"
   out="${out:A}"
@@ -495,13 +678,17 @@ main() {
   case "$phase" in
     survey) survey_phase ;;
     backup) backup_phase ;;
+    provision) provision_phase ;;
     migrate) migrate_phase ;;
     verify) verify_phase ;;
+    status) status_phase ;;
     all)
       survey_phase || return $?
       backup_phase || return $?
+      provision_phase || return $?
       migrate_phase || return $?
-      verify_phase
+      verify_phase || return $?
+      status_phase
       ;;
   esac
 }
