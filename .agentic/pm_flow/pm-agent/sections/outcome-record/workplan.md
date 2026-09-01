@@ -89,7 +89,7 @@ backend (T4) is the only step needing external infrastructure, so it is last.
 
 ## Task T2 — Close every run on every exit path, and fix the leak
 
-- Status: pending
+- Status: done (cycle 002, accepted)
 - Outcome: after a completed `run` and a deliberately failed `tick`, both new
   `runs` rows carry a terminal status (`ok` or `error`) and a non-NULL
   `ended_at`; no dispatching command leaves a row at `running`. The specific
@@ -99,6 +99,12 @@ backend (T4) is the only step needing external infrastructure, so it is last.
 - Reuse: `telemetry_begin_run` (`:724`) and `telemetry_end_run` (`:757`);
   the existing close calls in `cmd_tick` (`:2779-2833`) and `cmd_run`
   (`:2916-2923`); `cmd_run_end` (`telemetry.py:467`).
+- Resolved: both candidate leaks were real. (a) is closed by explicit
+  `telemetry_begin_run`/`telemetry_end_run ok` pairs in the three on-demand
+  commands; (b) by an owner-process `EXIT` trap at driver source scope
+  (`driver.zsh:779`) that closes as `error`, guarded store-side by a new
+  `--only-open` flag on `telemetry.py run-end` so it can never replace a
+  terminal status the command already wrote.
 - Investigate, do not assume: the two candidate leaks are (a) the lazy open at
   `driver.zsh:797`, where `telemetry_begin_attempt` starts a run for *any*
   dispatching command — `cmd_portfolio_review` (`:3710`),
