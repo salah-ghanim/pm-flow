@@ -74,30 +74,33 @@ Everything below serves that sentence.
   completion. The tracker is a view; the files stay the truth.
 - A plan-level request made while a run holds the driver lock is queued and
   applied at the next safe point, never refused and lost.
+- A finished run carries its outcomes, not only its costs: every cycle decision
+  the driver parses and a real end time land in the store and the exported
+  trace.
+- The product's one real install (golden-grid) runs the packaged engine:
+  migrated by `install.sh` with project data intact, driven through a real
+  cycle, its legacy costs imported and matching, its spans exportable.
 - The test suite runs to completion.
 
 ## Current position
 
-- The backend render is settled: a Jaeger all-in-one (container
-  `pm-flow-jaeger`, operator-started) displays pm-flow runs hours after they
-  finished. `pm-flow trace export --otlp http://localhost:4318/v1/traces`
-  exits 0 and is idempotent (`exported 0 span(s)` on re-run);
-  `curl :16686/api/traces?service=pm-flow` returns role spans (`cpo:
-  portfolio review 6`, `pm: handoff topology-compare (attempt 1)` and
-  `(attempt 2)`, developer model spans) with token counts, `pm_flow.cost_usd`
-  and `input.value` payloads.
-- The one open criterion is the suite. Two section suites exit 1 on `main`,
-  each reopened with an owner at review 007: `packaged_layout_test.sh`
-  (migration leaves `artifact_quality.md`, `cards` and `run_detach.zsh` in
-  the flow dir because none is registered in `install.sh`'s copied-engine
-  lists; `run-detach` owns the three entries) and `otel_semconv_test.sh`
-  (the secondary tree's exported span reports revision v1.37.0 against the
-  test's own v1.36.0 sed pin; `otel-semconv` reopened, acceptance
-  unchanged). Everything else is green from the officer's own runs:
-  `pm_flow_test.sh`, `prompt_quality_test.sh`, `store_ledger_test.sh`,
-  `tests/run.zsh` (35/41/32/58/74), `topology_compare_test.sh`,
-  `agent_bindings_test.sh`, `trace_commands_test.sh`, `run_detach_test.sh`,
-  `persona_cards_test.sh`, `artifact_quality_test.sh`, `codex_usage_test.sh`.
+- Seven of the twelve criteria above are settled on `main`. All thirteen
+  suites exit 0 from the officer's own runs, including the two red at review
+  007: `packaged_layout_test.sh` (run-detach's three `install.sh` registry
+  entries landed; the section closed at cycle 006) and `otel_semconv_test.sh`
+  (isolation fixed; the section closed at cycle 008). The Jaeger all-in-one
+  (`pm-flow-jaeger`, operator-started) has been up 7 days and re-served the
+  `invoke_agent -> chat` tree during the semconv suite's own
+  `curl :16686/api/traces?service=pm-flow`.
+- Unmet: the three criteria the owner added in `01ea0da` (JSON export,
+  tracker view, queued plan requests) and the two recorded above (outcome
+  record, real install). Five planned sections own them one-to-one:
+  `boundary-schema` → export; `ticket-exhaust` → tracker, waits on
+  boundary-schema; `plan-inbox` → queued requests, waits on boundary-schema
+  and outcome-record; `outcome-record` and `real-install` wait on nothing.
+  All five sit at zero cycles; nothing has dispatched since 2026-08-25
+  except the ticket-exhaust registration on 2026-09-01, whose first
+  proposal died on a usage limit and was re-run.
 - The TSV was retired after its gate ran: `cost.py import` on `pm-agent`
   printed `imported=0` twice (every TSV row already had a store row, reruns
   are no-ops), and the file is archived as
@@ -106,23 +109,23 @@ Everything below serves that sentence.
   the 2026-08-24 02:17-06:08Z window (the broken reader wrote the same low
   rows to both sinks; import cannot reprice an existing row); no shipped ACP
   agent or stock MCP SDK client has connected, only the suites' protocol
-  clients; compare arms have only run on stub projects; a budget-capped arm
-  drops out of `wall_clock_s` (`assert_within_budget` fails via `fail`, so
-  `runs.ended_at` stays NULL); `spent_usd` fails open on a broken reader.
-  Fixing the last two means reopening `driver.zsh` ownership - deferred
-  until capped-arm measurement matters.
+  clients; compare arms have only run on stub projects (`real-install`
+  supplies the first real ground); `spent_usd` fails open on a broken
+  reader, deferred until capped-arm measurement matters. The runs-left-
+  `running`/NULL `ended_at` leak now has an owner: `outcome-record` owns
+  `driver.zsh` and must close runs on every exit path.
 - Known test defects without a live owner, tolerated: `trace_commands_test.sh`
-  has an order-sensitive assertion over an unordered span-id set (one fail,
-  green on re-run; deflake when `trace-commands` can be reopened without
-  overlapping `run-detach`'s `pm_flow.sh` ownership);
-  `maintenance_accounting_test.sh` requires an installed driver at
+  has an order-sensitive assertion over an unordered span-id set (passed
+  first try this review; `pm_flow.sh` now belongs to `boundary-schema`, so
+  `trace-commands` still cannot reopen without overlap — deflake when that
+  frees); `maintenance_accounting_test.sh` requires an installed driver at
   `.agentic/pm_flow`, a layout this repository deliberately does not have;
   `persona-cards` closed without the `catalog.py` rewording, so
   `otel-semconv`'s A4 comment exemption stays.
-- Live sections: `run-detach` (nice-to-have, reopened for the three
-  `install.sh` registry entries; its `pm_flow.sh` routing arm and
-  `run_detach_test.sh` are green on `main`) and `otel-semconv` (must-have,
-  reopened for its red suite).
+- Live sections: `boundary-schema`, `outcome-record`, `plan-inbox`,
+  `real-install`, `ticket-exhaust` — all must-have, all planned at zero
+  cycles. `ticket-exhaust` stays must-have by decision at review 008: the
+  owner's tracker criterion stands, so the brief's open question is closed.
 - Cut: `a2a-binding` and `repo-hooks`. The product does not guarantee an A2A
   seat, a commit-message hook, or an install registry.
 
