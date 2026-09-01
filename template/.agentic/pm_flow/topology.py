@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 
-DIFFICULTIES = {"low", "medium", "high", "xhigh", "max"}
 FALLBACK_MODELS = {
     "claude": [
         "claude-fable-5",
@@ -19,8 +18,9 @@ FALLBACK_MODELS = {
         "claude-haiku-4-5-20251001",
     ],
     "codex": ["gpt-5.6-sol", "gpt-5.1-codex"],
-    # Empty is deliberately unconstrained, not a registry with no valid model.
+    # Empty lists are deliberately unconstrained, not registries with no valid model.
     "copilot": [],
+    "acp": [],
 }
 DEFAULT_ENGINE = Path(__file__).resolve().parent
 
@@ -81,6 +81,25 @@ def stored_models(flow: Path) -> dict[str, list[str]] | None:
 
 def model_registry(flow: Path) -> dict[str, list[str]]:
     return stored_models(flow) or FALLBACK_MODELS
+
+
+def config_enums(engine: Path) -> tuple[set[str], set[str]]:
+    schema_path = engine / "schemas" / "config.schema.json"
+    try:
+        schema = json.loads(schema_path.read_text())
+        seat_properties = schema["$defs"]["seat"]["properties"]
+        cli_enum = seat_properties["cli"]["enum"]
+        difficulty_enum = seat_properties["difficulty"]["enum"]
+        if (
+            not isinstance(cli_enum, list)
+            or not isinstance(difficulty_enum, list)
+            or not all(isinstance(item, str) for item in cli_enum + difficulty_enum)
+        ):
+            raise TypeError("cli and difficulty enums must contain only strings")
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise TopologyError(
+            f"cannot load config schema at {schema_path}: {error}") from error
+    return set(cli_enum), set(difficulty_enum)
 
 
 def load_config(flow: Path) -> dict:
@@ -166,6 +185,7 @@ def validate_binding(
         check_model: bool,
         engine: Path = DEFAULT_ENGINE,
 ) -> list[dict]:
+    cli_enum, difficulty_enum = config_enums(engine)
     seats = binding if isinstance(binding, list) else [binding]
     if not seats:
         raise TopologyError(f"role {role!r} is an empty panel in topology {key!r}")
@@ -190,15 +210,15 @@ def validate_binding(
         if not isinstance(seat, dict):
             raise TopologyError(f"role {role!r} seat {index} has an invalid binding")
         cli = seat.get("cli", "")
-        if cli not in registry:
+        if cli not in cli_enum:
             raise TopologyError(
                 f"role {role!r} seat {index} has an unsupported cli: {cli!r}")
         difficulty = seat.get("difficulty", "medium")
-        if difficulty not in DIFFICULTIES:
+        if difficulty not in difficulty_enum:
             raise TopologyError(
                 f"role {role!r} seat {index} has an invalid difficulty: {difficulty!r}")
         model = seat.get("model")
-        models = registry[cli]
+        models = registry.get(cli, [])
         if check_model and model not in (None, "") and models and model not in models:
             raise TopologyError(
                 f"role {role!r} seat {index} binds cli {cli!r} to unsupported "
