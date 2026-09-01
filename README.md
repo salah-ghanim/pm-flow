@@ -88,6 +88,9 @@ refreshes the project scaffolding it owns while preserving all of the above. Run
 against a repository that still holds a copied engine from an older release, it
 migrates: the project data is kept as it stands and the copied engine is removed.
 
+For a backed-up, verified migration of a real legacy repository, use the
+[real-install operator runbook](docs/real-install.md).
+
 ## Run it
 
 ```bash

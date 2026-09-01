@@ -225,6 +225,20 @@ printf 'PASS: fixture has four unnamed legacy workspaces and copied engine data\
 # one. A clone keeps this failure probe from mutating the fixture being migrated.
 NO_KEY_REPO="$TEST_ROOT/no key fixture"
 git clone --quiet "$LEGACY_REPO" "$NO_KEY_REPO"
+RUNBOOK_REPO="$TEST_ROOT/runbook fixture"
+EMPTY_RESPONSE_REPO="$TEST_ROOT/empty response fixture"
+NEGATIVE_REPO="$TEST_ROOT/unmigrated negative fixture"
+git clone --quiet "$LEGACY_REPO" "$RUNBOOK_REPO"
+git clone --quiet "$LEGACY_REPO" "$EMPTY_RESPONSE_REPO"
+git clone --quiet "$LEGACY_REPO" "$NEGATIVE_REPO"
+
+RUNBOOK_SCRIPT="$TEST_ROOT/real-install-runbook.zsh"
+sed -n '/^<!-- runbook:begin -->/,/^<!-- runbook:end -->/p' \
+  "$REPO_ROOT/docs/real-install.md" | sed '1d;$d;/^```/d' > "$RUNBOOK_SCRIPT"
+[[ -s "$RUNBOOK_SCRIPT" ]] || fail "docs/real-install.md yielded an empty runbook script"
+chmod +x "$RUNBOOK_SCRIPT"
+zsh -n "$RUNBOOK_SCRIPT" || fail "the extracted real-install runbook is not valid zsh"
+
 no_key_output="$(expect_failure "migration without a project key" \
   "$REPO_ROOT/install.sh" "$NO_KEY_REPO")"
 assert_contains "$no_key_output" "multiple pm-flow project workspaces exist" \
@@ -420,3 +434,98 @@ assert_equals "$completed_pm_attempts" "1" \
   "the tick records one completed pm attempt in the project store"
 
 printf 'PASS: installed tick section=beta-section action=scope -> ASSIGN; TSVs unchanged; completed pm attempt stored\n'
+
+# The published runbook is the implementation under test: this suite extracts
+# it from the document rather than keeping another copy of the commands here.
+RUNBOOK_OUT="$TEST_ROOT/runbook-output"
+RUNBOOK_BACKUPS="$TEST_ROOT/runbook-backups"
+runbook_output="$("$RUNBOOK_SCRIPT" all \
+  --repo "$RUNBOOK_REPO" \
+  --project-key beta \
+  --name "Golden Grid Fixture" \
+  --install-sh "$REPO_ROOT/install.sh" \
+  --pm-flow "$PM_FLOW" \
+  --out "$RUNBOOK_OUT" \
+  --backup-root "$RUNBOOK_BACKUPS" 2>&1)" || \
+  fail "the extracted runbook failed over the fixture:"$'\n'"$runbook_output"
+
+assert_contains "$runbook_output" "workspace_count=4" \
+  "the runbook surveys all fixture workspaces"
+assert_contains "$runbook_output" "workspaces=alpha beta gamma project" \
+  "the runbook reports the sorted fixture workspace names"
+assert_contains "$runbook_output" "project_key_file=absent" \
+  "the runbook reports the missing legacy project selector"
+assert_contains "$runbook_output" "projects_md=absent" \
+  "the runbook reports the missing legacy project registry"
+assert_contains "$runbook_output" "collision=project" \
+  "the runbook reports the workspace and engine-directory collision"
+for key in "${WORKSPACE_KEYS[@]}"; do
+  assert_contains "$runbook_output" \
+    "workspace=$key ledger=present rows=3 total=7.5000 empty_response_rows=0" \
+    "the runbook independently surveys workspace $key's ledger"
+done
+printf 'PASS: runbook survey reports the legacy layout and independent ledger arithmetic\n'
+
+assert_contains "$runbook_output" "backup_verified=yes" \
+  "the runbook verifies the full repository backup"
+backup_path="$(printf '%s\n' "$runbook_output" | sed -n 's/^backup=//p' | tail -n 1)"
+[[ -n "$backup_path" && -d "$backup_path" ]] || \
+  fail "the runbook's reported backup directory does not exist: $backup_path"
+assert_contains "$runbook_output" "removed_copied_engine=" \
+  "the runbook includes install.sh's copied-engine removal output"
+assert_contains "$runbook_output" "migrated=agentic -> .agentic" \
+  "the runbook includes install.sh's legacy-directory migration output"
+assert_contains "$runbook_output" $'copied_engine_remaining=\n' \
+  "the runbook verifies no copied engine name remains"
+renames_recorded="$(printf '%s\n' "$runbook_output" | sed -n 's/^renames_recorded=//p' | tail -n 1)"
+[[ "$renames_recorded" == <-> && "$renames_recorded" -gt 0 ]] || \
+  fail "the runbook did not report a recorded rename: $renames_recorded"
+assert_contains "$runbook_output" "verify=ok" \
+  "the runbook completes all migration verification"
+assert_contains "$runbook_output" "beta-section" \
+  "the runbook runs installed pm-flow status in the migrated repository"
+for phase in survey backup migrate verify; do
+  assert_contains "$(/bin/cat "$RUNBOOK_OUT/transcript.txt")" "=== phase: $phase ===" \
+    "the transcript carries the $phase phase header"
+done
+printf 'PASS: extracted runbook backs up, migrates, and verifies the fixture end to end\n'
+
+# Add the known hazardous ledger shape only to a throwaway clone. The shared
+# fixture ledgers remain the three-row parity input exercised above.
+{
+  printf '2026-01-01T00:03:00Z\talpha-section\tdeveloper\tempty-one\t1.000000\t\n'
+  printf '2026-01-01T00:04:00Z\talpha-section\tdeveloper\tempty-two\t2.000000\t\n'
+} >> "$EMPTY_RESPONSE_REPO/agentic/pm_flow/alpha/runs/cost_ledger.tsv"
+EMPTY_SURVEY_OUT="$TEST_ROOT/empty-response-survey"
+empty_survey_output="$("$RUNBOOK_SCRIPT" survey \
+  --repo "$EMPTY_RESPONSE_REPO" \
+  --install-sh "$REPO_ROOT/install.sh" \
+  --pm-flow "$PM_FLOW" \
+  --out "$EMPTY_SURVEY_OUT" 2>&1)" || \
+  fail "the runbook survey failed on empty response fields:"$'\n'"$empty_survey_output"
+assert_contains "$empty_survey_output" "workspace=alpha ledger=present rows=5 total=10.5000 empty_response_rows=2" \
+  "the survey exposes legacy rows cost.py would collapse"
+printf 'PASS: runbook survey counts empty legacy response fields without importing them\n'
+
+NEGATIVE_VERIFY_OUT="$TEST_ROOT/negative-verify"
+negative_verify_output="$(expect_failure "verify on an unmigrated repository" \
+  "$RUNBOOK_SCRIPT" verify \
+  --repo "$NEGATIVE_REPO" \
+  --project-key beta \
+  --install-sh "$REPO_ROOT/install.sh" \
+  --pm-flow "$PM_FLOW" \
+  --out "$NEGATIVE_VERIFY_OUT")"
+assert_contains "$negative_verify_output" "pm_flow.sh" \
+  "negative verify names a surviving copied-engine file"
+
+MISSING_BACKUP_OUT="$TEST_ROOT/missing-backup"
+missing_backup_output="$(expect_failure "migrate without a verified backup" \
+  "$RUNBOOK_SCRIPT" migrate \
+  --repo "$NEGATIVE_REPO" \
+  --project-key beta \
+  --install-sh "$REPO_ROOT/install.sh" \
+  --pm-flow "$PM_FLOW" \
+  --out "$MISSING_BACKUP_OUT")"
+assert_contains "$missing_backup_output" "missing verified backup manifest" \
+  "migrate names the missing backup evidence"
+printf 'PASS: runbook negative controls reject unmigrated verification and unbacked migration\n'
