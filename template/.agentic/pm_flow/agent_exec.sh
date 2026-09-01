@@ -3,7 +3,7 @@
 #
 # Roles are named, not vendors. config.json binds each role to a cli, a model,
 # and a difficulty (reasoning effort), so prompts and handoff files never name
-# claude, codex, or copilot. Every call is a separate process, so each role
+# claude, codex, copilot, or acp. Every call is a separate process, so each role
 # starts with a fresh context by construction.
 #
 # Usage:
@@ -161,7 +161,7 @@ if [[ -n "$agent_project_key" && -d "$FLOW_DIR/$agent_project_key" ]]; then
 fi
 
 role_binding="$(python3 - "$CONFIG_FILE" "$ROLE" "$SEAT" "$PROJECT_CONFIG_FILE" \
-    "$PROJECT_ROOT" "$AGENT_PROJECT_DIR" <<'PY'
+    "$PROJECT_ROOT" "$AGENT_PROJECT_DIR" "$SCRIPT_DIR/schemas/config.schema.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -172,6 +172,20 @@ seat = int(sys.argv[3])
 project_config = sys.argv[4]
 project_root = sys.argv[5]
 project_dir = sys.argv[6]
+schema_path = sys.argv[7]
+try:
+    schema = json.loads(Path(schema_path).read_text())
+    seat_properties = schema["$defs"]["seat"]["properties"]
+    cli_enum = seat_properties["cli"]["enum"]
+    difficulty_enum = seat_properties["difficulty"]["enum"]
+    if (
+        not isinstance(cli_enum, list)
+        or not isinstance(difficulty_enum, list)
+        or not all(isinstance(item, str) for item in cli_enum + difficulty_enum)
+    ):
+        raise TypeError("cli and difficulty enums must contain only strings")
+except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+    raise SystemExit(f"cannot load config schema at {schema_path}: {error}")
 if config.get("version") != 1:
     raise SystemExit(f"unsupported config version: {config.get('version')!r}")
 roles = config.get("roles")
@@ -196,10 +210,10 @@ if not isinstance(binding, dict):
     raise SystemExit(f"role {role!r} has an invalid binding")
 
 cli = binding.get("cli", "")
-if cli not in {"claude", "codex", "copilot", "acp"}:
+if cli not in cli_enum:
     raise SystemExit(f"role {role!r} has an unsupported cli: {cli!r}")
 difficulty = binding.get("difficulty", "medium")
-if difficulty not in {"low", "medium", "high", "xhigh", "max"}:
+if difficulty not in difficulty_enum:
     raise SystemExit(f"role {role!r} has an invalid difficulty: {difficulty!r}")
 
 supervision = config.get("supervision", {})

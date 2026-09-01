@@ -504,13 +504,27 @@ cmd_role_prompt() {
 cmd_config() {
   [[ -f "$AGENT_CONFIG_FILE" ]] || fail "missing agent config: $AGENT_CONFIG_FILE"
   resolve_domain
-  python3 - "$AGENT_CONFIG_FILE" "$DOMAINS_DIR" "$ROLES_DIR" "$DOMAIN" "$DOMAIN_SOURCE" <<'PY'
+  python3 - "$AGENT_CONFIG_FILE" "$DOMAINS_DIR" "$ROLES_DIR" "$DOMAIN" "$DOMAIN_SOURCE" \
+    "$SCRIPT_DIR/schemas/config.schema.json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-config_path, domains_dir, roles_dir, domain, domain_source = sys.argv[1:]
+config_path, domains_dir, roles_dir, domain, domain_source, schema_path = sys.argv[1:]
 config = json.loads(Path(config_path).read_text())
+try:
+    schema = json.loads(Path(schema_path).read_text())
+    seat_properties = schema["$defs"]["seat"]["properties"]
+    cli_enum = seat_properties["cli"]["enum"]
+    difficulty_enum = seat_properties["difficulty"]["enum"]
+    if (
+        not isinstance(cli_enum, list)
+        or not isinstance(difficulty_enum, list)
+        or not all(isinstance(item, str) for item in cli_enum + difficulty_enum)
+    ):
+        raise TypeError("cli and difficulty enums must contain only strings")
+except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+    raise SystemExit(f"cannot load config schema at {schema_path}: {error}")
 if config.get("version") != 1:
     raise SystemExit(f"unsupported config version: {config.get('version')!r}")
 domain_file = Path(domains_dir) / f"{domain}.json"
@@ -536,10 +550,10 @@ for name in sorted(roles):
         if not isinstance(seat, dict):
             raise SystemExit(f"role {name!r} seat {index} has an invalid binding")
         cli = seat.get("cli", "")
-        if cli not in {"claude", "codex", "copilot"}:
+        if cli not in cli_enum:
             raise SystemExit(f"role {name!r} seat {index} has an unsupported cli: {cli!r}")
         difficulty = seat.get("difficulty", "medium")
-        if difficulty not in {"low", "medium", "high", "xhigh", "max"}:
+        if difficulty not in difficulty_enum:
             raise SystemExit(f"role {name!r} seat {index} has an invalid difficulty: {difficulty!r}")
         print(f"  seat {index}: cli={cli} model={seat.get('model') or '(cli default)'} "
               f"difficulty={difficulty}")

@@ -2,6 +2,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "config.schema.json",
   "title": "pm-flow configuration",
+  "$defs": {
+    "seat": {
+      "type": "object",
+      "required": ["cli", "model", "difficulty"],
+      "properties": {
+        "cli": {"type": "string", "enum": ["claude", "codex", "copilot", "acp"]},
+        "model": {"type": "string"},
+        "difficulty": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"]}
+      }
+    }
+  },
   "type": "object",
   "required": [
     "version",
@@ -22,27 +33,11 @@
       "type": "object",
       "additionalProperties": {
         "oneOf": [
-          {
-            "type": "object",
-            "required": ["cli", "model", "difficulty"],
-            "properties": {
-              "cli": {"type": "string", "enum": ["claude", "codex", "copilot", "acp"]},
-              "model": {"type": "string"},
-              "difficulty": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"]}
-            }
-          },
+          {"$ref": "#/$defs/seat"},
           {
             "type": "array",
             "minItems": 1,
-            "items": {
-              "type": "object",
-              "required": ["cli", "model", "difficulty"],
-              "properties": {
-                "cli": {"type": "string", "enum": ["claude", "codex", "copilot", "acp"]},
-                "model": {"type": "string"},
-                "difficulty": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"]}
-              }
-            }
+            "items": {"$ref": "#/$defs/seat"}
           }
         ]
       }

@@ -32,9 +32,23 @@ def _type_matches(value, expected):
         raise ValueError(f"unsupported schema type {expected!r}") from error
 
 
-def validate_schema(payload, schema, path="$"):
+def validate_schema(payload, schema, path="$", root=None):
     """Validate the JSON Schema subset used by the boundary schemas."""
+    root = schema if root is None else root
     try:
+        reference = schema.get("$ref")
+        if isinstance(reference, str) and reference.startswith("#/"):
+            resolved = root
+            try:
+                for raw_key in reference[2:].split("/"):
+                    key = raw_key.replace("~1", "/").replace("~0", "~")
+                    resolved = resolved[key]
+            except (KeyError, TypeError) as error:
+                raise ValueError(
+                    f"unresolvable schema pointer {reference!r}"
+                ) from error
+            schema = resolved
+
         expected_type = schema.get("type")
         if expected_type and not _type_matches(payload, expected_type):
             raise ValueError(f"{path} must be of type {expected_type}")
@@ -54,12 +68,12 @@ def validate_schema(payload, schema, path="$"):
                     raise ValueError(f"{path}.{label} is required")
             for key, child_schema in properties.items():
                 if key in payload:
-                    validate_schema(payload[key], child_schema, f"{path}.{key}")
+                    validate_schema(payload[key], child_schema, f"{path}.{key}", root)
             extra_schema = schema.get("additionalProperties")
             if isinstance(extra_schema, dict):
                 for key, value in payload.items():
                     if key not in properties:
-                        validate_schema(value, extra_schema, f"{path}.{key}")
+                        validate_schema(value, extra_schema, f"{path}.{key}", root)
 
         if isinstance(payload, list):
             if len(payload) < schema.get("minItems", 0):
@@ -69,7 +83,7 @@ def validate_schema(payload, schema, path="$"):
             item_schema = schema.get("items")
             if item_schema:
                 for index, item in enumerate(payload):
-                    validate_schema(item, item_schema, f"{path}[{index}]")
+                    validate_schema(item, item_schema, f"{path}[{index}]", root)
 
         if "maximum" in schema and payload > schema["maximum"]:
             raise ValueError(f"{path} must be at most {schema['maximum']}, got {payload}")
@@ -79,7 +93,7 @@ def validate_schema(payload, schema, path="$"):
             errors = []
             for choice in schema["oneOf"]:
                 try:
-                    validate_schema(payload, choice, path)
+                    validate_schema(payload, choice, path, root)
                     matches += 1
                 except ValueError as error:
                     errors.append(str(error))
