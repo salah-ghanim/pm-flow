@@ -18,7 +18,11 @@ case "$TEST_ROOT" in
   *) printf 'unsafe test temp directory: %s\n' "$TEST_ROOT" >&2; exit 1 ;;
 esac
 
+JAEGER_CONTAINER_ID=""
 cleanup() {
+  if [[ -n "${JAEGER_CONTAINER_ID:-}" ]]; then
+    docker rm -f "$JAEGER_CONTAINER_ID" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${TEST_ROOT:-}" && -d "$TEST_ROOT" && \
         "$(basename "$TEST_ROOT")" == outcome-record-test.* ]]; then
     rm -rf -- "$TEST_ROOT"
@@ -37,8 +41,201 @@ assert_eq() {
     fail "$label: expected '$expected', got '$actual'"
 }
 
+jaeger_reachable() {
+  [[ "$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' \
+    http://localhost:16686/api/services || true)" == 200 ]]
+}
+
+ensure_jaeger() {
+  if jaeger_reachable; then
+    return 0
+  fi
+
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    printf '%s\n' \
+      'SKIP: A2 requires docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one'
+    return 1
+  fi
+
+  JAEGER_CONTAINER_ID="$(docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one)" || \
+    fail "could not start Jaeger with the brief's docker command"
+  [[ -n "$JAEGER_CONTAINER_ID" ]] || fail "Jaeger docker run returned no container id"
+
+  local tries=0
+  while ! jaeger_reachable; do
+    (( tries += 1 ))
+    (( tries <= 300 )) || \
+      fail "Jaeger container $JAEGER_CONTAINER_ID did not become reachable"
+    sleep 0.1
+  done
+}
+
+jaeger_evaluations_present() {
+  local response="$1" db="$2" semconv="$3" trace_id="$4"
+  python3 - "$response" "$db" "$semconv" "$trace_id" <<'PY'
+import importlib.util
+import json
+import sqlite3
+import sys
+from collections import Counter
+from pathlib import Path
+
+response, db_path, semconv_path, trace_id = sys.argv[1:]
+try:
+    payload = json.loads(Path(response).read_text())
+except (json.JSONDecodeError, OSError):
+    raise SystemExit(1)
+
+spec = importlib.util.spec_from_file_location("outcome_record_jaeger_semconv", semconv_path)
+semconv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(semconv)
+names = semconv.evaluation_event()
+if names is None:
+    raise SystemExit(1)
+
+connection = sqlite3.connect(db_path)
+expected = Counter(connection.execute(
+    "SELECT s.trace_id, a.span_id, o.metric, o.value_text "
+    "FROM outcomes o JOIN attempts a ON a.id = o.attempt_id "
+    "JOIN spans s ON s.span_id = a.span_id "
+    "WHERE o.source = 'verdict' AND s.trace_id = ?",
+    (trace_id,),
+))
+
+actual = Counter()
+for trace in payload.get("data", []):
+    if trace.get("traceID") != trace_id:
+        continue
+    for span in trace.get("spans", []):
+        for log in span.get("logs", []):
+            fields = {
+                field.get("key"): field.get("value")
+                for field in log.get("fields", [])
+                if field.get("key")
+            }
+            if fields.get("event") != names["event_name"]:
+                continue
+            actual[(
+                trace_id,
+                span.get("spanID"),
+                fields.get(names["evaluation_name"]),
+                fields.get(names["score_label"]),
+            )] += 1
+
+raise SystemExit(0 if expected and actual == expected else 1)
+PY
+}
+
+assert_jaeger_evaluations() {
+  local db="$1" semconv="$2"
+  if ! ensure_jaeger; then
+    return 0
+  fi
+
+  local trace_ids trace_id response next_response http_code tries ready
+  local -a responses
+  trace_ids="$(sqlite3 "$db" "SELECT DISTINCT s.trace_id FROM outcomes o JOIN attempts a ON a.id = o.attempt_id JOIN spans s ON s.span_id = a.span_id WHERE o.source = 'verdict' ORDER BY s.trace_id;")"
+  [[ -n "$trace_ids" ]] || fail "no verdict trace ids were available for Jaeger"
+
+  # Every driver invocation that produced these rows has exited. This exporter
+  # is a new process and receives only the durable database path.
+  python3 "$FLOW/trace_export.py" --db "$db" \
+    --otlp http://localhost:4318 --replay >/dev/null
+
+  responses=()
+  for trace_id in ${(f)trace_ids}; do
+    response="$TEST_ROOT/jaeger-$trace_id.json"
+    next_response="$response.next"
+    tries=0
+    ready=0
+    printf "%s\n" "JAEGER query: curl -s 'http://localhost:16686/api/traces/$trace_id'"
+    while (( tries < 200 )); do
+      (( tries += 1 ))
+      http_code="$(curl -s --max-time 2 -o "$next_response" -w '%{http_code}' \
+        "http://localhost:16686/api/traces/$trace_id" || true)"
+      if [[ "$http_code" == 200 ]]; then
+        mv "$next_response" "$response"
+        if jaeger_evaluations_present "$response" "$db" "$semconv" "$trace_id"; then
+          ready=1
+          break
+        fi
+      else
+        rm -f -- "$next_response"
+      fi
+      sleep 0.1
+    done
+    (( ready == 1 )) || \
+      fail "Jaeger never re-served every evaluation event for trace $trace_id"
+    responses+=("$response")
+  done
+
+  local fragment
+  fragment="$(python3 - "$db" "$semconv" "${responses[@]}" <<'PY'
+import importlib.util
+import json
+import sqlite3
+import sys
+from collections import Counter
+from pathlib import Path
+
+db_path, semconv_path, *response_paths = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("outcome_record_jaeger_semconv", semconv_path)
+semconv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(semconv)
+names = semconv.evaluation_event()
+if names is None:
+    raise SystemExit("the pinned revision did not provide evaluation event names")
+
+connection = sqlite3.connect(db_path)
+expected = Counter(connection.execute(
+    "SELECT s.trace_id, a.span_id, o.metric, o.value_text "
+    "FROM outcomes o JOIN attempts a ON a.id = o.attempt_id "
+    "JOIN spans s ON s.span_id = a.span_id WHERE o.source = 'verdict'"
+))
+
+actual = Counter()
+fragments = []
+for response_path in response_paths:
+    payload = json.loads(Path(response_path).read_text())
+    for trace in payload.get("data", []):
+        trace_id = trace.get("traceID")
+        for span in trace.get("spans", []):
+            matching = []
+            for log in span.get("logs", []):
+                fields = {
+                    field.get("key"): field.get("value")
+                    for field in log.get("fields", [])
+                    if field.get("key")
+                }
+                if fields.get("event") != names["event_name"]:
+                    continue
+                matching.append(log)
+                actual[(
+                    trace_id,
+                    span.get("spanID"),
+                    fields.get(names["evaluation_name"]),
+                    fields.get(names["score_label"]),
+                )] += 1
+            if matching:
+                fragments.append({
+                    "traceID": trace_id,
+                    "spanID": span.get("spanID"),
+                    "logs": matching,
+                })
+
+if actual != expected:
+    raise SystemExit(f"Jaeger events do not match verdict rows: {actual!r} != {expected!r}")
+print(json.dumps(fragments, indent=2, sort_keys=True))
+PY
+)"
+
+  printf 'JAEGER JSON FRAGMENT:\n%s\n' "$fragment"
+  printf 'PASS: Jaeger re-serves one evaluation event per verdict on its attempt span\n'
+}
+
 WORK="$TEST_ROOT/work"
-mkdir -p "$WORK/.agentic" "$WORK/src" "$WORK/lib" "$WORK/docs" "$WORK/tools"
+mkdir -p "$WORK/.agentic" "$WORK/src" "$WORK/lib" "$WORK/docs" "$WORK/tools" \
+  "$WORK/complete"
 cp -R "$REPO_ROOT/template/.agentic/pm_flow" "$WORK/.agentic/pm_flow"
 cp "$REPO_ROOT/src/pm_flow/semconv.py" "$WORK/.agentic/semconv.py"
 FLOW="$WORK/.agentic/pm_flow"
@@ -99,6 +296,8 @@ brief unparsed "docs/" > "$TEST_ROOT/brief.md"
 "$FLOWSH" init-section unparsed --file "$TEST_ROOT/brief.md" >/dev/null
 brief abandoned "tools/" > "$TEST_ROOT/brief.md"
 "$FLOWSH" init-section abandoned --file "$TEST_ROOT/brief.md" >/dev/null
+brief complete "complete/" > "$TEST_ROOT/brief.md"
+"$FLOWSH" init-section complete --file "$TEST_ROOT/brief.md" >/dev/null
 git add -A
 git commit -qm fixture
 
@@ -162,6 +361,12 @@ PM_FLOW_STUB='## Decision
 
 probably assign this' PM_FLOW_SECTION=unparsed "$FLOWSH" tick >/dev/null
 
+# COMPLETE must be parsed from the scope response. Priming decision.txt here
+# would skip record_cycle_decision and leave this verdict unobserved.
+PM_FLOW_STUB='## Decision
+
+COMPLETE' PM_FLOW_SECTION=complete "$FLOWSH" tick >/dev/null
+
 # The portfolio review has additional per-section parsing after its top-level
 # decision. A deliberately minimal response proves the top-level parse is
 # recorded immediately even when that later parsing asks for a retry.
@@ -174,7 +379,7 @@ DB="$FLOW/demo/runs/pm_flow.db"
 
 JOIN_SQL="SELECT o.metric || '|' || o.value_text || '|' || o.source || '|' || a.role_key || '|' || r.command FROM outcomes o JOIN attempts a ON a.id = o.attempt_id JOIN runs r ON r.id = o.run_id AND r.id = a.run_id WHERE o.metric IN ('scope_decision','review_verdict','portfolio_verdict','obstruction_class') ORDER BY o.metric, o.id;"
 JOIN_ROWS="$(sqlite3 "$DB" "$JOIN_SQL")"
-EXPECTED_JOIN_ROWS=$'obstruction_class|NONE|verdict|pm|tick\nportfolio_verdict|ON_TRACK|verdict|cpo|tick\nreview_verdict|GO_WITH_CHANGES|verdict|pm|tick\nscope_decision|ASSIGN|verdict|pm|tick\nscope_decision|UNPARSED|verdict|pm|tick'
+EXPECTED_JOIN_ROWS=$'obstruction_class|NONE|verdict|pm|tick\nportfolio_verdict|ON_TRACK|verdict|cpo|portfolio-review\nreview_verdict|GO_WITH_CHANGES|verdict|pm|tick\nscope_decision|ASSIGN|verdict|pm|tick\nscope_decision|UNPARSED|verdict|pm|tick\nscope_decision|COMPLETE|verdict|pm|tick'
 assert_eq "$JOIN_ROWS" "$EXPECTED_JOIN_ROWS" \
   "every decision joins to its producing attempt and run"
 assert_eq "$(sqlite3 "$DB" "SELECT COUNT(*) FROM outcomes WHERE source = 'verdict' AND attempt_id IS NULL;")" \
@@ -296,6 +501,8 @@ printf '%s\n' "$EVENT_ROWS"
 printf 'EXPORTED JSON FRAGMENT:\n%s\n' "$EXPORTED_FRAGMENT"
 printf 'PASS: every verdict exports one evaluation event on its attempt span\n'
 
+assert_jaeger_evaluations "$DB" "$SEMCONV"
+
 # Prime the two terminal actions without bypassing them. Each tick executes the
 # real complete/abandon caller; only the role response is stubbed.
 review_dir="$FLOW/demo/sections/review"
@@ -369,10 +576,14 @@ OPEN_ROWS="$(sqlite3 "$DB" "$OPEN_SQL")"
 assert_eq "$OPEN_ROWS" "0" "completed run and failed tick both have ended_at"
 assert_eq "$(sqlite3 "$DB" "SELECT COUNT(*) FROM runs WHERE ended_at IS NULL;")" \
   "0" "on-demand and loop commands leave no run open"
+RUNS_SQL="SELECT id || '|' || command || '|' || status || '|' || CASE WHEN ended_at IS NULL THEN 'open' ELSE 'closed' END FROM runs ORDER BY id;"
+RUNS_ROWS="$(sqlite3 "$DB" "$RUNS_SQL")"
 printf 'RAW SELECT:\n%s\n' "$CLOSE_SQL"
 printf '%s\n' "$CLOSE_ROWS"
 printf 'RAW SELECT:\n%s\n' "$OPEN_SQL"
 printf '%s\n' "$OPEN_ROWS"
+printf 'RUNS TABLE:\n%s\n' "$RUNS_SQL"
+printf '%s\n' "$RUNS_ROWS"
 printf 'PASS: completed run and fail-aborted tick close with distinct statuses\n'
 
 # Recording is best effort even from the EXIT trap. A read-only database in a
