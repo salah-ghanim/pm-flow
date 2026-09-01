@@ -2,11 +2,12 @@
 
 ## Current task
 
-- T5 — golden-grid surveyed, backed up and migrated. T1-T4 are accepted, A1 is
-  complete and A2's method is closed: the runbook now provisions the venv
-  offline and proves `status` in place, and an `all` run with no `--pm-flow` and
-  no `--wheel` completes end to end. Everything this section can prove without
-  the real tree is proved. T5-T7 need the operator, not a code change.
+- T5 — golden-grid surveyed, backed up and migrated. T1-T4 are accepted and on
+  `main` (`3ff45bd`), A1 is complete and A2's method is closed: the runbook
+  provisions the venv offline and proves `status` in place, and an `all` run
+  with no `--pm-flow` and no `--wheel` completes end to end. Everything this
+  section can prove without the real tree is proved. No code change remains
+  before T5; what is missing is access to the real tree, escalated in cycle 005.
 
 ## Completed tasks and evidence
 
@@ -267,26 +268,28 @@ cycle 002; evidence above. One new defect, in an unowned file, replaces them.
 
 ## Blockers
 
-- None external, and the reachability question is now closed rather than open.
-  The driver's extra-dir grant is not configurable: `dispatch_role` passes
-  `--work-root` and each `DISPATCH_EXTRA_DIRS` entry (`driver.zsh:1076-1082`),
-  and the only caller that populates them, `driver.zsh:1476`, passes the section
-  directory and nothing else. No dispatched developer can be granted
-  `/Users/salah/code/personal/golden-grid` without editing `driver.zsh`, which
-  this section does not own and will not touch. Re-probed in cycle 004 from the
-  PM's own session, not a developer worktree: `ls
-  /Users/salah/code/personal/golden-grid` refused with "Claude Code may only list
-  files in the allowed working directories for this session:
+- **External, as of cycle 005: the operator run.** A2, A3, A4 and A5 are settled
+  only by a run against `/Users/salah/code/personal/golden-grid`, and no session
+  in this loop can reach it. Probed again in cycle 005 from the PM's own
+  session: `ls /Users/salah/code/personal/golden-grid` → "Claude Code may only
+  list files in the allowed working directories for this session:
   '/Users/salah/code/personal/pm-flow'". The limit is the session grant, not the
   dispatch mechanism.
-- Consequence: A2, A3, A4 and A5 are settled by an operator run, which is the
-  brief's own second route ("an operator-run probe whose output is committed").
-  T3 and T4 are fully executable in the sandbox and make that run one tested
-  command; T5-T7 then need the operator, not a code change. This is escalated
-  through `handoff.md` as a request for an operator run, not as an external
-  blocker — and not yet, because as of cycle 004 the command being requested
-  would fail partway. T4 is the last thing standing between the request and a
-  run that can succeed.
+- The driver's extra-dir route — the brief's first option — is closed and not
+  configurable: `dispatch_role` passes `--work-root` and each
+  `DISPATCH_EXTRA_DIRS` entry (`driver.zsh:1084-1086`), `DISPATCH_EXTRA_DIRS` is
+  set only by `begin_worktree_dispatch` (2574-2589), and both callers
+  (`driver.zsh:1483` and the rescue path at 1971) pass the section directory and
+  nothing else. Granting golden-grid would mean editing `driver.zsh`, which this
+  section does not own and will not touch.
+- So the brief's second route is the route, and as of this cycle the request is
+  live rather than premature: cycle 004 held it back because the command would
+  have died at exit 127 partway through, and T4 removed that. The runbook now
+  completes end to end from a clean checkout with no overrides. What unblocks
+  T5-T7 is either a session whose allowed working directories include
+  `/Users/salah/code/personal/golden-grid`, or the operator running the command
+  block at `docs/real-install.md:11-20` and pasting the transcript into the
+  `Golden-grid evidence` section over `transcript=PLACEHOLDER` (line 709).
 
 ## Open questions
 
@@ -306,17 +309,17 @@ cycle 002; evidence above. One new defect, in an unowned file, replaces them.
 
 ## Next eligible task
 
-- T5 — golden-grid surveyed, backed up and migrated. It is now one operator
-  command, and cycle 004 ran that exact command shape against the fixture with
-  no overrides. From a pm-flow checkout, extract the script between the
-  `runbook:begin` / `runbook:end` markers of `docs/real-install.md` and run it as
-  `<script> all --repo /Users/salah/code/personal/golden-grid --project-key <key>
-  --name "Golden Grid"`, then commit the transcript into that document's
-  `Golden-grid evidence` section, replacing the placeholders. No `--pm-flow` and
-  no `--wheel`: `provision` builds the wheel from the checkout's wheelhouse
-  offline and installs it into golden-grid's `.venv`. `migrate` refuses without
-  a verified backup, so a single `all` run cannot skip the rollback copy, and
-  the survey answers the open questions above before `install.sh` touches
-  anything.
-- This section cannot run that command: the session grant covers
-  `/Users/salah/code/personal/pm-flow` only. Requested through `handoff.md`.
+- T5 — golden-grid surveyed, backed up and migrated. It is one operator command,
+  published verbatim at `docs/real-install.md:11-20`, and cycle 004 ran that
+  exact shape against the fixture with no overrides. From a pm-flow checkout,
+  extract the script between the `runbook:begin` / `runbook:end` markers and run
+  `<script> all --repo /Users/salah/code/personal/golden-grid --project-key
+  <key> --name "Golden Grid"`, then commit the transcript into that document's
+  `Golden-grid evidence` section over the placeholder at line 709. No
+  `--pm-flow` and no `--wheel`: `provision` builds the wheel from the checkout's
+  wheelhouse offline and installs it into golden-grid's `.venv`. `migrate`
+  refuses without a verified backup, so a single `all` run cannot skip the
+  rollback copy, and `survey` answers the open questions above before
+  `install.sh` touches anything.
+- No role in this loop can run it — see Blockers. The section is stopped on that
+  access, not on a code change.

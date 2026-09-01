@@ -239,8 +239,10 @@ change.
 
 ## Task T5 — golden-grid surveyed, backed up and migrated
 
-- Status: pending (needs the operator to run T4's runbook; not dispatchable in
-  the role sandbox — see Risks)
+- Status: blocked on access (cycle 005). Every code prerequisite is on `main`:
+  the runbook at `docs/real-install.md:11-20` completes all six phases from a
+  clean checkout with no `--pm-flow` and no `--wheel`. Not dispatchable in any
+  session this loop can start — see Risks and `state.md` Blockers.
 - Outcome: the runbook has run against `/Users/salah/code/personal/
   golden-grid`; a verified backup exists, the current wheel is in its venv,
   `install.sh` has run, the flow dir holds no copied-engine name, its own
