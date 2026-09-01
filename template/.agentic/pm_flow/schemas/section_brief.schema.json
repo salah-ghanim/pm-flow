@@ -3,7 +3,7 @@
   "$id": "section_brief.schema.json",
   "title": "Parsed section brief",
   "type": "object",
-  "required": ["shape", "headings", "acceptance_ids", "priority"],
+  "required": ["shape", "headings", "acceptance_ids", "priority", "priority_loss"],
   "properties": {
     "shape": {
       "type": "string",
@@ -21,8 +21,15 @@
     "priority": {
       "type": "string",
       "enum": ["must-have", "nice-to-have"]
+    },
+    "priority_loss": {
+      "type": "string",
+      "pattern": "\\S"
     }
   },
+  "x-full-shape-heading": "Deliverables",
+  "x-acceptance-heading": "Acceptance",
+  "x-priority-heading": "Priority",
   "oneOf": [
     {
       "properties": {

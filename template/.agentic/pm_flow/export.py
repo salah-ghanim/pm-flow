@@ -113,71 +113,74 @@ def _markdown_sections(text):
     return sections, display_names
 
 
-def parse_brief(text):
-    """Return headings, Acceptance bullet identifiers, and the priority token."""
+def _brief_contract(schema):
+    choices = schema["oneOf"]
+    headings = []
+    for choice in choices:
+        for heading in choice["properties"]["headings"]["required"]:
+            if heading not in headings:
+                headings.append(heading)
+    return headings
+
+
+def parse_brief(text, schema=None):
+    """Return headings, Acceptance bullet identifiers, priority, and its loss."""
+    schema = schema or _load_schema("brief")
+    contract_headings = _brief_contract(schema)
     sections, display_names = _markdown_sections(text)
-    canonical = {
-        heading.casefold(): heading
-        for heading in (
-            "Objective",
-            "Current baseline",
-            "Deliverables",
-            "User-visible scenarios",
-            "Interfaces produced",
-            "Interfaces consumed",
-            "Scope",
-            "Non-goals",
-            "Priority",
-            "Owned paths",
-            "Dependencies",
-            "Constraints and fixed decisions",
-            "Acceptance",
-            "Rejection conditions",
-            "Open questions",
-        )
-    }
+    canonical = {heading.casefold(): heading for heading in contract_headings}
     headings = {
         canonical.get(key, display_names[key]): sections[key] for key in sections
     }
-    acceptance = sections.get("acceptance", "")
+    acceptance_heading = schema["x-acceptance-heading"].casefold()
+    acceptance = sections.get(acceptance_heading, "")
     acceptance_ids = re.findall(r"(?m)^\s*[-*]\s+(.*)$", acceptance)
 
     priority_value = ""
-    for line in sections.get("priority", "").splitlines():
+    priority_heading = schema["x-priority-heading"].casefold()
+    for line in sections.get(priority_heading, "").splitlines():
         candidate = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s*", "", line)
         candidate = candidate.strip().strip("`*_ ")
         if candidate:
             priority_value = candidate
             break
     priority_match = re.match(
-        r"^(must[\s-]?have|nice[\s-]?to[\s-]?have)\b", priority_value, re.I
+        r"^(must[\s-]?have|nice[\s-]?to[\s-]?have)\b[\s:,.-]*(.*)$",
+        priority_value,
+        re.I,
     )
     priority = ""
+    priority_loss = ""
     if priority_match:
         priority = (
             "must-have"
             if priority_match.group(1).lower().startswith("must")
             else "nice-to-have"
         )
+        priority_loss = priority_match.group(2).strip().strip("`*_ ")
 
     return {
-        "shape": "full" if "deliverables" in sections else "legacy",
+        "shape": (
+            "full"
+            if schema["x-full-shape-heading"].casefold() in sections
+            else "legacy"
+        ),
         "headings": headings,
         "acceptance_ids": acceptance_ids,
         "priority": priority,
+        "priority_loss": priority_loss,
     }
 
 
-def parse_handoff(text):
+def parse_handoff(text, schema=None):
     """Return stable handoff fields plus validate_handoff-compatible budgets."""
+    schema = schema or _load_schema("handoff")
     sections, _ = _markdown_sections(text)
+    properties = schema["properties"]
     field_headings = {
-        "outcome": "Outcome",
-        "decisions": "Decisions",
-        "interfaces": "Interfaces",
-        "risks": "Risks",
-        "unproven": "What is unproven",
-        "next_action": "Next action",
+        field: properties[field]["title"]
+        for field in schema["required"]
+        if "title" in properties[field]
     }
     result = {}
     for field, heading in field_headings.items():
@@ -272,9 +275,9 @@ def check(kind, path, allowed_csv=None):
         raise ValueError(f"cannot read {kind} artifact {source}: {error}") from error
 
     if kind == "brief":
-        payload = parse_brief(text)
+        payload = parse_brief(text, schema)
     elif kind == "handoff":
-        payload = parse_handoff(text)
+        payload = parse_handoff(text, schema)
     elif kind == "verdict":
         if not allowed_csv:
             raise ValueError("verdict check requires --allowed <csv>")
@@ -298,6 +301,9 @@ def _build_parser():
     checker.add_argument("--kind", choices=tuple(SCHEMA_NAMES), required=True)
     checker.add_argument("--allowed", help="comma-separated verdict tokens")
     checker.add_argument("path")
+    verdict = subparsers.add_parser("verdict", help="parse a markdown verdict from stdin")
+    verdict.add_argument("--allowed", required=True, help="comma-separated verdict tokens")
+    verdict.add_argument("--heading", default="Decision")
     return parser
 
 
@@ -309,6 +315,18 @@ def main(argv=None):
         except (ValueError, TypeError, KeyError) as error:
             print(f"{args.kind} check failed: {error}", file=sys.stderr)
             return 1
+        return 0
+    if args.command == "verdict":
+        try:
+            allowed = [token for token in args.allowed.split(",") if token]
+            if not allowed:
+                raise ValueError("verdict --allowed must name at least one token")
+            parsed = parse_verdict(sys.stdin.read(), allowed, args.heading)
+        except (ValueError, TypeError, KeyError) as error:
+            print(error, file=sys.stderr)
+            return 1
+        print(parsed["token"])
+        print(parsed["value_line"])
         return 0
     return 2
 
