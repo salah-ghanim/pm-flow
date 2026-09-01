@@ -138,6 +138,13 @@ python3 -m venv "$VENV" >> "$BUILD_LOG" 2>&1 || {
 }
 PM_FLOW="$VENV/bin/pm-flow"
 [[ -x "$PM_FLOW" ]] || fail "the install produced no pm-flow entry point at $PM_FLOW"
+PACKAGED_COST="$("$VENV/bin/python" - <<'PY'
+from pathlib import Path
+import pm_flow
+print(Path(pm_flow.__file__).resolve().parent / "engine" / "cost.py")
+PY
+)"
+[[ -f "$PACKAGED_COST" ]] || fail "the installed package has no cost command"
 
 /bin/cat > "$TEST_ROOT/digest_tree.py" <<'DIGEST'
 import hashlib
@@ -153,6 +160,23 @@ for root in sorted(sys.argv[2:]):
             continue
         print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(base)}")
 DIGEST
+
+# An existing flow directory without any workspace must still take the repository
+# basename as its default key. A blank key writes project data at the flow root
+# and makes the next install reject its own persisted selector.
+EMPTY_REPO="$TEST_ROOT/empty-workspace"
+EMPTY_KEY="$(basename "$EMPTY_REPO")"
+mkdir -p "$EMPTY_REPO/.agentic/pm_flow"
+printf '{"version": 1}\n' > "$EMPTY_REPO/.agentic/pm_flow/config.json"
+"$REPO_ROOT/install.sh" "$EMPTY_REPO" > "$TEST_ROOT/empty-first.out" 2>&1 || \
+  fail "installing a workspace-less flow directory failed:"$'\n'"$(/bin/cat "$TEST_ROOT/empty-first.out")"
+assert_equals "$(/usr/bin/head -n 1 "$EMPTY_REPO/.agentic/pm_flow/.project-key")" \
+  "$EMPTY_KEY" "a workspace-less flow uses the repository basename as its key"
+[[ -d "$EMPTY_REPO/.agentic/pm_flow/$EMPTY_KEY" ]] || \
+  fail "a workspace-less flow did not create the basename workspace"
+"$REPO_ROOT/install.sh" "$EMPTY_REPO" > "$TEST_ROOT/empty-second.out" 2>&1 || \
+  fail "reinstalling the workspace-less flow failed:"$'\n'"$(/bin/cat "$TEST_ROOT/empty-second.out")"
+printf 'PASS: workspace-less flow defaults to its repository basename and reinstalls\n'
 
 LEGACY_REPO="$TEST_ROOT/golden grid fixture"
 "$REPO_ROOT/tests/fixtures/real_install/build_fixture.sh" "$REPO_ROOT" "$LEGACY_REPO"
@@ -257,18 +281,50 @@ listed_keys="$(sed -n 's/^- `\([^`]*\)` - installed project workspace.*/\1/p' \
 assert_equals "$listed_keys" "alpha beta gamma project " \
   "projects.md lists every migrated workspace"
 
-COPIED_ENGINE_FILES=(
-  pm_flow.sh net_exec.sh agent_exec.sh access_hook.sh fetch.sh heartbeat.sh
-  driver.zsh catalog.py compare.py cost.py store.py telemetry.py topology.py
-  trace_export.py export.py prompt_quality.py watch.py upgrade.py requirements-telemetry.txt
-  README.md run_detach.zsh artifact_quality.md
-)
+install_array_names() {
+  local array_name="$1"
+  sed -n "/^${array_name}=(/,/^)/p" "$REPO_ROOT/install.sh" | \
+    sed '1d;$d;s/#.*//;s/^[[:space:]]*//;s/[[:space:]]*$//;/^$/d'
+}
+
+COPIED_ENGINE_FILES=("${(@f)$(install_array_names COPIED_ENGINE_FILES)}")
+COPIED_ENGINE_DIRS=("${(@f)$(install_array_names COPIED_ENGINE_DIRS)}")
+(( ${#COPIED_ENGINE_FILES[@]} > 0 )) || fail "install.sh names no copied engine files"
+(( ${#COPIED_ENGINE_DIRS[@]} > 0 )) || fail "install.sh names no copied engine directories"
 for name in "${COPIED_ENGINE_FILES[@]}"; do
   [[ ! -e "$MIGRATED_FLOW/$name" ]] || fail "a copied engine file survives: $name"
 done
-for name in roles domains tasks topologies cards schemas .pm-flow; do
+for name in "${COPIED_ENGINE_DIRS[@]}"; do
+  (( ${WORKSPACE_KEYS[(Ie)$name]} )) && continue
   [[ ! -e "$MIGRATED_FLOW/$name" ]] || \
     fail "a flow-level packaged resource survives: $name"
+done
+
+# Import all legacy ledgers before dispatch. `cost.py total` also imports response
+# envelopes, and `pm-flow status` reads those totals, so this must precede both.
+for key in "${WORKSPACE_KEYS[@]}"; do
+  workspace="$MIGRATED_FLOW/$key"
+  ledger="$workspace/runs/cost_ledger.tsv"
+  ledger_stats="$(awk -F '\t' \
+    'NF >= 5 { count += 1; total += $5 } END { printf "%d\t%.4f", count, total }' \
+    "$ledger")"
+  expected_count="${ledger_stats%%$'\t'*}"
+  expected_total="${ledger_stats#*$'\t'}"
+
+  import_output="$("$VENV/bin/python" "$PACKAGED_COST" import "$workspace")" || \
+    fail "cost import failed for workspace $key"
+  assert_equals "$import_output" "imported=$expected_count" \
+    "cost import reads every TSV row for workspace $key"
+  reimport_output="$("$VENV/bin/python" "$PACKAGED_COST" import "$workspace")" || \
+    fail "cost re-import failed for workspace $key"
+  assert_equals "$reimport_output" "imported=0" \
+    "cost re-import is idempotent for workspace $key"
+  total_output="$("$VENV/bin/python" "$PACKAGED_COST" total "$workspace")" || \
+    fail "cost total failed for workspace $key"
+  assert_equals "$total_output" "$expected_total" \
+    "stored cost matches independent TSV arithmetic for workspace $key"
+  printf 'PASS: workspace=%s %s reimported=0 total=%s\n' \
+    "$key" "$import_output" "$total_output"
 done
 
 status_output="$(cd "$LEGACY_REPO" && "$PM_FLOW" status)" || \
@@ -279,3 +335,88 @@ assert_not_contains "$status_output" "$REPO_ROOT/template/.agentic/pm_flow" \
   "the installed command did not reach the checkout engine"
 
 printf 'PASS: all workspaces survive migration, are registered, and the installed command reads them\n'
+
+ledger_digests() {
+  local key
+  for key in "${WORKSPACE_KEYS[@]}"; do
+    shasum -a 256 "$MIGRATED_FLOW/$key/runs/cost_ledger.tsv"
+  done
+}
+ledgers_before_tick="$(ledger_digests)"
+
+# The child records the prompt and returns a deterministic scope verdict. Its
+# only write retires the scaffold marker in the workplan named by that prompt.
+mkdir -p "$TEST_ROOT/agent-bin"
+CAPTURED_PROMPT="$TEST_ROOT/dispatched_prompt.txt"
+/bin/cat > "$TEST_ROOT/agent-bin/claude" <<'STUB'
+#!/bin/zsh -f
+printf '%s' "${@[-1]}" > "$PM_FLOW_CAPTURED_PROMPT"
+wp="$(printf '%s\n' "${@[-1]}" | sed -n 's/^- *`\{0,1\}\([^`]*workplan\.md\)`\{0,1\} *$/\1/p' | head -n 1)"
+[[ "$wp" == /* || -z "$wp" ]] || wp="${PROJECT_ROOT:-$PWD}/$wp"
+[[ -z "$wp" || ! -f "$wp" ]] || { grep -v 'pm-flow-workplan-template' "$wp" > "$wp.tmp"; mv "$wp.tmp" "$wp"; }
+python3 -c 'import json, sys; print(json.dumps(
+    {"is_error": False, "result": sys.argv[1], "session_id": ""}))' \
+'## Where the section stands
+
+The migrated section has not been scoped yet.
+
+## Workplan task
+
+T1
+
+## Assignment
+
+Preserve the migrated project data.
+
+## Acceptance
+
+The migrated workspace drives an installed tick.
+
+## Rejection conditions
+
+Scope drift.
+
+## Decision
+
+ASSIGN - first piece'
+STUB
+chmod +x "$TEST_ROOT/agent-bin/claude"
+
+tick_output="$(cd "$LEGACY_REPO" && \
+  PM_FLOW_CAPTURED_PROMPT="$CAPTURED_PROMPT" \
+  PATH="$TEST_ROOT/agent-bin:$PATH" \
+  "$PM_FLOW" --project beta --section beta-section tick 2>&1)" || \
+  fail "the installed dispatch failed:"$'\n'"$tick_output"
+assert_contains "$tick_output" "section=beta-section" \
+  "the tick acted on the migrated fixture section"
+assert_contains "$tick_output" "action=scope" "the tick scoped the migrated section"
+assert_contains "$tick_output" "-> ASSIGN" "the dispatched child's verdict was acted on"
+[[ -f "$MIGRATED_FLOW/beta/sections/beta-section/cycles/001/assignment.md" ]] || \
+  fail "the dispatch produced no assignment:"$'\n'"$tick_output"
+[[ -f "$CAPTURED_PROMPT" ]] || fail "the installed dispatch captured no prompt"
+captured_prompt="$(/bin/cat "$CAPTURED_PROMPT")"
+assert_contains "$captured_prompt" "Beta workspace role marker" \
+  "the installed engine reads the migrated workspace's pm overlay"
+assert_not_contains "$captured_prompt" "$REPO_ROOT/template/.agentic/pm_flow" \
+  "the installed tick did not reach the checkout engine"
+
+assert_equals "$(ledger_digests)" "$ledgers_before_tick" \
+  "the installed tick leaves every legacy TSV byte-identical"
+
+completed_pm_attempts="$("$VENV/bin/python" - "$MIGRATED_FLOW/beta/runs/pm_flow.db" <<'PY'
+import sqlite3
+import sys
+
+connection = sqlite3.connect(sys.argv[1])
+count = connection.execute(
+    "SELECT COUNT(*) FROM attempts WHERE role_key = 'pm'"
+    " AND status = 'ok' AND ended_at IS NOT NULL"
+).fetchone()[0]
+connection.close()
+print(count)
+PY
+)" || fail "the tick's completed attempt could not be read from the store"
+assert_equals "$completed_pm_attempts" "1" \
+  "the tick records one completed pm attempt in the project store"
+
+printf 'PASS: installed tick section=beta-section action=scope -> ASSIGN; TSVs unchanged; completed pm attempt stored\n'
