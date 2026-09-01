@@ -180,23 +180,45 @@ backend (T4) is the only step needing external infrastructure, so it is last.
 
 ## Task T4 — Prove all four scenarios end to end against a real backend
 
-- Status: pending
-- Outcome: a real `pm-flow run` and a forced-failure `pm-flow tick` against a
-  live local OTLP backend, with the four brief scenarios walked in order and
-  their observed output recorded in `state.md`: the outcomes join, the
-  evaluation event visible in the backend UI after the run, both runs closed,
-  and a dispatch surviving an unwritable store at exit 0.
+- Status: done (cycle 004, accepted)
+- Outcome: the four brief scenarios walked end to end against a live local
+  OTLP backend rather than a loopback receiver, with their observed output
+  recorded in `state.md`: the outcomes join, the evaluation event re-served by
+  the backend after the producing process has exited, both runs closed, and a
+  dispatch surviving an unwritable store at exit 0.
+- What "real" means here: real backend, real driver. The brief's constraint and
+  its rejection condition are both about the *backend* ("not only a loopback
+  receiver", "backend evidence supplied only by a loopback test receiver"),
+  not about the model. Role responses stay stubbed exactly as in T1-T3;
+  `otel_semconv_test.sh`'s A6 is the precedent — it drives a real dispatch into
+  a real Jaeger with the response stubbed. An unstubbed model run is not
+  required and is not the evidence being asked for.
 - Paths: `tests/outcome_record_test.sh`, `tests/fixtures/outcome_record/**`,
-  `template/.agentic/pm_flow/driver.zsh` (for the `PM_FLOW_COMMAND` label only)
-- Also in T4: a real run is the first thing that observes a
-  `scope_decision|COMPLETE` row, which no stubbed case produces; and it is
-  where `runs.command` mislabelling the on-demand commands as `tick` is either
-  fixed by passing the real command name at `driver.zsh:3751`, `:3805`, `:3881`
-  or recorded as accepted, since `compare.py:492` groups by it.
-- Reuse: the settled `pm-flow-jaeger` render (or Phoenix) named in the brief;
-  `telemetry_autoexport` (`driver.zsh:774`) and `pm-flow trace export --otlp`;
-  `tests/otel_semconv_test.sh`'s Jaeger assertions (`assert_jaeger_tree`) as
-  the pattern for querying a live backend.
+  `template/.agentic/pm_flow/driver.zsh` (for the `runs.command` label only)
+- Also in T4, both deferred out of earlier cycles:
+  - `scope_decision|COMPLETE` has never been observed as an outcome row. It
+    needs no real run after all: `record_cycle_decision` (`driver.zsh:1275`)
+    records any parsed token before the `case` at `:1408` branches, and
+    `COMPLETE` is in the allowed set at `:1407`. Stubbing a scope response
+    whose `Decision` is `COMPLETE` reaches it; the existing case instead
+    primes `cycles/002/decision.txt` (`outcome_record_test.sh:303`), which
+    bypasses the parse.
+  - `runs.command` records the three on-demand commands as `tick` because
+    `PM_FLOW_COMMAND` is set nowhere. Fix by changing the default at
+    `driver.zsh:3751`, `:3805`, `:3881` to the handler's own command name;
+    `runs.command` is a free `TEXT` column (`store.py:292`) with no
+    constraint, and `compare.py:492` groups by it.
+- Reuse: the settled `pm-flow-jaeger` container, confirmed up on this host
+  (ports 4318 and 16686); `pm-flow trace export --otlp`, whose
+  `export_to_otlp` (`trace_export.py:216-224`) appends `/v1/traces` to a bare
+  origin itself; `tests/otel_semconv_test.sh`'s `jaeger_reachable` (`:94`),
+  `ensure_jaeger` (`:99`) and `assert_jaeger_tree` (`:511-552`) as the pattern
+  for exporting with `--replay` and then polling
+  `http://localhost:16686/api/traces/<trace_id>`.
+- Note: Jaeger's query API does not return OTLP `events`. It renders a span
+  event as an entry in that span's `logs`, with the event name carried as a
+  field. Assert against what Jaeger actually returns, not against the OTLP
+  shape the file exporter produces — that half is already proved by T3.
 - Acceptance IDs: A1, A2, A3, A4, A5
 - Validation: `pm-flow trace export --otlp http://localhost:4318/v1/traces`
   followed by a backend query showing the `gen_ai.evaluation.result` event
@@ -204,6 +226,18 @@ backend (T4) is the only step needing external infrastructure, so it is last.
   `zsh tests/otel_semconv_test.sh` and
   `zsh template/.agentic/pm_flow/tests/run.zsh` all exit 0.
 - Depends on: T1, T2, T3.
+- Resolved: all five acceptance IDs are on evidence, A2's live-backend half
+  included. `assert_jaeger_evaluations` (`outcome_record_test.sh:196-292`)
+  exports the store from a separate process that receives only `--db`, polls
+  `http://localhost:16686/api/traces/<trace_id>`, and requires `Counter`
+  equality between Jaeger's `logs` entries and the store's verdict rows keyed
+  on `(trace_id, span_id, metric, value_text)`. The event name and both
+  attribute keys are read from `semconv.py` at runtime, so the suite holds no
+  `gen_ai.` literal. `scope_decision|COMPLETE` is now produced by a stubbed
+  `COMPLETE` scope response through `record_cycle_decision`, not by priming
+  `decision.txt`, and the three on-demand commands label their own
+  `runs.command`. The registry re-read was completed first-hand by the PM and
+  confirms the pin. See `state.md` for the observations.
 
 ## Risks and rollback
 

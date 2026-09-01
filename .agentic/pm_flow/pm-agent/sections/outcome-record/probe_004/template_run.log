@@ -1,0 +1,406 @@
+
+########## verdict_parser ##########
+PASS  plain atx heading                              -> GO
+PASS  numbered atx heading                           -> GO
+PASS  numbered paren heading                         -> NO_GO
+PASS  bold heading                                   -> GO
+PASS  bold heading with colon                        -> NO_GO
+PASS  same-line dash verdict                         -> GO
+PASS  same-line colon verdict                        -> GO_WITH_CHANGES
+PASS  same-line em-ish double dash                   -> GO
+PASS  blockquoted value                              -> NO_GO
+PASS  bulleted value                                 -> GO
+PASS  numbered value                                 -> GO
+PASS  bold value                                     -> NO_GO
+PASS  backticked value                               -> GO
+PASS  bare heading line no hashes                    -> GO
+PASS  duplicate sections, last wins                  -> NO_GO
+PASS  prose mention then real one                    -> GO
+PASS  trailing justification                         -> GO
+PASS  scope ASSIGN                                   -> ASSIGN
+PASS  scope BLOCKED_EXTERNAL                         -> BLOCKED_EXTERNAL
+PASS  developer Status heading                       -> PARTIAL
+PASS  reject unknown token                           -> <REJECT>
+PASS  reject missing section                         -> <REJECT>
+PASS  reject empty section                           -> <REJECT>
+PASS  GO not GO_WITH_CHANGES prefix                  -> GO_WITH_CHANGES
+
+--- decision line extraction ---
+line=BLOCKED_EXTERNAL the IB paper gateway has no credentials on this host
+
+--- assignment extraction (F20) ---
+## Assignment
+
+Write the probe script.
+
+## Acceptance
+
+- `.venv/bin/python -m pytest -q tests/x.py` exits 0
+
+## Rejection conditions
+
+- The probe is mocked.
+PASS  bare id                                        -> ACCEPT
+PASS  backticked id                                  -> ACCEPT
+PASS  bulleted id                                    -> ACCEPT
+PASS  id with title                                  -> ACCEPT
+PASS  Task prefix                                    -> ACCEPT
+PASS  bold id                                        -> ACCEPT
+PASS  id with colon                                  -> ACCEPT
+PASS  undefined id                                   -> REJECT
+PASS  two ids                                        -> REJECT
+PASS  empty                                          -> REJECT
+PASS  scaffold workplan                              -> REJECT
+
+totals: pass=35 fail=0
+
+########## transitions ##########
+
+===== setup: seven sections, disjoint owned paths =====
+
+===== F3: the scheduler ranks by dependents, not lexically =====
+1 alpha                    scope
+2 epsilon                  scope
+3 eta                      scope
+4 gamma                    scope
+5 zeta                     scope
+PASS  F3 alpha (2 dependents) outranks the lexically-first zero-dependent section
+
+===== F20: only the task ID and bounded assignment reach the developer =====
+PASS  F20 the Workplan task is kept
+PASS  F20 the Assignment section is kept
+PASS  F20 the editorial is dropped
+PASS  F20 the exact generated prompt has a quality manifest
+PASS  F20 the manifest records task density
+
+===== F11: the lifecycle is stamped on every tick =====
+PASS  F11 status.txt advances past planned
+PASS  F11 summary.txt is no longer the creation text
+
+===== F7: the dispatch cost is recorded =====
+PASS  F7 the store has a priced row
+PASS  F7 status reports the total
+
+===== F2: the developer status is parsed =====
+PASS  F2 dev_status.txt records PARTIAL
+
+===== F5: an unreadable verdict becomes UNPARSED and is re-asked =====
+PASS  F5 decision.txt records UNPARSED
+PASS  F5 the parser complaint is fed back
+PASS  F5 the section is re-asked, not advanced past
+
+===== F5: duplicate Decision sections resolve to the last =====
+PASS  F5 the re-ask parses
+PASS  F5 the feedback file is cleared
+
+===== F5: UNPARSED counts as a failure for escalation =====
+PASS  F5 one NO_GO alone does not escalate (threshold 2)
+PASS  F5 NO_GO then UNPARSED reaches the escalation threshold
+
+===== F6: accepted cycles with no COMPLETE force a convergence review =====
+PASS  F6 three accepted cycles do not trigger it while it is switched off
+PASS  F6 switching it on makes the next action a convergence review
+PASS  F6 CONTINUE is recorded
+PASS  F6 it does not re-fire on the next tick
+
+===== F2: BLOCKED_EXTERNAL moves the section to blocked =====
+PASS  F2 the lifecycle becomes blocked
+PASS  F2 the summary names the dependency
+PASS  F2 the dash after the token is not part of the reason
+PASS  F2 the driver commits the blocked state
+PASS  F2 and leaves the section's record clean
+PASS  F2 a blocked section is not actionable
+
+===== F2: a bare BLOCKED_EXTERNAL token is refused =====
+PASS  F2 a token with no named dependency is UNPARSED
+PASS  F2 the section is not blocked by it
+
+===== F4: a fatal dispatch quarantines one section, not the run =====
+PASS  F4 quarantine.txt is written
+PASS  F4 status surfaces the quarantine
+PASS  F4 a quarantined section leaves the queue
+PASS  F4 the healthy sections stay in the queue
+PASS  F7 a failed dispatch still records its cost
+
+===== F19: two drivers cannot run at once =====
+PASS  F19 the second driver is refused
+
+===== F13: a cancelled dependency is reported as a deadlock =====
+PASS  F13 status names the deadlock
+PASS  F13 run reports the deadlock
+PASS  F13 run exits non-zero on a deadlock
+
+===== F7: the budget stops the run before it dispatches =====
+PASS  F7 the run refuses to spend past budget.max_usd
+
+===== F14: the step-claim ceiling is configurable and quarantines =====
+PASS  F14 the configured ceiling is enforced and routed to quarantine
+
+totals: pass=41 fail=0
+
+########## recovery ##########
+
+===== F18/F21: decomposition validates before creating, and matches briefs exactly =====
+section=(project)
+action=decompose
+result=decompose -> 2 section(s): client, ib-client
+spent_usd=0.5000
+PASS  F21 both sections were created despite the name being a suffix of the other
+PASS  F21 client got the brief written for client
+PASS  F21 ib-client got the brief written for ib-client
+
+===== F18: a decomposition with one bad brief creates nothing =====
+PASS  F18 the decomposition is refused as a whole
+PASS  F18 no section was created
+
+===== setup for the recovery paths =====
+
+===== F16: an assignment that owns the dispatch output returns to its manager =====
+PASS  F16 the cycle wants develop next
+PASS  F16 the tick reports the rejection instead of failing the run
+PASS  F16 a rescope reason is written
+PASS  F16 the rejected assignment is kept
+PASS  F16 the section goes back to scope
+PASS  F16 the section is not quarantined
+PASS  F16 the re-ask reuses the same cycle rather than burning a new one
+PASS  F16 the rescope reason reached the new scope prompt
+
+===== F15: a failed dispatch names what it left uncommitted =====
+PASS  F15 orphaned_worktree.txt is written
+PASS  F15 it names the file the dispatch left behind
+PASS  F15 the driver's own bookkeeping is not reported as a leftover
+
+===== F12: the scope context is windowed, not cumulative =====
+PASS  F12 only the last cycle is cited (window of 1)
+PASS  F12 the newest cycle is included
+PASS  F12 cycle 003 is no longer carried
+PASS  F12 state.md is still in the context
+
+===== F17: a handoff over budget gets feedback, then gives up cleanly =====
+PASS  F17 the section wants to complete
+PASS  F17 the overrun is written down
+PASS  F17 the feedback names the actual word count
+PASS  F17 the second prompt carries the feedback
+PASS  F17 two attempts and then a clean stop
+
+===== F8: a rescue that holds breaks the failure streak for good =====
+PASS  F8 two rejections reach the escalation threshold
+PASS  F8 the panel hands over to adjudication
+PASS  F8 the adjudication routes to a rescue
+PASS  F8 the rescue is reviewed
+PASS  F8 the streak floor is recorded
+PASS  F8 the section resumes normal cycles instead of escalating again
+PASS  F8 and it still does not escalate on the tick after that
+
+totals: pass=32 fail=0
+
+########## governance ##########
+
+===== C1: Priority is required, parsed, and persisted =====
+PASS  C1 the token is the first line of priority.txt
+PASS  C1 what the product loses is kept on the second line
+PASS  C1 nice-to-have is recorded as itself
+PASS  C1 a brief with no Priority heading is refused
+PASS  C1 and no section was created
+PASS  C1 a priority that is neither token is refused
+PASS  C1 a bare token with no stated loss is refused
+
+===== C1: priority is surfaced =====
+PASS  C1 status has a PRIORITY column
+PASS  C1 status shows the section priority
+PASS  C1 list-sections carries it too
+
+===== C1: a section created before priorities reads as must-have =====
+PASS  C1 the default is must-have, so nothing is cut for lack of a label
+
+===== C2: no trigger armed means no review =====
+PASS  C2 no trigger is armed, so no review is offered
+PASS  C2 and section work is still queued
+
+===== C2: the idle-cycle trigger fires =====
+PASS  C2 one project cycle with nothing done arms the review
+PASS  C2 status names the trigger
+PASS  C2 switching the trigger off disarms it
+
+===== C2: the dispatch-count trigger fires =====
+PASS  C2 two recorded dispatches arm the review
+
+===== C2: the spend trigger fires =====
+PASS  C2 $1.00 of ledger spend passes a $0.75 threshold
+
+===== C2: the review runs, and preempts actionable section work =====
+PASS  C2 the tick is taken by the project, not a section
+PASS  C2 the action is the portfolio review
+PASS  C2 the product-level verdict is recorded
+PASS  C2 decision.txt holds the product verdict
+PASS  C2 the trigger that convened it is recorded
+PASS  C2 the driver commits its own record of the review
+PASS  C2 and leaves none of it dirty
+
+===== C2: all four verdict tokens parse =====
+PASS  C2 CONTINUE parses
+PASS  C2 CUT parses
+PASS  C2 BLOCK parses
+PASS  C2 RESCOPE parses
+PASS  C2 the reason travels with the verdict
+PASS  C2 the plan-structure checks are recorded
+
+===== C2: CUT and BLOCK reach the right terminal status =====
+PASS  C2 CUT cancels the section
+PASS  C2 BLOCK blocks the section
+PASS  C2 CONTINUE leaves the section alone
+PASS  C2 the cut section's handoff carries the officer's reason
+PASS  C2 a governance handoff still states what is unproven
+PASS  C2 a cut section is not actionable
+PASS  C2 a blocked section is not actionable
+
+===== C2: RESCOPE reaches that section next scope =====
+PASS  C2 the rescope reason is written
+PASS  C2 it names what has to change
+PASS  C2 the reason reached the scope prompt
+PASS  C2 and it is consumed rather than riding along forever
+
+===== C2: a rescope outranks a stale COMPLETE =====
+PASS  C2 a reopened section scopes again instead of re-completing
+
+===== C2: the review is not re-convened until the baseline moves =====
+PASS  C2 the baseline advanced with the review
+
+===== C2: the officer gets durable memory =====
+PASS  C2 portfolio_log.md is written
+PASS  C2 it records the criteria
+PASS  C2 it records the verdicts
+PASS  C2 it records the shortest path
+PASS  C2 it carries a one-line summary for compaction
+
+===== C2: an unreadable review is refused, not half-applied =====
+PASS  C2 the review is sent back
+PASS  C2 the CUT with no reason was not applied
+PASS  C2 the complaint is fed back for the re-ask
+PASS  C2 the complaint names the missing reason
+PASS  C2 and the missing plan-structure checks
+
+===== C3: What is unproven is a required handoff heading =====
+PASS  C3 a handoff without it is refused
+
+===== C4: the dependency graph changes only through validation =====
+PASS  C4 the dependency is recorded
+PASS  C4 a dependency on a section that does not exist is refused
+PASS  C4 a cycle is refused
+PASS  C4 and the graph is left as it was
+
+totals: pass=59 fail=0
+
+########## on_demand ##########
+
+===== D1: section-analysis dispatches the manager, outside any cycle =====
+PASS  D1 the command reports what it recorded
+PASS  D1 the section manager is the role dispatched
+PASS  D1 the label names the section it assessed
+PASS  D1 exactly one dispatch is spent
+PASS  D1 the prompt is the section-analysis task
+PASS  D1 it forbids writing an assignment
+PASS  D1 it forbids a scope verdict
+PASS  D1 it asks the four questions the owner asked for
+PASS  D1 the brief reaches the manager
+PASS  D1 no placeholder survives composition
+PASS  D1 the assessment is written under the section
+PASS  D1 it holds what the manager answered
+PASS  D1 latest.md points at the most recent one
+
+===== D1: it opens nothing =====
+PASS  D1 no cycle directory is created
+PASS  D1 the cycle count stays at zero
+PASS  D1 no assignment is written
+PASS  D1 the section's next action is still its first scope
+
+===== D1: the cost is recorded like any dispatch =====
+PASS  D1 the store carries the analysis
+PASS  D1 and charges it to the section
+
+===== D1: a focusing question reaches the manager =====
+PASS  D1 the question is listed among the files to read
+PASS  D1 and the task says to answer it first
+
+===== D1: an ASSIGN answer is refused the effect it wants =====
+PASS  D1 the scope verdict is called out
+PASS  D1 and still no cycle was opened
+
+===== D2: portfolio-review runs the review with no threshold armed =====
+PASS  D2 nothing has armed the automatic review
+PASS  D2 the review reports the product verdict
+PASS  D2 the product officer is the role dispatched
+PASS  D2 the label names it a portfolio review
+PASS  D2 the prompt is the portfolio review task
+PASS  D2 the record says it was convened by hand
+
+===== D2: it is a review in every other respect =====
+PASS  D2 the product verdict is recorded
+PASS  D2 a CUT verdict takes effect
+PASS  D2 the portfolio log is appended
+PASS  D2 and carries this review's shortest path
+
+===== D2: it advances the governance baseline =====
+PASS  D2 the loop is not left about to convene another
+PASS  D2 and one further dispatch arms it again
+
+===== D3: proposals convenes the panel on a question =====
+PASS  D3 the panel name is slugified
+PASS  D3 one artifact per seat
+PASS  D3 seat one answered
+PASS  D3 seat two answered
+PASS  D3 the question is kept with the panel
+PASS  D3 the adjudication is written
+PASS  D3 the adopted path is recorded
+
+===== D3: the seats are consultants, the adjudicator is the officer =====
+PASS  D3 both seats ran as consultants
+PASS  D3 the product officer adjudicates last
+PASS  D3 the seat prompt asks for proposals, not a diagnosis
+PASS  D3 the seats are told they are blind to each other
+PASS  D3 the seat prompt points at the question
+
+===== D3: the adjudication reuses the panel task =====
+PASS  D3 it is the consultant panel adjudication
+PASS  D3 it says the panel was not convened on a failure
+PASS  D3 both proposals are listed for the officer
+PASS  D3 the question is listed too
+PASS  D3 no placeholder survives composition
+
+===== D3: the failure panel still reads as a failure panel =====
+PASS  D3 the shared task still frames a failed section
+
+===== D4: each command refuses while a driver holds the project =====
+PASS  D4 portfolio-review refuses
+PASS  D4 and exits non-zero
+PASS  D4 section-analysis refuses
+PASS  D4 proposals refuses
+PASS  D4 no dispatch was spent behind the lock
+
+===== D4: the lock is released, so the commands work again =====
+PASS  D4 section-analysis runs once the driver is gone
+
+===== D5: init-section with a request has the officer cut the section =====
+PASS  D5 the officer is dispatched once
+PASS  D5 exactly one dispatch is spent
+PASS  D5 the decision is reported
+PASS  D5 the section exists
+PASS  D5 the brief is the officer's, in full shape
+PASS  D5 acceptance carries its ID
+PASS  D5 the officer's decision stays out of the brief
+PASS  D5 owned paths come from the brief
+PASS  D5 the request is kept with the proposal
+PASS  D5 the proposal prompt names the live owners
+PASS  D5 no placeholder survives composition
+
+===== D5: a DECLINE creates nothing =====
+PASS  D5 the decline is reported
+PASS  D5 no section was created
+
+===== D5: a block under another name is refused =====
+PASS  D5 the mismatch is named
+PASS  D5 nothing was created for kappa
+
+totals: pass=74 fail=0
+
+all suites passed

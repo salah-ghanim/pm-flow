@@ -1,0 +1,355 @@
+RAW SELECT:
+SELECT o.metric || '|' || o.value_text || '|' || o.source || '|' || a.role_key || '|' || r.command FROM outcomes o JOIN attempts a ON a.id = o.attempt_id JOIN runs r ON r.id = o.run_id AND r.id = a.run_id WHERE o.metric IN ('scope_decision','review_verdict','portfolio_verdict','obstruction_class') ORDER BY o.metric, o.id;
+obstruction_class|NONE|verdict|pm|tick
+portfolio_verdict|ON_TRACK|verdict|cpo|portfolio-review
+review_verdict|GO_WITH_CHANGES|verdict|pm|tick
+scope_decision|ASSIGN|verdict|pm|tick
+scope_decision|UNPARSED|verdict|pm|tick
+scope_decision|COMPLETE|verdict|pm|tick
+PASS: every parsed decision joins to its producing attempt and run
+RAW SELECT:
+SELECT a.id || '|' || a.span_id || '|' || se.name || '|' || se.attributes FROM span_events se JOIN attempts a ON a.span_id = se.span_id WHERE se.name = 'gen_ai.evaluation.result' ORDER BY a.id, se.rowid;
+1|c766eeaad14beed0|gen_ai.evaluation.result|{"gen_ai.evaluation.name": "scope_decision", "gen_ai.evaluation.score.label": "ASSIGN"}
+3|f3a9d909e43159b3|gen_ai.evaluation.result|{"gen_ai.evaluation.name": "review_verdict", "gen_ai.evaluation.score.label": "GO_WITH_CHANGES"}
+3|f3a9d909e43159b3|gen_ai.evaluation.result|{"gen_ai.evaluation.name": "obstruction_class", "gen_ai.evaluation.score.label": "NONE"}
+4|d5bc82d512f93a11|gen_ai.evaluation.result|{"gen_ai.evaluation.name": "scope_decision", "gen_ai.evaluation.score.label": "UNPARSED"}
+5|f7444c390feb472f|gen_ai.evaluation.result|{"gen_ai.evaluation.name": "scope_decision", "gen_ai.evaluation.score.label": "COMPLETE"}
+6|0bf36e8dd474e46a|gen_ai.evaluation.result|{"gen_ai.evaluation.name": "portfolio_verdict", "gen_ai.evaluation.score.label": "ON_TRACK"}
+EXPORTED JSON FRAGMENT:
+[
+  {
+    "events": [
+      {
+        "attributes": [
+          {
+            "key": "gen_ai.evaluation.name",
+            "value": {
+              "stringValue": "scope_decision"
+            }
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "value": {
+              "stringValue": "ASSIGN"
+            }
+          }
+        ],
+        "name": "gen_ai.evaluation.result",
+        "timeUnixNano": "1788296556683685888"
+      }
+    ],
+    "spanId": "c766eeaad14beed0"
+  },
+  {
+    "events": [
+      {
+        "attributes": [
+          {
+            "key": "gen_ai.evaluation.name",
+            "value": {
+              "stringValue": "review_verdict"
+            }
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "value": {
+              "stringValue": "GO_WITH_CHANGES"
+            }
+          }
+        ],
+        "name": "gen_ai.evaluation.result",
+        "timeUnixNano": "1788296559059389952"
+      },
+      {
+        "attributes": [
+          {
+            "key": "gen_ai.evaluation.name",
+            "value": {
+              "stringValue": "obstruction_class"
+            }
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "value": {
+              "stringValue": "NONE"
+            }
+          }
+        ],
+        "name": "gen_ai.evaluation.result",
+        "timeUnixNano": "1788296559181356032"
+      }
+    ],
+    "spanId": "f3a9d909e43159b3"
+  },
+  {
+    "events": [
+      {
+        "attributes": [
+          {
+            "key": "gen_ai.evaluation.name",
+            "value": {
+              "stringValue": "scope_decision"
+            }
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "value": {
+              "stringValue": "UNPARSED"
+            }
+          }
+        ],
+        "name": "gen_ai.evaluation.result",
+        "timeUnixNano": "1788296560355702016"
+      }
+    ],
+    "spanId": "d5bc82d512f93a11"
+  },
+  {
+    "events": [
+      {
+        "attributes": [
+          {
+            "key": "gen_ai.evaluation.name",
+            "value": {
+              "stringValue": "scope_decision"
+            }
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "value": {
+              "stringValue": "COMPLETE"
+            }
+          }
+        ],
+        "name": "gen_ai.evaluation.result",
+        "timeUnixNano": "1788296561525651968"
+      }
+    ],
+    "spanId": "f7444c390feb472f"
+  },
+  {
+    "events": [
+      {
+        "attributes": [
+          {
+            "key": "gen_ai.evaluation.name",
+            "value": {
+              "stringValue": "portfolio_verdict"
+            }
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "value": {
+              "stringValue": "ON_TRACK"
+            }
+          }
+        ],
+        "name": "gen_ai.evaluation.result",
+        "timeUnixNano": "1788296563061699072"
+      }
+    ],
+    "spanId": "0bf36e8dd474e46a"
+  }
+]
+PASS: every verdict exports one evaluation event on its attempt span
+JAEGER query: curl -s 'http://localhost:16686/api/traces/350747f06228a1d1a3467b17e1061997'
+JAEGER query: curl -s 'http://localhost:16686/api/traces/49a3a2ba4d941b4fb5015e02d9050534'
+JAEGER query: curl -s 'http://localhost:16686/api/traces/bf01636f4eaddb47cfa602f09099c512'
+JAEGER query: curl -s 'http://localhost:16686/api/traces/ed2632de9efff8035f3bc7a6a4906c24'
+JAEGER query: curl -s 'http://localhost:16686/api/traces/ff0a5276b395e4acb477b8ba59d1da0c'
+JAEGER JSON FRAGMENT:
+[
+  {
+    "logs": [
+      {
+        "fields": [
+          {
+            "key": "event",
+            "type": "string",
+            "value": "gen_ai.evaluation.result"
+          },
+          {
+            "key": "gen_ai.evaluation.name",
+            "type": "string",
+            "value": "portfolio_verdict"
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "type": "string",
+            "value": "ON_TRACK"
+          }
+        ],
+        "timestamp": 1788296563061699
+      }
+    ],
+    "spanID": "0bf36e8dd474e46a",
+    "traceID": "350747f06228a1d1a3467b17e1061997"
+  },
+  {
+    "logs": [
+      {
+        "fields": [
+          {
+            "key": "event",
+            "type": "string",
+            "value": "gen_ai.evaluation.result"
+          },
+          {
+            "key": "gen_ai.evaluation.name",
+            "type": "string",
+            "value": "review_verdict"
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "type": "string",
+            "value": "GO_WITH_CHANGES"
+          }
+        ],
+        "timestamp": 1788296559059389
+      },
+      {
+        "fields": [
+          {
+            "key": "event",
+            "type": "string",
+            "value": "gen_ai.evaluation.result"
+          },
+          {
+            "key": "gen_ai.evaluation.name",
+            "type": "string",
+            "value": "obstruction_class"
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "type": "string",
+            "value": "NONE"
+          }
+        ],
+        "timestamp": 1788296559181356
+      }
+    ],
+    "spanID": "f3a9d909e43159b3",
+    "traceID": "49a3a2ba4d941b4fb5015e02d9050534"
+  },
+  {
+    "logs": [
+      {
+        "fields": [
+          {
+            "key": "event",
+            "type": "string",
+            "value": "gen_ai.evaluation.result"
+          },
+          {
+            "key": "gen_ai.evaluation.name",
+            "type": "string",
+            "value": "scope_decision"
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "type": "string",
+            "value": "COMPLETE"
+          }
+        ],
+        "timestamp": 1788296561525651
+      }
+    ],
+    "spanID": "f7444c390feb472f",
+    "traceID": "bf01636f4eaddb47cfa602f09099c512"
+  },
+  {
+    "logs": [
+      {
+        "fields": [
+          {
+            "key": "event",
+            "type": "string",
+            "value": "gen_ai.evaluation.result"
+          },
+          {
+            "key": "gen_ai.evaluation.name",
+            "type": "string",
+            "value": "scope_decision"
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "type": "string",
+            "value": "ASSIGN"
+          }
+        ],
+        "timestamp": 1788296556683685
+      }
+    ],
+    "spanID": "c766eeaad14beed0",
+    "traceID": "ed2632de9efff8035f3bc7a6a4906c24"
+  },
+  {
+    "logs": [
+      {
+        "fields": [
+          {
+            "key": "event",
+            "type": "string",
+            "value": "gen_ai.evaluation.result"
+          },
+          {
+            "key": "gen_ai.evaluation.name",
+            "type": "string",
+            "value": "scope_decision"
+          },
+          {
+            "key": "gen_ai.evaluation.score.label",
+            "type": "string",
+            "value": "UNPARSED"
+          }
+        ],
+        "timestamp": 1788296560355702
+      }
+    ],
+    "spanID": "d5bc82d512f93a11",
+    "traceID": "ff0a5276b395e4acb477b8ba59d1da0c"
+  }
+]
+PASS: Jaeger re-serves one evaluation event per verdict on its attempt span
+RAW SELECT:
+SELECT o.metric || '|' || o.value_text || '|' || o.source FROM outcomes o JOIN runs r ON r.id = o.run_id WHERE o.metric = 'section_status' ORDER BY o.value_text;
+section_status|abandoned|derived
+section_status|complete|derived
+PASS: complete and abandoned section_status rows remain derived
+RAW SELECT:
+SELECT command || '|' || status FROM runs WHERE id > 8 ORDER BY id;
+run|ok
+tick|error
+RAW SELECT:
+SELECT COUNT(*) FROM runs WHERE id > 8 AND ended_at IS NULL;
+0
+RUNS TABLE:
+SELECT id || '|' || command || '|' || status || '|' || CASE WHEN ended_at IS NULL THEN 'open' ELSE 'closed' END FROM runs ORDER BY id;
+1|tick|ok|closed
+2|tick|ok|closed
+3|tick|ok|closed
+4|tick|ok|closed
+5|tick|ok|closed
+6|portfolio-review|ok|closed
+7|tick|ok|closed
+8|tick|ok|closed
+9|run|ok|closed
+10|tick|error|closed
+PASS: completed run and fail-aborted tick close with distinct statuses
+UNWRITABLE RUN EXIT: 0
+WARNING: cost.py total reported nothing for the project; treating as $0
+[tick 1] swallow-run: scope ($0 spent)
+WARNING: cost.py total reported nothing for the project; treating as $0
+WARNING: cost.py total reported nothing for swallow-run; treating as $0
+          scope 001 -> ASSIGN
+WARNING: cost.py total reported nothing for the project; treating as $0
+run stopped at the 1 tick budget; work remains ($0 spent)
+UNWRITABLE TICK EXIT: 0
+section=swallow-tick
+action=scope
+WARNING: cost.py total reported nothing for the project; treating as $0
+WARNING: cost.py total reported nothing for swallow-tick; treating as $0
+result=scope 001 -> ASSIGN
+WARNING: cost.py total reported nothing for the project; treating as $0
+spent_usd=0
+PASS: run and tick dispatch and exit zero with unwritable store

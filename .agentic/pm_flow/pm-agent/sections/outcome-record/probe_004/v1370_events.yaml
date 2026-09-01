@@ -1,0 +1,12 @@
+groups:
+  - id: event.gen_ai.client.inference.operation.details
+    name: gen_ai.client.inference.operation.details
+    type: event
+    stability: development
+    brief: >
+      Describes the details of a GenAI completion request including chat history
+      and parameters.
+    note: >
+      This event is opt-in and could be used to store input and output details
+      independently from traces.
+    extends: attributes.gen_ai.inference.client

@@ -1,0 +1,16 @@
+ROUTE primary: driver telemetry_autoexport
+TREE primary: ccfe606f138c13ee invoke_agent -> 870ab285dd050394 chat parent=ccfe606f138c13ee input_tokens=31 output_tokens=13 trace_id=8ca51ebd1885e978826a21fe861cc070
+SPLIT primary: parent_only=llm.token_count.prompt,llm.token_count.completion,llm.token_count.total,pm_flow.cost_usd,input.value,input.mime_type,output.value,output.mime_type child_kept=gen_ai.usage.input_tokens,gen_ai.usage.output_tokens,openinference.span.kind,llm.model_name
+JAEGER brief query: curl -s 'http://localhost:16686/api/traces?service=pm-flow'
+JAEGER primary: 8ca51ebd1885e978826a21fe861cc070 invoke_agent -> 870ab285dd050394 chat
+PASS: a stock backend re-serves the invoke_agent -> chat tree
+resolved semconv.py: /private/var/folders/9x/9xzxgmhn75q66kr2x3n691hw0000gn/T/otel-semconv-test.9q1H2B/secondary/src/pm_flow/semconv.py
+ROUTE secondary: driver telemetry_autoexport
+TREE secondary: bae52f157fd8b4a4 invoke_agent -> 8527580169a78fd3 chat parent=bae52f157fd8b4a4 input_tokens=31 output_tokens=13 trace_id=c96119d0378f1d352afbf4c39a3d789c
+SPLIT secondary: parent_only=llm.token_count.prompt,llm.token_count.completion,llm.token_count.total,pm_flow.cost_usd,input.value,input.mime_type,output.value,output.mime_type child_kept=gen_ai.usage.input_tokens,gen_ai.usage.output_tokens,openinference.span.kind,llm.model_name
+PASS: receiver decoded invoke_agent with exactly one chat child
+PASS: receiver usage equals the attempts row and stays off the parent
+PASS: non-convention usage and bodies stay only on the invoke_agent parent
+PASS: every received span carries its loaded revision
+PASS: changing only the pin changes the receiver provider attribute
+PASS: standard GenAI literals are centralised in semconv.py
