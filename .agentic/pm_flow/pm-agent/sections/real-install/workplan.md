@@ -64,6 +64,30 @@ suite against the fixture, so the doc cannot drift from what actually runs. The
 fixture proves the runbook executes; only the operator's captured golden-grid
 transcript settles A2.
 
+Cycle 004 re-cuts what "the operator runs one command" actually requires, because
+the published runbook cannot yet complete on golden-grid. Two gaps, both read out
+of the shipped text rather than guessed:
+
+- Nothing puts the current wheel in golden-grid's venv. The brief's third
+  deliverable names it ("current wheel in its venv") and scenario 1 reads
+  `pip show pm-flow`, but `install.sh` never creates or populates a venv — line
+  97 only *documents* `python3 -m venv .venv && .venv/bin/pip install pm-flow`,
+  and installing from an index is this brief's own non-goal. `survey` merely
+  reports `pm_flow_version=absent` and continues (`docs/real-install.md:233-246`).
+  golden-grid runs a pre-sections copied `pm_flow.sh`, so `--pm-flow`'s default
+  `$repo/.venv/bin/pm-flow` will not exist, and `verify` invokes it unguarded at
+  line 414. An `all` run there backs up, migrates, and then dies at exit 127 —
+  after the irreversible phase. No test catches this because every suite call
+  passes `--pm-flow "$PM_FLOW"` (`tests/real_install_test.sh:447,503,516,527`);
+  the operator's default path has never once been executed.
+- `verify` proves `pm-flow status` against a copy under `--out`, carried out of
+  cycle 003. Left as an ad-hoc operator step it becomes the pasted sequence this
+  section decided against, so it belongs in the runbook as a phase with its own
+  write budget.
+
+T4 closes both against the fixture. T5-T7 then need the operator, not a code
+change.
+
 ## Interfaces and data changes
 
 - New: `tests/real_install_test.sh`, `tests/fixtures/real_install/**`,
@@ -71,6 +95,11 @@ transcript settles A2.
 - `docs/real-install.md` is two things at once from T3 on: the evidence record,
   and the executable runbook the suite extracts and runs. Its extraction markers
   are therefore load-bearing text, not formatting.
+- The runbook's phase vocabulary changes under T4 from
+  `survey|backup|migrate|verify|all` to
+  `survey|backup|provision|migrate|verify|status|all`. `all` gains the two new
+  phases in order; every existing phase keeps its current contract, and the
+  document's operator instructions change with it.
 - `install.sh` behaviour change expected under T1: which workspaces migration
   treats as named, and what `projects.md` lists afterwards. Both are additive
   — a single-workspace install with a `.project-key` must behave exactly as it
@@ -144,9 +173,10 @@ transcript settles A2.
 
 - Status: done (cycle 003; the runbook is published in `docs/real-install.md`
   between the extraction markers and executed from there by the suite, which is
-  now at 13 PASS. One carried requirement into T4: `verify` runs `pm-flow
+  now at 13 PASS. Two requirements carried into T4: `verify` runs `pm-flow
   status` against a snapshot copy under `--out`, so scenario 1 still needs a
-  direct `.venv/bin/pm-flow status` in golden-grid — see `state.md`.)
+  direct in-place run; and the runbook has no way to put the current wheel in
+  the target's venv — see `state.md`.)
 - Outcome: `docs/real-install.md` exists and carries, between extraction
   markers, one runnable zsh script with four phases — `survey` (read-only),
   `backup` (copy and verify), `migrate` (`install.sh` only), `verify` —
@@ -173,30 +203,66 @@ transcript settles A2.
   control; `zsh tests/packaged_layout_test.sh` still 13 PASS.
 - Depends on: T2.
 
-## Task T4 — golden-grid surveyed, backed up and migrated
+## Task T4 — the runbook provisions the venv and proves status in place
 
-- Status: pending (needs the operator to run T3's runbook; not dispatchable in
+- Status: done (cycle 004; the runbook now has `provision` and `status`, `all`
+  runs all six phases in order, and the suite is at 18 PASS with the operator's
+  default `--pm-flow` executed. One residual carried into T5: the `status` write
+  budget digests `.venv` too, so an uncompiled venv reports bytecode as an
+  out-of-store write — see `state.md`.)
+- Outcome: the runbook published in `docs/real-install.md` can complete on a
+  repository that has no pm-flow venv. It gains a `provision` phase that builds
+  the current wheel from the checkout and installs it into `$repo/.venv`, and a
+  `status` phase that runs that venv's `pm-flow status` with `$repo` as cwd and
+  golden-grid's *own* path resolution — no `PM_FLOW_REPO_ROOT` override —
+  bounding its writes to the store rather than forbidding them. `all` runs
+  survey, backup, provision, migrate, verify, status in that order, and the
+  suite exercises the operator's default `--pm-flow` at least once instead of
+  always supplying its own.
+- Paths: `docs/real-install.md`, `tests/real_install_test.sh`,
+  `tests/fixtures/real_install/**`, `README.md`.
+- Reuse: the suite's offline two-venv wheel build against
+  `tests/packaging-build-wheelhouse` (`tests/real_install_test.sh:66-139`) — the
+  same `--no-index --no-build-isolation` idiom, relocated into the runbook so the
+  operator builds the way the suite does; the runbook's own `write_full_manifest`
+  (`docs/real-install.md:127-141`) for the `status` phase's write budget;
+  `expect_failure` (`tests/real_install_test.sh:51-58`) for the negative
+  controls; `src/pm_flow/paths.py:46,161` for the store path the budget permits.
+- Acceptance IDs: A2's method — completes what T3 left open (scenario 1 proved in
+  place, and the venv state the brief's third deliverable names). A1 must not
+  regress.
+- Validation: `zsh tests/real_install_test.sh` exits 0 with new PASS lines for
+  the default-`--pm-flow` `all` run, the offline `provision` build, in-place
+  `status`, and the two negative controls; `zsh tests/packaged_layout_test.sh`
+  still 13 PASS.
+- Depends on: T3.
+
+## Task T5 — golden-grid surveyed, backed up and migrated
+
+- Status: pending (needs the operator to run T4's runbook; not dispatchable in
   the role sandbox — see Risks)
 - Outcome: the runbook has run against `/Users/salah/code/personal/
-  golden-grid`; a verified backup exists, `install.sh` has run, the flow dir
-  holds no copied-engine name, its venv's `pm-flow` reports status, its ten
-  workspaces and run history survive, and `docs/real-install.md` carries the
-  verbatim transcript of all four phases.
+  golden-grid`; a verified backup exists, the current wheel is in its venv,
+  `install.sh` has run, the flow dir holds no copied-engine name, its own
+  `.venv/bin/pm-flow` reports status in place, its ten workspaces and run
+  history survive, and `docs/real-install.md` carries the verbatim transcript of
+  all six phases.
 - Paths: `docs/real-install.md`, `install.sh` (only if the real tree forces a
   fix the fixture did not), `tests/real_install_test.sh` and
   `tests/fixtures/real_install/**` (extend the fixture with any shape
-  golden-grid turns out to have that T1-T3 did not reproduce, and re-run the
+  golden-grid turns out to have that T1-T4 did not reproduce, and re-run the
   suite over it).
-- Reuse: T3's runbook verbatim; the `COPIED_ENGINE_*` arrays as the checklist.
+- Reuse: T4's runbook verbatim; the `COPIED_ENGINE_*` arrays as the checklist.
 - Acceptance IDs: A2.
 - Validation: the committed transcript shows `removed_copied_engine=N`,
   `migrated=agentic -> .agentic` with the `R` rename lines from
   `git diff --cached -M --name-status`, `git -C golden-grid status --short`
   naming only migration paths, the before/after workspace manifests agreeing,
-  and `.venv/bin/pm-flow status` naming the project.
-- Depends on: T3.
+  `pm_flow_version=` naming the current version, and the in-place
+  `.venv/bin/pm-flow status` naming the project.
+- Depends on: T4.
 
-## Task T5 — one real cycle in golden-grid
+## Task T6 — one real cycle in golden-grid
 
 - Status: pending
 - Outcome: a section cycle ran there through the installed command, and
@@ -210,11 +276,11 @@ transcript settles A2.
 - Validation: committed `git -C golden-grid log --oneline -n 3` showing the
   driver commit, and the `pm-flow status` output for the same section before
   and after.
-- Depends on: T4.
+- Depends on: T5.
 
 ## Integration and end-to-end validation
 
-## Task T6 — parity and traces from the real install, scenarios 1-6 in one pass
+## Task T7 — parity and traces from the real install, scenarios 1-6 in one pass
 
 - Status: pending
 - Outcome: `docs/real-install.md` is complete evidence: per-workspace
@@ -233,7 +299,7 @@ transcript settles A2.
   and the `cost.py total` figure agreeing; the export command exiting 0 with
   golden-grid span names in its output; `zsh tests/real_install_test.sh`
   exiting 0 on `main`.
-- Depends on: T5.
+- Depends on: T6.
 
 ## Risks and rollback
 
@@ -244,15 +310,30 @@ transcript settles A2.
   no configuration widens it. Re-probed this cycle for the record:
   `ls /Users/salah/code/personal/golden-grid` is refused with "Claude Code may
   only list files in the allowed working directories for this session:
-  '/Users/salah/code/personal/pm-flow'". So T4-T6 are operator-run by
-  construction, and T3 exists to make that run one tested command instead of a
-  pasted sequence. Substituting the fixture for the real install remains a
-  rejection condition, not a fallback.
-- Data loss during T4 is the one irreversible risk. Rollback: a full copy of
+  '/Users/salah/code/personal/pm-flow'". Re-probed again in cycle 004 from the
+  PM's own session with the same refusal, so it is not a property of the
+  developer worktree. T5-T7 are operator-run by construction, and T3-T4 exist to
+  make that run one tested command instead of a pasted sequence. Substituting the
+  fixture for the real install remains a rejection condition, not a fallback.
+- A runbook whose default arguments no test exercises is a runbook tested in a
+  configuration no operator will use. Every cycle-003 suite call passes
+  `--pm-flow "$PM_FLOW"`, so the default `$repo/.venv/bin/pm-flow` — the one
+  golden-grid will take — has never run. T4's guard is to run `all` once with no
+  `--pm-flow` at all, and to make every phase that invokes it fail with a named
+  error rather than exit 127.
+- `provision` writes `$repo/.venv` and `status` writes `$repo/runs/pm_flow.db`,
+  so T4 puts the first legitimate writes under `--repo` into the runbook. The
+  budget must be explicit and enforced by digest, not by convention: `status`
+  fails if anything outside the store changes. A phase permitted to write is one
+  mutation away from hiding the data loss `verify` exists to catch.
+- Data loss during T5 is the one irreversible risk. Rollback: a full copy of
   golden-grid taken and verified *before* `install.sh` runs — the runbook's
   `backup` phase, which `migrate` refuses to run without — with the copy's
   location and manifest recorded in `docs/real-install.md` (settles the brief's
-  first open question: yes, always).
+  first open question: yes, always). `backup` currently digests the whole tree
+  including `.venv`; T4 orders `provision` after `backup` and excludes the
+  regenerable `.venv` from both sides of the comparison, so the rollback copy
+  stays about project data and git history and does not grow with the wheel.
 - A runbook that is published but never executed is the failure mode of every
   runbook. Guard: the suite extracts the script from `docs/real-install.md`
   itself and runs it, so an edit to the document that breaks the script breaks
@@ -265,7 +346,7 @@ transcript settles A2.
   cost.py` is not an owned path: T2 probes it read-only against a throwaway
   workspace and records the figures; if the drop is real it is escalated
   through `handoff.md` and the fixture keeps distinct response paths, so the
-  suite still exits 0 and the hazard is known before T5 meets real TSVs.
+  suite still exits 0 and the hazard is known before T6 meets real TSVs.
 - The suite hardcodes its own `COPIED_ENGINE_FILES` list
   (`tests/real_install_test.sh:260-265`). It matches `install.sh` today, but the
   next engine file added to `template/` would be missed by both lists at once
@@ -280,7 +361,7 @@ transcript settles A2.
 | Brief ID | Workplan task | Evidence required |
 |---|---|---|
 | A1 | T1, T2 | `zsh tests/real_install_test.sh` exits 0 over a fixture with `agentic/`-rooted pre-sections `pm_flow.sh`, ≥3 workspaces, no `.project-key`, legacy TSVs; an installed tick after migration |
-| A2 | T3 (method), T4 (evidence) | T3: the runbook in `docs/real-install.md` runs end to end over the fixture from the suite, and its `verify` phase fails on an unmigrated tree. T4: the operator's committed golden-grid transcript — `removed_copied_engine=N`, the recorded rename, no copied-engine name left, `pm-flow status` from golden-grid's venv, workspaces and history intact |
-| A3 | T5 | Committed driver commit SHA in golden-grid's `git log` and the advanced-cycle `pm-flow status` |
-| A4 | T6 | Per-workspace `imported=N`, `imported=0` on re-run, `cost.py total` equal to arithmetic computed from the TSV independently, with T3's survey having named the workspaces where empty response fields make disagreement expected |
-| A5 | T6 | `pm-flow trace status` listing spans and a `trace export` exiting 0 with golden-grid spans in its output |
+| A2 | T3, T4 (method), T5 (evidence) | T3: the runbook in `docs/real-install.md` runs end to end over the fixture from the suite, and its `verify` phase fails on an unmigrated tree. T4: the same runbook completes on a repository with no pm-flow venv, provisioning the current wheel and proving `status` in place under an enforced write budget, with the operator's default `--pm-flow` exercised. T5: the operator's committed golden-grid transcript — `removed_copied_engine=N`, the recorded rename, no copied-engine name left, in-place `.venv/bin/pm-flow status`, workspaces and history intact |
+| A3 | T6 | Committed driver commit SHA in golden-grid's `git log` and the advanced-cycle `pm-flow status` |
+| A4 | T7 | Per-workspace `imported=N`, `imported=0` on re-run, `cost.py total` equal to arithmetic computed from the TSV independently, with T3's survey having named the workspaces where empty response fields make disagreement expected |
+| A5 | T7 | `pm-flow trace status` listing spans and a `trace export` exiting 0 with golden-grid spans in its output |

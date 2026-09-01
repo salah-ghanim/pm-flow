@@ -2,15 +2,66 @@
 
 ## Current task
 
-- T4 — golden-grid surveyed, backed up and migrated. T1-T3 are accepted; A1 is
-  complete and A2's method is fixed and executable. T4 is not dispatchable in the
-  role sandbox by construction (see Blockers); it needs the operator to run the
-  published runbook and paste the transcript back into `docs/real-install.md`.
+- T5 — golden-grid surveyed, backed up and migrated. T1-T4 are accepted, A1 is
+  complete and A2's method is closed: the runbook now provisions the venv
+  offline and proves `status` in place, and an `all` run with no `--pm-flow` and
+  no `--wheel` completes end to end. Everything this section can prove without
+  the real tree is proved. T5-T7 need the operator, not a code change.
 
 ## Completed tasks and evidence
 
+- T4 (A2's method — the runbook now completes on a repository with no pm-flow
+  venv; A1 not regressed. A2 itself still needs T5's real output) — accepted
+  cycle 004.
+  - `zsh /Users/salah/code/personal/.pm-flow-worktrees/pm-flow/pm-agent/real-install/tests/real_install_test.sh`
+    exits 0 with 18 PASS, adding five to T3's 13: `runbook all provisions and
+    uses the default target pm-flow entry point`; `runbook status reads
+    beta-section in place within its store write budget`; `standalone provision
+    builds and installs the checkout wheel offline`; `status rejects and names a
+    mutated project-data path`; `verify names a missing pm-flow entry point
+    before invocation`.
+  - `zsh …/tests/packaged_layout_test.sh` exits 0 with 13 PASS; T2's
+    `workspace=<key> imported=3 reimported=0 total=7.5000` block and the
+    `installed tick section=beta-section` line are unchanged.
+  - The operator's *entire* default path is proved, not just the suite's
+    (`sections/real-install/probe_status_budget_004.zsh`): the extracted runbook
+    run as `all --repo <fixture> --project-key beta` with **neither `--pm-flow`
+    nor `--wheel`** exits 0, building the wheel itself. Transcript in order:
+    `=== phase: survey ===` (reporting `pm_flow_version=absent`, golden-grid's
+    starting condition), `backup` → `backup_verified=yes`, `provision` →
+    `pm_flow_wheel=pm_flow-0.2.0-py3-none-any.whl`, `pm_flow_version=0.2.0`,
+    `provision=ok`, `migrate` → `migrated=agentic -> .agentic`,
+    `removed_copied_engine=30`, `verify` → `renames_recorded=144`, `verify=ok`,
+    `status` → `store=.agentic/pm_flow/beta/runs/pm_flow.db`,
+    `status_in_place=ok`. The 127 that cycle 004 predicted for golden-grid
+    cannot now happen on this path.
+  - The `status` write budget has an exit-code consequence, proved by mutation
+    rather than by reading the check. Same repository, same `--out`, two runs of
+    the *same* extracted script differing in one injected `touch
+    "$repo/stray-write.txt"` inside the status step: the unmutated re-run exits 0
+    printing only `status_wrote=.agentic/pm_flow/beta/runs/pm_flow.db`; the
+    mutated one exits 1 with `status_wrote=stray-write.txt` and `ERROR: status
+    wrote outside the store: stray-write.txt`. The failure isolates to the extra
+    write.
+  - Nothing in `provision` reaches an index. All three pip invocations in the
+    extracted script carry `--no-index`: the build venv's `-r
+    build-requirements.txt`, the `pip wheel --no-build-isolation --no-deps`, and
+    the target venv's `--force-reinstall <wheel>`.
+  - `pm_flow_version` is compared, not printed. With the *expected* value alone
+    forced to `9.9.9` in a copy of the script and nothing else changed
+    (`sections/real-install/probe_provision_004.zsh`), `provision` exits 1 with
+    `ERROR: installed pm-flow version 0.2.0 does not match wheel version 9.9.9`.
+  - `backup` excludes only `.venv`, symmetrically: after the default `all` run
+    the repository has an executable `.venv/bin/pm-flow`, the backup has no
+    `.venv`, and its 341-line source manifest contains zero `.venv` paths, while
+    `.git` and the whole flow dir are in the copy.
+  - `status` runs golden-grid's own resolution: `(cd "$repo" && "$pm_flow"
+    status)` with no `PM_FLOW_REPO_ROOT`. The only occurrence of that variable in
+    the document is `verify`'s snapshot step, scoped to its single command
+    (`docs/real-install.md:500-501`), so it cannot leak into the status phase.
+
 - T3 (A2's method — the transcript format and the checks A2 will be read from;
-  A2 itself still needs T4's real output) — accepted cycle 003.
+  A2 itself still needs T5's real output) — accepted cycle 003.
   - `zsh /Users/salah/code/personal/.pm-flow-worktrees/pm-flow/pm-agent/real-install/tests/real_install_test.sh`
     exits 0 with 13 PASS, adding four to T2's nine: `runbook survey reports the
     legacy layout and independent ledger arithmetic`; `extracted runbook backs
@@ -51,7 +102,7 @@
     throwaway clone inside the suite, which reports
     `workspace=alpha ledger=present rows=5 total=10.5000 empty_response_rows=2`.
   - `docs/real-install.md` states no golden-grid figure as observed; every value
-    is marked a placeholder pending T4, and the suite never names the real path.
+    is marked a placeholder pending T5, and the suite never names the real path.
 
 - T2 (A1, installed-tick half — A1 complete; fixes the arithmetic method A4
   later applies to golden-grid) — accepted cycle 002.
@@ -133,22 +184,41 @@ cycle 002; evidence above. One new defect, in an unowned file, replaces them.
   - Consequence for this section: A4's independent arithmetic will disagree with
     `cost.py total` on any golden-grid workspace whose legacy TSV has more than
     one empty-response row. This is escalated through `handoff.md` and must be
-    settled before T6; the runbook's survey phase (T3) counts empty response
-    fields per ledger, so T4's run reports the exposure instead of T6 meeting it
+    settled before T7; the runbook's survey phase (T3) counts empty response
+    fields per ledger, so T5's run reports the exposure instead of T7 meeting it
     as a surprise over real money.
 
-- Carried into T4 from cycle 003, not a defect in the runbook but a limit of it:
-  `verify`'s status step does not exercise golden-grid's own path resolution.
-  `pm-flow status` imports legacy costs and writes the store at
-  `runs/pm_flow.db` (`src/pm_flow/paths.py:46,161`), which is under `--repo`, so
-  a phase that must leave `--repo` byte-identical cannot run it there. The
-  runbook resolves this honestly and says so in a comment: cwd is `$repo`, but
-  `PM_FLOW_REPO_ROOT` (`src/pm_flow/paths.py:82`) points at an exact copy of the
-  migrated flow dir under `--out`. That proves the venv's binary reads the
-  migrated data; it does not prove scenario 1 in place. T4 must therefore record
-  a separate, direct `.venv/bin/pm-flow status` run in golden-grid *after*
-  `verify` returns `verify=ok` — a legitimate write under the brief's
-  golden-grid constraint — or A2 is settled only for a copy.
+- Both cycle-004 defects — nothing provisioned the target venv, so an operator
+  `all` on golden-grid would have died at exit 127 after the irreversible phase;
+  and `verify`'s status step proved scenario 1 only against a copy under `--out`
+  — are fixed and pinned in T4; evidence above. Two residuals replace them, both
+  about the new `status` phase and both carried into T5.
+
+- The `status` write budget counts `.venv` bytecode as an out-of-store write.
+  `status_phase` digests the whole of `--repo` with no exclusion, and its budget
+  admits only `<flow>/<selected key>/runs/pm_flow.db` and its `-wal`/`-shm`
+  siblings. Observed (`sections/real-install/probe_cold_venv_004.zsh`): purging
+  the 55 `__pycache__` directories from the provisioned `.venv` and re-running
+  `status` unchanged makes it exit 1 with `ERROR: status wrote outside the store:
+  .venv/lib/python3.14/site-packages/pm_flow/__pycache__/__init__.cpython-314.pyc`
+  — three `.pyc` writes, no project data touched.
+  - Not a defect against the assignment, which specified exactly this budget, and
+    it fails closed rather than open. But the message reads as a data-integrity
+    alarm when the cause is harmless interpreter bytecode.
+  - Why the documented path is safe: `pip install` byte-compiles, and `all` runs
+    `verify`'s status step before `status`, so the venv is always warm by then.
+    The default `all` run above passed with exactly one changed path. The
+    exposure is a golden-grid `.venv` that pre-dates the run, a Python upgrade
+    between provision and status, or a phase run standalone against a cold venv.
+  - For T5: if the real transcript reports `status_wrote=.venv/…`, that is this,
+    not data loss — re-run `status` and it passes. If it recurs, exclude `.venv`
+    from the status manifest the way `backup` already excludes it.
+
+- The budget admits only the *selected* workspace's store, not every workspace's
+  `runs/`. Harmless on the fixture, where `pm-flow status` touched only
+  `beta/runs/pm_flow.db` out of four workspaces. On golden-grid's ten workspaces
+  any store write outside the selected key would fail the phase by name, which
+  T5's transcript will show rather than hide.
 
 - Two smaller hazards to watch when the runbook first meets real data, neither
   worth a change against the fixture:
@@ -203,39 +273,50 @@ cycle 002; evidence above. One new defect, in an unowned file, replaces them.
   and the only caller that populates them, `driver.zsh:1476`, passes the section
   directory and nothing else. No dispatched developer can be granted
   `/Users/salah/code/personal/golden-grid` without editing `driver.zsh`, which
-  this section does not own and will not touch. Re-probed for the record this
-  cycle: `ls /Users/salah/code/personal/golden-grid` refused with "Claude Code
-  may only list files in the allowed working directories for this session:
-  '/Users/salah/code/personal/pm-flow'".
-- Consequence, and the reason for the re-cut: A2, A3, A4 and A5 are settled by
-  an operator run, which is the brief's own second route ("an operator-run probe
-  whose output is committed"). T3 is fully executable in the sandbox and makes
-  that run one tested command; T4-T6 then need the operator, not a code change.
-  This is escalated through `handoff.md` as a request for an operator run, not
-  as an external blocker.
+  this section does not own and will not touch. Re-probed in cycle 004 from the
+  PM's own session, not a developer worktree: `ls
+  /Users/salah/code/personal/golden-grid` refused with "Claude Code may only list
+  files in the allowed working directories for this session:
+  '/Users/salah/code/personal/pm-flow'". The limit is the session grant, not the
+  dispatch mechanism.
+- Consequence: A2, A3, A4 and A5 are settled by an operator run, which is the
+  brief's own second route ("an operator-run probe whose output is committed").
+  T3 and T4 are fully executable in the sandbox and make that run one tested
+  command; T5-T7 then need the operator, not a code change. This is escalated
+  through `handoff.md` as a request for an operator run, not as an external
+  blocker — and not yet, because as of cycle 004 the command being requested
+  would fail partway. T4 is the last thing standing between the request and a
+  run that can succeed.
 
 ## Open questions
 
-- Which golden-grid workspace hosts the real cycle (T5). Answered by T4's survey
+- Which golden-grid workspace hosts the real cycle (T6). Answered by T5's survey
   output, not by guessing from here.
 - Whether golden-grid's ten workspaces include a name colliding with
-  `COPIED_ENGINE_DIRS` (`install.sh:75-86`). T4's survey settles it; T1 assumes
+  `COPIED_ENGINE_DIRS` (`install.sh:75-86`). T5's survey settles it; T1 assumes
   at least one collision and proves the workspace survives regardless.
 - Whether golden-grid is a git work tree with `agentic/` tracked. If it is not,
   `migrate_legacy_flow_dir` falls to plain `mv` (`install.sh:279-284`) and
   scenario 2's "recorded rename" cannot be produced; the survey must report this
   before `migrate` runs, not after.
+- Whether golden-grid has a `.venv` at all, and what it holds. `provision` must
+  work either way — create it when absent, install the current wheel over
+  whatever is there when present — so this does not gate T4; it only decides how
+  much T5's transcript has to explain.
 
 ## Next eligible task
 
-- T4 — golden-grid surveyed, backed up and migrated. Nothing in this sandbox
-  advances it: the work is one operator command, already published and tested.
-  From a pm-flow checkout, extract the script between the `runbook:begin` /
-  `runbook:end` markers of `docs/real-install.md` and run it as
-  `<script> all --repo /Users/salah/code/personal/golden-grid --project-key
-  <key> --name "Golden Grid"`, then commit the transcript into that document's
-  `Golden-grid evidence` section, replacing the placeholders. `migrate` refuses
-  without a verified backup, so a single `all` run cannot skip the rollback copy.
-  The survey answers all three open questions below before `install.sh` touches
-  anything, and T4 must add the direct in-place `pm-flow status` run named under
-  Carried defects.
+- T5 — golden-grid surveyed, backed up and migrated. It is now one operator
+  command, and cycle 004 ran that exact command shape against the fixture with
+  no overrides. From a pm-flow checkout, extract the script between the
+  `runbook:begin` / `runbook:end` markers of `docs/real-install.md` and run it as
+  `<script> all --repo /Users/salah/code/personal/golden-grid --project-key <key>
+  --name "Golden Grid"`, then commit the transcript into that document's
+  `Golden-grid evidence` section, replacing the placeholders. No `--pm-flow` and
+  no `--wheel`: `provision` builds the wheel from the checkout's wheelhouse
+  offline and installs it into golden-grid's `.venv`. `migrate` refuses without
+  a verified backup, so a single `all` run cannot skip the rollback copy, and
+  the survey answers the open questions above before `install.sh` touches
+  anything.
+- This section cannot run that command: the session grant covers
+  `/Users/salah/code/personal/pm-flow` only. Requested through `handoff.md`.

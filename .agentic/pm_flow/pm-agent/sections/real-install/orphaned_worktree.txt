@@ -1,0 +1,14 @@
+# Uncommitted changes left by a failed dispatch
+
+Recorded at 2026-09-01T18:02:12Z for section real-install.
+
+The dispatch failed after changing the working tree, and nothing
+committed it. Review and either commit or discard these paths before
+the section is released from quarantine.
+
+```diff
+1c1
+< head 69849e8639701bb1c131492910c40ec010357910
+---
+> head 08a0a8d86aa9d561a24f1a38dbbe17cca2900927
+```
