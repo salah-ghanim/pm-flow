@@ -1,27 +1,25 @@
 ## Outcome
 
-- Blocked on an external dependency: A2–A5 need a run against `/Users/salah/code/personal/golden-grid`, which no session in this loop can reach (probe above); unblocked by either a session whose allowed working directories include that path, or the operator running the command block at `docs/real-install.md:11-20` and committing the transcript over `transcript=PLACEHOLDER` (line 709).
+- Blocked by a portfolio review: — needs a target-writable session or documented operator execution with committed evidence; disposable target-file creation returned `Operation not permitted`.
 
 ## Decisions
 
-- The section manager opened no assignment: the next workplan task
-  cannot be done until the dependency above is resolved.
+- The product officer decided this in a portfolio review, against the
+  mission and the evidence it probed, not against this section reporting.
 
 ## Interfaces
 
-- Nothing new. Dependent sections must assume this capability is unavailable.
+- Nothing new. Any section expecting this capability must be reconciled
+  without it.
 
 ## Risks
 
-- The dependency may never arrive, in which case the section must be rescoped
-  or abandoned as a product decision.
+- — needs a target-writable session or documented operator execution with committed evidence; disposable target-file creation returned `Operation not permitted`.
 
 ## What is unproven
 
-- Every acceptance criterion behind the blocked dependency. Nothing here has
-  been demonstrated against the real system.
+- Every acceptance criterion behind the blocker named above.
 
 ## Next action
 
-- Resolve the external dependency, then reopen this section with an
-  `active` handoff.
+- Resolve the blocker, then reopen this section with an active handoff.

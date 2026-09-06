@@ -1,0 +1,5 @@
+knowledge-handover	CONTINUE	— first priority; deliver transactional state and trustworthy export/telemetry interfaces.
+plan-inbox	CONTINUE	— required queued-request capability, after shared hooks.
+real-install	BLOCK	— needs a target-writable session or documented operator execution with committed evidence; disposable target-file creation returned `Operation not permitted`.
+ticket-exhaust	CONTINUE	— required tracker lifecycle, after shared hooks; live validation remains outstanding.
+workflow-studio	CONTINUE	— required workflow application and research example, consuming the shared runtime.

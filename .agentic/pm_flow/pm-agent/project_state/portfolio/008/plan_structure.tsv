@@ -1,0 +1,4 @@
+UNSTARTED_DEPENDENCY	FOUND	inbox, tracker and studio wait on knowledge-handover, which has zero cycles.
+UNREACHABLE_SECTION	FOUND	plan-inbox names missing `tests/run.zsh`; the plan identifies the existing engine runner.
+MUST_HAVE_INFLATION	CLEAR	
+LINEAR_CHAIN_RISK	FOUND	knowledge-handover gates all three remaining in-repository consumers; its failure stalls them together.

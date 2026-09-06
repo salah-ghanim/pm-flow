@@ -4,6 +4,44 @@ Newest first. Read this before anything else: one review cannot see a
 section that has been nearly done for four of them, or a shortest path that
 has not moved in three. Older entries are compacted to their summary line.
 
+## Review 008 - 2026-09-06T11:12:32Z - $488.9174 spent
+
+- Summary: 5 of 18 criteria met; verdicts BLOCK 1, CONTINUE 4; shortest path: Start knowledge-handover: it is the next eligible section and the common path to transactional state, provenance and corrected acceptance export. Then its th...
+
+### Completion criteria
+
+Probe paths below abbreviate the repository as `R`, its project directory as `P`, and `R/template/.agentic/pm_flow` as `E`.
+- Finished runs visible in a backend with every dollar: 127 attempts lack costs; SQLite cost probe — NOT MET
+- TSV ledger gone, no per-dispatch host writes: `store_ledger_test.sh` passes; remaining TSV references are import-only — MET
+- Isolated section worktrees: `pm_flow_test.sh` passes isolation, merge and concurrency checks — MET
+- External persona installed, swapped and measured: `persona_cards_test.sh` passes — MET
+- Two topologies compared in one command: `topology_compare_test.sh` cannot load its persona-card module; source-path retry also fails — UNKNOWN
+- MCP driving and ACP binding: `agent_bindings_test.sh` passes — MET
+- Validated JSON section state: public export falsely marks real-install A2/A4 met despite missing target evidence — NOT MET
+- External tracker lifecycle: committed implementation search returns no matches — NOT MET
+- Plan requests queued under lock: implementation absent; engine tests demonstrate current refusal — NOT MET
+- Outcomes and actual end times stored/exported: `outcome_record_test.sh` passes — MET
+- Real golden-grid packaged migration, cycle, cost parity and export: committed runbook still contains `transcript=PLACEHOLDER` — NOT MET
+- Complete telemetry correlation, usage and recovery coverage: revision/provenance fields and new execution paths absent — NOT MET
+- Complete test suite: engine suite passes; trace socket binding is denied and topology import remains unresolved — UNKNOWN
+- Transactional operational knowledge and handovers without tracked-file churn: store/schema and implementation probes show the required migration is absent — NOT MET
+- Independent task/base and immutable prompt/binding comparisons: revision/schema probes find no implementation — NOT MET
+- Visual reusable workflow authoring and execution: committed application search is empty — NOT MET
+- Visual research/development/review example and prompt comparison: committed example search is empty — NOT MET
+
+### Verdicts
+
+- knowledge-handover: CONTINUE — first priority; deliver transactional state and trustworthy export/telemetry interfaces.
+- plan-inbox: CONTINUE — required queued-request capability, after shared hooks.
+- real-install: BLOCK — needs a target-writable session or documented operator execution with committed evidence; disposable target-file creation returned `Operation not permitted`.
+- ticket-exhaust: CONTINUE — required tracker lifecycle, after shared hooks; live validation remains outstanding.
+- workflow-studio: CONTINUE — required workflow application and research example, consuming the shared runtime.
+
+### Shortest path
+
+Start knowledge-handover: it is the next eligible section and the common path to transactional state, provenance and corrected acceptance export. Then its three consumers can proceed. No section work is currently in flight on that path.
+Real-install can advance independently when its demonstrated write dependency changes.
+
 ## Review 007 - 2026-09-01T14:37:30Z - $427.8493 spent
 
 - Summary: 7 of 12 criteria met; verdicts CONTINUE 5; shortest path: Start a run. The next unmet criterion is the JSON export: boundary-schema T1 (schemas, checker, export verb), which alone also unblocks ticket-exhaust and ha...
@@ -178,26 +216,6 @@ and motion is starting the run.
 
 - Summary: 6 of 7 criteria met; verdicts CONTINUE 3; shortest path: The one open criterion needs the host, not a section: start Docker, run the Jaeger all-in-one, `pm-flow trace export --otlp http://localhost:4318/v1/traces`,...
 
-### Completion criteria
-
-- Backend render (Phoenix/Langfuse/Jaeger) — everything local passes (`trace_commands_test.sh` exit 0, exact span ids re-fetched; `otlp_endpoint` at `config.json:61`), but no backend has displayed a run and `docker ps` exits 1 (no daemon) — **UNKNOWN**, probe `docker run -d -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one` + `curl :16686/api/traces?service=pm-flow`
-- `cost_ledger.tsv` gone, no per-dispatch host writes — `git grep cost_ledger -- template` hits only `cost.py:184,191` (import reader); TSV mtime froze at 07:17Z while `pm_flow.db` advanced to 19:10Z; parity gate ran (`imported=0` twice, idempotent), file archived to gitignored `runs/cost_ledger.tsv.imported-20260824` — **MET**
-- Sections run in isolated worktrees — `pm_flow_test.sh` "per-section git worktrees, merge-back, and cleanup" PASS; `git worktree list` = main only, nothing in flight — **MET**
-- Persona installed elsewhere, dropped on a seat, measured — `catalog.py:1508-1642` `persona add/update/list/swap`; `topology_compare_test.sh` PASS asserts `--persona lean:pm=cpo` in `attempts.persona_stack` and the report — **MET**
-- Two topologies compared in one command — `pm_flow.sh:1943 cmd_compare`, usage lines 43-44; suite PASS on `main` — **MET**
-- Drivable over MCP, binds any ACP agent — after `9dfed03`: `agent_bindings_test.sh` exit 0 incl. "MCP lists exactly five tools and drives a section to done" and "ACP developer completes a public driver cycle to GO" — **MET**
-- Test suite runs to completion — all four plan suites exit 0 from this tier (10 PASS; 57 prompts; store ledger passed; 35/41/32/58/74), run twice: before and after the merge — **MET**
-
-### Verdicts
-
-- artifact-quality: CONTINUE
-- persona-cards: CONTINUE
-- run-detach: CONTINUE
-
-### Shortest path
-
-The one open criterion needs the host, not a section: start Docker, run the Jaeger all-in-one, `pm-flow trace export --otlp http://localhost:4318/v1/traces`, read the trace back at `:16686`. The three nice-to-haves in flight are not on it and cannot be. The objective sentence — two designs run, compared, a persona swapped and measured — is demonstrable on `main` today, on stub projects; the next product-level increment beyond the render is running `compare` on a real multi-section project.
-
 ## Review 006 - 2026-08-24 - $105.3747 / 82 dispatches since 005
 
 - Summary: 6 of 7 criteria met; verdicts CONTINUE 3; ON_TRACK - all five
@@ -225,6 +243,10 @@ The one open criterion needs the host, not a section: start Docker, run the Jaeg
 ## Review 001 - 2026-08-23T13:50:52Z - $112.3201 spent
 
 - Summary: 1 of 7 criteria met; verdicts CONTINUE 8, CUT 2; shortest path: `store-ledger` T1 now (it heads the chain to `compare`, the objective itself), with `trace-commands` T1 and `otel-semconv` T1 in parallel on disjoint paths; ...
+
+## Review 008 - 2026-09-06 - $61.0681 / 50 dispatches / 15 cycles
+
+- Summary: OFF_TRACK; 5 of 17 criteria MET, 10 NOT MET, 2 UNKNOWN.
 
 ## 2026-08-22 — `agents-md` panel adjudication
 

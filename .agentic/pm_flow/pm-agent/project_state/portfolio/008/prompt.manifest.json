@@ -1,0 +1,93 @@
+{
+  "context": [
+    {
+      "bytes": 11268,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/plan.md",
+      "words": 1623
+    },
+    {
+      "bytes": 38706,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/portfolio_log.md",
+      "words": 5420
+    },
+    {
+      "bytes": 20627,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/task_contract.md",
+      "words": 3159
+    },
+    {
+      "bytes": 7209,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/sections.md",
+      "words": 790
+    },
+    {
+      "bytes": 2301,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/project_state/portfolio/008/facts.md",
+      "words": 265
+    },
+    {
+      "bytes": 360,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/knowledge-handover/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 352,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/plan-inbox/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 1011,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/real-install/handoff.md",
+      "words": 144
+    },
+    {
+      "bytes": 356,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/ticket-exhaust/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 357,
+      "exists": true,
+      "path": ".agentic/pm_flow/pm-agent/sections/workflow-studio/handoff.md",
+      "words": 42
+    }
+  ],
+  "findings": [
+    {
+      "code": "context-fanout",
+      "message": "prompt asks the role to read 10 context files",
+      "severity": "warning"
+    },
+    {
+      "code": "context-budget",
+      "message": "listed context contains approximately 11569 words",
+      "severity": "warning"
+    }
+  ],
+  "metrics": {
+    "bytes": 6713,
+    "context_files": 10,
+    "context_words": 11569,
+    "duplicate_ratio": 0.0,
+    "task_ratio": 0.7115,
+    "task_words": 698,
+    "words": 981
+  },
+  "path": "/Users/salah/code/personal/pm-flow/.agentic/pm_flow/pm-agent/project_state/portfolio/008/prompt.md",
+  "runtime": {
+    "commit_owner": "product-officer",
+    "phase": "portfolio_review",
+    "role": "cpo",
+    "version": "2"
+  },
+  "schema_version": 1
+}
