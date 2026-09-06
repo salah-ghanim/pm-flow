@@ -1,2 +1,3 @@
 .agentic/pm_flow/pm-agent/sections/boundary-schema/handoff.md
 .agentic/pm_flow/pm-agent/sections/outcome-record/handoff.md
+.agentic/pm_flow/pm-agent/sections/knowledge-handover/handoff.md

@@ -50,16 +50,17 @@
 
 ### Dependencies
 - boundary-schema
+- knowledge-handover
 
 ### Constraints and fixed decisions
-- Files remain the truth; nothing read from GitHub may alter flow state except the inbound proposal intake, which still terminates at the officer (owner decision).
+- The local project state remains the truth: files for unmigrated projects, the knowledge-handover store after cutover. GitHub cannot alter flow state except through inbound officer-mediated proposals. This storage adaptation preserves the tracker-as-view requirement (owner decision, 2026-09-06).
 - Sync consumes the validated JSON export, never the project markdown; if the export lacks per-cycle decision records needed for comment-per-cycle, request the field through the officer rather than parsing markdown.
-- `pm_flow.sh` belongs to `boundary-schema` until it closes; the dispatch arm and `--from-issue` flag land only after that (the dependency guarantees the ordering).
-- `driver.zsh` belongs to `outcome-record`: do not edit it. Acceptance must pass with operator-run sync alone, so sync replays unsynced accepted cycles rather than assuming it runs on every tick.
+- Owner integration decision, 2026-09-06: knowledge-handover owns `pm_flow.sh`, export/schema and scheduler integration. It supplies supported sync-dispatch and issue-intake hooks plus stable accepted-cycle exports. This section owns its adapter and tests and consumes those interfaces; it may not edit the shared files. Publish missing interface needs through its bounded handoff. The dependency graph includes knowledge-handover.
+- `driver.zsh` belongs to `knowledge-handover`: do not edit it. Acceptance must pass with operator-run sync alone, so sync replays unsynced accepted cycles rather than assuming it runs on every tick.
 - `install.sh` belongs to `real-install`: hand the new engine filenames over for registration; acceptance is checked against the checkout, not an installed layout.
 - Credentials and `gh` invocations never enter role prompts; sync is reachable only from operator or driver command paths, in the spirit of `fetch.sh`'s isolation (owner decision).
 - A missing or unauthenticated `gh` must never block a tick: message, exit 0, no changes (owner decision).
-- Issue numbers live in the section's own workspace, not in a central file (owner decision).
+- Idempotency records remain scoped to their section: a section workspace record for unmigrated projects, or a section-keyed knowledge-store record after cutover. Never create competing authoritative ticket mappings (owner integration decision, 2026-09-06).
 
 ### Acceptance
 - A1: sync against a scratch GitHub repository creates one issue per section with the key-and-objective title and export-derived body — checked by running scenario 1 and reading the issues in the GitHub UI.
@@ -77,5 +78,5 @@
 - Credentials, tokens, or `gh` calls appear in any role prompt or dispatch payload.
 
 ### Open questions
-- The request says nice-to-have, but the plan's completion criteria promise the tracker view, which forces must-have. Keep must-have, or issue a dated decision weakening that plan bullet?
+- Priority is settled: must-have, as decided in the prior portfolio review; the tracker completion criterion remains.
 - Label-versus-reopen on `cancelled` is left to the manager unless the owner has a preference.

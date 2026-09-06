@@ -13,7 +13,7 @@
 - `pm-flow init-section` queues instead of refusing when the lock is held, says so, and prints the queued file's path; `--now` preserves today's immediate-attempt-or-refusal behaviour.
 - A drain step at the existing project-work preemption point: each pending request runs the existing officer-mediated proposal path; a failed request (invalid, ownership overlap, officer DECLINE) moves to a `failed/` area with the error recorded, never dropped, never auto-retried.
 - `pm-flow status` lists pending inbox requests.
-- A suite `tests/plan_inbox_test.sh` wired into `tests/run.zsh`, with fixtures.
+- A suite `tests/plan_inbox_test.sh` wired into `template/.agentic/pm_flow/tests/run.zsh`, with fixtures.
 
 ### User-visible scenarios
 1. Start `pm-flow run`; from a second shell run `pm-flow init-section demo --file req.md`: exit 0, output says the request was queued and prints the file's path; the file exists in the inbox.
@@ -53,14 +53,15 @@
 ### Dependencies
 - boundary-schema
 - outcome-record
+- knowledge-handover
 
 ### Constraints and fixed decisions
-- The queue and drain hooks must land in `template/.agentic/pm_flow/pm_flow.sh` (init-section entry) and `template/.agentic/pm_flow/driver.zsh` (tick-boundary drain, status). Both are owned by the sections named under Dependencies; this section starts only after both are done and then claims exactly those two hook sites — do not reopen or weaken their delivered work, including outcome-record's swallow-and-exit-0 telemetry contract and boundary-schema's validators.
+- Owner integration decision, 2026-09-06: knowledge-handover owns `pm_flow.sh`, `driver.zsh`, schemas and the engine test runner, and supplies queue/intake, drain, status and suite-registration interfaces. This section owns its inbox module and tests and integrates through those interfaces; it must not edit the shared files. Publish precise interface needs in its handoff if the delivered hooks are insufficient. The dependency graph now includes knowledge-handover. Preserve validation and telemetry while adapting storage to the selected project mode.
 - Drain reuses the existing officer-mediated proposal path; no second proposal mechanism.
 - Queueing takes no lock; the write is atomic (temp file + rename, the pattern at `driver.zsh:994`); lock semantics are unchanged (owner decision).
 - A failed request is moved with its error recorded — never silently dropped, never retried in a loop (owner decision).
 - If boundary-schema ships a schema covering request envelopes, the inbox envelope validates against it; otherwise the envelope is documented in the inbox module.
-- Inbox files are runtime state under the flow directory, like `runs/` — never committed per-dispatch into the host repository.
+- Pending requests are durable runtime state and never require per-dispatch Git commits. Preserve the file-envelope behavior for unmigrated projects; use knowledge-handover's authoritative interface for migrated projects, without independently writable mirrors. A returned queued path is a durable request receipt/projection when the database is authoritative.
 - `install.sh` is owned by real-install: hand it the new engine file (`inbox.zsh`) for its copied-engine lists; acceptance here is checked against the checkout.
 - These paths are the engine: work happens in a git worktree, merged back after review.
 
@@ -70,7 +71,7 @@
 - A3: an invalid or rejected request lands in `failed/` with its error recorded, and a subsequent tick leaves it untouched — checked per scenario 4.
 - A4: `pm-flow status` lists pending requests — checked per scenario 5.
 - A5: a queued request survives a driver kill and restart and is applied exactly once; re-draining an applied request creates nothing — checked per scenario 6.
-- A6: `zsh tests/plan_inbox_test.sh` exits 0 on `main` and `tests/run.zsh` still runs to completion.
+- A6: `zsh tests/plan_inbox_test.sh` exits 0 on `main` and `template/.agentic/pm_flow/tests/run.zsh` still runs to completion.
 
 ### Rejection conditions
 - Queueing implemented as waiting for the lock (blocking or polling `init-section`) instead of a durable file the process can abandon.

@@ -1,0 +1,9 @@
+src/pm_flow/studio/**
+src/pm_flow/workflows/**
+src/pm_flow/cli.py
+pyproject.toml
+ui/workflow-studio/**
+tests/workflow_studio_test.sh
+tests/workflow_studio/**
+tests/fixtures/workflow_studio/**
+docs/workflow-studio.md

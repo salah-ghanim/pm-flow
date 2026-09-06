@@ -49,9 +49,13 @@ Everything below serves that sentence.
   with cost, tokens, cycles-to-done, rescue rate, abandonment rate and escalation
   depth, where effect sizes are large and measurement is not a matter of opinion.
   Document the limit rather than letting a user over-read three runs.
-- **Definitions are markdown; records are SQLite.** Definitions change rarely,
-  deserve git history, and are what a person wants to edit. Records are written
-  on every dispatch and are unmergeable churn in somebody else's repository.
+- **Operational knowledge belongs in SQLite.** Tasks, responsibilities,
+  dependencies, reviews, evidence and bounded handovers must survive fresh
+  processes without tracked-file churn or a commit for each review. Version
+  prompts independently from task contracts and bind attempts to exact source
+  commits. Portable definitions and explicit exports may remain files; avoid
+  competing writable sources of truth. This owner decision supersedes the
+  previous Markdown-state restriction once the migration is validated.
 - **The flow must not rewrite itself mid-run.** Work on pm-flow's own machinery
   happens in a git worktree, reviewed and merged back. Sections owning disjoint
   paths is the normal isolation mechanism, but here the paths are the engine.
@@ -71,7 +75,8 @@ Everything below serves that sentence.
   markdown, and one schema settles what the flow's own validators accept.
 - A section is visible in an external ticket tracker, GitHub Issues first:
   created with its objective, updated on every accepted cycle, closed on
-  completion. The tracker is a view; the files stay the truth.
+  completion. The tracker is a view; the authoritative local project store stays
+  the truth (files until the validated knowledge-store migration).
 - A plan-level request made while a run holds the driver lock is queued and
   applied at the next safe point, never refused and lost.
 - A finished run carries its outcomes, not only its costs: every cycle decision
@@ -80,59 +85,90 @@ Everything below serves that sentence.
 - The product's one real install (golden-grid) runs the packaged engine:
   migrated by `install.sh` with project data intact, driven through a real
   cycle, its legacy costs imported and matching, its spans exportable.
+- OpenTelemetry is mandatory across every supported dispatch and workflow path,
+  including the new database/API/UI paths: task, attempt, agent/model/effort,
+  prompt version and source commit remain correlated in spans and persisted
+  records. Input/output and provider-reported cache/reasoning token usage must
+  reconcile without retry double counting or representing missing usage as zero.
+  Success, rejection, retries, errors, interruption and resume must remain
+  observable. Unsupported token fields are explicitly unavailable. Exported
+  traces must be inspected in a real OpenTelemetry backend and reconcile with
+  provider usage and local records, including after restart or exporter outage.
+  No new workflow backend can be declared complete on a UI counter or stub-only
+  token evidence. Secrets must not be copied into telemetry.
 - The test suite runs to completion.
+- Tasks, responsible and accountable assignments, dependencies, knowledge,
+  acceptance evidence and handovers persist transactionally in SQLite. A review
+  and a fresh-agent handover cause no tracked-file modification or Git commit;
+  accepted source changes still retain their source commits. Existing projects
+  migrate without losing task, cycle or evidence identity.
+- A task revision and its target/base commit are independent of immutable prompt
+  revisions and agent/CLI/model/effort bindings. Re-run that same task and commit
+  with a different prompt or binding in isolated checkouts, then compare measured
+  cost, acceptance results and evaluation quality with provenance and uncertainty.
+- A lightweight local visual application lets an operator create, edit, validate,
+  save, reopen and launch reusable collaborative workflows. Responsibility,
+  accountability, communication and dependency relationships are explicit data
+  interpreted by the runtime, not just a diagram over a fixed hierarchy.
+- From the visual application, instantiate a trading-research example with paper
+  researchers handing cited hypotheses to developers who implement and evaluate
+  them, and a reviewer deciding the next step. Inspect task/handovers/results and
+  compare prompt variants without editing JSON or enabling live trading.
 
 ## Current position
 
-- Seven of the twelve criteria above are settled on `main`. All thirteen
-  suites exit 0 from the officer's own runs, including the two red at review
-  007: `packaged_layout_test.sh` (run-detach's three `install.sh` registry
-  entries landed; the section closed at cycle 006) and `otel_semconv_test.sh`
-  (isolation fixed; the section closed at cycle 008). The Jaeger all-in-one
-  (`pm-flow-jaeger`, operator-started) has been up 7 days and re-served the
-  `invoke_agent -> chat` tree during the semconv suite's own
-  `curl :16686/api/traces?service=pm-flow`.
-- Unmet: the three criteria the owner added in `01ea0da` (JSON export,
-  tracker view, queued plan requests) and the two recorded above (outcome
-  record, real install). Five planned sections own them one-to-one:
-  `boundary-schema` → export; `ticket-exhaust` → tracker, waits on
-  boundary-schema; `plan-inbox` → queued requests, waits on boundary-schema
-  and outcome-record; `outcome-record` and `real-install` wait on nothing.
-  All five sit at zero cycles; nothing has dispatched since 2026-08-25
-  except the ticket-exhaust registration on 2026-09-01, whose first
-  proposal died on a usage limit and was re-run.
-- The TSV was retired after its gate ran: `cost.py import` on `pm-agent`
-  printed `imported=0` twice (every TSV row already had a store row, reruns
-  are no-ops), and the file is archived as
-  `runs/cost_ledger.tsv.imported-20260824`, gitignored.
-- Documented limits, deliberately not worked around: the store under-counts
-  the 2026-08-24 02:17-06:08Z window (the broken reader wrote the same low
-  rows to both sinks; import cannot reprice an existing row); no shipped ACP
-  agent or stock MCP SDK client has connected, only the suites' protocol
-  clients; compare arms have only run on stub projects (`real-install`
-  supplies the first real ground); `spent_usd` fails open on a broken
-  reader, deferred until capped-arm measurement matters. The runs-left-
-  `running`/NULL `ended_at` leak now has an owner: `outcome-record` owns
-  `driver.zsh` and must close runs on every exit path.
-- Known test defects without a live owner, tolerated: `trace_commands_test.sh`
-  has an order-sensitive assertion over an unordered span-id set (passed
-  first try this review; `pm_flow.sh` now belongs to `boundary-schema`, so
-  `trace-commands` still cannot reopen without overlap — deflake when that
-  frees); `maintenance_accounting_test.sh` requires an installed driver at
-  `.agentic/pm_flow`, a layout this repository deliberately does not have;
-  `persona-cards` closed without the `catalog.py` rewording, so
-  `otel-semconv`'s A4 comment exemption stays.
-- Live sections: `boundary-schema`, `outcome-record`, `plan-inbox`,
-  `real-install`, `ticket-exhaust` — all must-have, all planned at zero
-  cycles. `ticket-exhaust` stays must-have by decision at review 008: the
-  owner's tracker criterion stands, so the brief's open question is closed.
-- Cut: `a2a-binding` and `repo-hooks`. The product does not guarantee an A2A
-  seat, a commit-message hook, or an install registry.
+- The 2026-09-06 repository review at `460f60b` found 22 sections: 17 done,
+  2 planned, 1 blocked and 2 cancelled. `boundary-schema` and `outcome-record`
+  completed cycles 001–005 and are merged. `plan-inbox` and `ticket-exhaust`
+  have zero cycles and completed dependencies. `real-install` accepted T1–T4;
+  cycle 005 blocked T5 on access to the real golden-grid target.
+- Seven selected regression suites passed on 2026-09-06, including the main
+  integration suite, 241 engine assertions, schema, bindings, outcome records,
+  packaging and real-install fixtures. Fixtures do not settle real-target
+  migration or live GitHub acceptance.
+- Before dispatching current consumer sections, settle shared-file ownership:
+  both need `pm_flow.sh`, and plan-inbox also needs `driver.zsh`; their declared
+  owned paths omit these integrations. Serialize shared-file changes. The inbox
+  brief names nonexistent `tests/run.zsh`; the engine runner is
+  `template/.agentic/pm_flow/tests/run.zsh`. Ticket-exhaust needs stable accepted
+  cycle records, which the delivered JSON export does not yet expose.
+- Acceptance export has a concrete false positive: real-install A2 and A4 are
+  marked met from mentions in state prose despite missing real-target evidence.
+  Explicit accepted evidence must replace mention-based completion before a
+  tracker or the new knowledge store consumes it as truth.
+- Recorded spend is $488.9174, incomplete: all 56 recorded Codex attempts have
+  NULL dollar costs. There are 132 historical runs still marked running with no
+  end time; recent runs now close correctly. Do not invent missing costs or end
+  times. Named-topology model lists also need Astra/Fable 5.1 support before
+  explicitly overriding those models in comparison arms.
+- A fresh operator read can list `/Users/salah/code/personal/golden-grid`;
+  whether a newly scoped developer can perform the real-install work remains
+  to be probed. The target migration must preserve its existing project data.
+- Owner extension, 2026-09-06: `knowledge-handover` and `workflow-studio` were
+  registered through `pm-flow init-section` with CUT decisions. There are now
+  24 sections: 17 done, 4 planned, 1 blocked and 2 cancelled. These are
+  required capabilities, replacing the earlier exclusions of SQLite state and
+  a visual editor. Reuse the store, persona catalog, topology comparison and
+  protocol adapters; do not create a parallel orchestrator.
+- Integration ordering: knowledge-handover owns shared scheduler/CLI/export/
+  telemetry files and supplies the inbox/tracker hooks. The dependency interface
+  now places plan-inbox and ticket-exhaust after knowledge-handover, as well as
+  their completed prerequisites; workflow-studio also depends on it. Their
+  module/UI paths stay disjoint. CPO must verify the interface handovers. Existing file-based handoff and commit
+  rules govern the current engine until the knowledge-store migration is proven;
+  that section owns updating the affected runtime contracts and role guidance.
+- Live OpenTelemetry probe: the knowledge-handover CPO proposal used Astra;
+  its provider event and stored attempt 349 agree on input=222208, output=4792,
+  cached-input=179328 and reasoning=331. Jaeger trace
+  `cb1f68ead78ca1e4d931be4c330d1831` was fetched and inspected: correlated
+  invoke_agent/chat spans carry the same input/output and parent cache/reasoning
+  values. This proves that one live dispatch, not all required recovery paths
+  or transports; Codex dollars remain unknown.
+- Cut sections remain `a2a-binding` and `repo-hooks`; this extension does not
+  restore them. The separately drafted hosted OS-Agents product is not this plan.
 
 ## Deliberately out of scope
 
-- A visual editor. The vault format has to survive real use first; the markdown
-  is already readable and linkable in Obsidian today.
 - Any hosted service. Everything runs locally, against backends the user starts.
-- Migrating the driver's file-derived state machine to SQLite. The record moves;
-  the state stays where it is.
+- Live trading, placing orders, and deploying a trading system. The research
+  example evaluates ideas and produces evidence; it does not operate capital.
