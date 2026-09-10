@@ -2723,6 +2723,16 @@ dependents = {path.name: 0 for path in candidates}
 for section_dir in sections_dir.iterdir():
     if not section_dir.is_dir() or section_dir.name.startswith("."):
         continue
+    # A cancelled or finished section is not waiting on anybody, so it must not
+    # lend its dependencies priority. It did: a cut section's dependency file
+    # kept giving each of its former dependencies a dependent, which outranks a
+    # zero-dependency section for ever. Where those are usually actionable, a
+    # must-have section with no dependencies is never dispatched at all.
+    status_file = section_dir / "status.txt"
+    if status_file.is_file():
+        lifecycle = status_file.read_text(errors="replace").splitlines()[:1]
+        if lifecycle and lifecycle[0].strip() in {"cancelled", "done"}:
+            continue
     listing = section_dir / "dependency_handoffs.txt"
     if not listing.is_file():
         continue
