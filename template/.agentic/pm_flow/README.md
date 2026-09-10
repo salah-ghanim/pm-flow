@@ -73,6 +73,23 @@ root while keeping repo-relative paths meaningful, so on those backends `scoped`
 is a prompt-level boundary only. Bind the managing roles to a backend that can
 enforce the tier if that difference matters to you.
 
+There is a harder reason not to bind `pm` or `cpo` to `codex`. Codex's
+workspace-write sandbox refuses git index writes in any repository that has a
+git hook at all, because committing would run hook code outside the sandbox.
+That was reproduced across four scratch repositories varying one thing each: no
+hooks commits fine; a hook whose entire body is `exit 0` fails, at
+`core.hooksPath` or at the default `.git/hooks` alike; and `--no-verify` does
+not escape it. So it is the presence of a hook, not its contents or its
+location.
+
+The managing roles are the ones that commit, so in a repository with hooks a
+codex-bound `pm` cannot close a cycle and a codex-bound `cpo` cannot commit the
+decomposition. The run does not fail loudly: the section manager reports the
+obstruction as an external blocker, every section that depends on it waits, and
+the project goes idle while still spending. Keep `pm` and `cpo` on a backend
+that can commit. `developer` never commits and is unaffected, which is why the
+default binding puts codex there.
+
 Add extra writable roots with `access.scoped_write_paths` and extra shell
 prefixes with `access.scoped_bash`.
 
