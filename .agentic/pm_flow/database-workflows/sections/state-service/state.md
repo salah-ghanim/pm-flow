@@ -2,10 +2,37 @@
 
 ## Current task
 
-- T2 (next cycle): transaction service, reducer, projection hash and
-  rejections.
+- None assigned. T3 is next.
 
 ## Completed tasks and evidence
+
+- T2 (cycle 002, accepted 2026-09-13) — A3 (invalid references,
+  cross-project access, cyclic dependencies, stale updates), A15 (contiguous
+  sequence, outside-mutation detection). `state_service/service.py apply`,
+  `reducer.py` (seven v1 operations, `(op, op_version)` table, extension
+  merge), `projection.py` (`digests`, `hash_projection`, `replay`, `verify`),
+  `errors.py` (twelve codes), `extensions.py`, `cli.py apply` and `timeline
+  log|projection|verify`. Contract in `docs/database-state-api.md`.
+  - `zsh tests/knowledge_state_test.sh` → `ok rejections` (nine codes
+    matched by exact `"error": "<code>"` string), `ok schema_migration`,
+    `ok transactions` (seq 1 2 3 4 5; replay of seq 3 returns transaction 3
+    with 5 rows; verify match true; after raw `UPDATE tasks` exit 1 with
+    `mismatched_tables ["tasks"]`), `knowledge state tests passed`, exit 0.
+  - `zsh tests/store_ledger_test.sh`, `zsh tests/outcome_record_test.sh`,
+    `zsh tests/trace_commands_test.sh` → exit 0 unchanged;
+    `zsh template/.agentic/pm_flow/tests/run.zsh` → `all suites passed`.
+  - Independent check (cycles/002/review_probe.zsh): same request file twice
+    on a fresh store differs only by `"idempotent_replay": true`, 1 log row and
+    2 change rows; `expected_version` one behind → `conflict`, rows and
+    head unchanged; same key with a different body → `conflict`; a two-op
+    request whose second op is `a→a` leaves no task from the first op; raw
+    `UPDATE timelines SET head_seq` → verify exit 1 naming `timelines`.
+  - Mutation checks on engine copies, each re-running the scenario: drop cycle
+    check → rejections fails at `b depends on a`; drop scope check → fails at
+    `task key outside scope`; exclude `tasks.status` from the hash →
+    transactions fails at "verify exited 0 after a raw UPDATE"; replace the
+    replayed digest with the stored one → fails at `mismatched tables`.
+    Unmutated copies pass.
 
 - T1 (cycle 001, accepted 2026-09-13) — A3, A15 schema foundation.
   Store at schema version 2: `store._migrate` is a per-version ladder that
@@ -58,7 +85,23 @@
   committed `store.py` at `SCHEMA_VERSION = 1`, so it keeps working after this
   migration is committed.
 - Rollback after version-2 writes is lossy; a restore command must refuse
-  without `--discard-new-state` and is deferred until a write path exists (T2).
+  without `--discard-new-state`. The write path now exists but the command is
+  not in any workplan task; fold it into T5 or an integration assignment.
+- Replay results are recomputed from the log row, not stored:
+  `timeline_version = version - (head_seq - seq)`, valid because every
+  transaction advances both by one and both are in the hash.
+- Change payloads are `{"args", "bound"}`; `bound` carries allocated row ids
+  (and project id and key for `timeline.create`) so replay reproduces ids.
+  Reducers read only `context.at` (the transaction's `committed_at`).
+- A log row for a timeline-creating request is inserted right after
+  `timeline.create` runs, still inside the same `BEGIN IMMEDIATE`.
+- `tasks` is unique on `(project_id, key)` across timelines and legacy rows;
+  experiment or replay timelines that reuse task keys need a later schema step.
+- Extension registrations are process-local and the CLI loads no plugins; a
+  separate `verify` process cannot replay extension operations until a loader
+  exists (T3 or later).
+- `verify` requires stored, replayed and live hashes all equal;
+  `mismatched_tables` compares live to replayed per table.
 
 ## Blockers
 
@@ -66,4 +109,4 @@
 
 ## Next eligible task
 
-- T2.
+- T3.

@@ -144,7 +144,7 @@ Contract: `brief.md`, pinned to `docs/database-workflows-spec.md` at `9236bde`
 
 ## Task T2 — Transaction service, reducer, projection hash and rejections
 
-- Status: pending
+- Status: done (cycle 002, accepted 2026-09-13)
 - Outcome: a request through `cli.py apply` appends one contiguous
   transaction with its changes and a stored projection hash; a repeated
   idempotency key returns the first result without a new row; a stale
