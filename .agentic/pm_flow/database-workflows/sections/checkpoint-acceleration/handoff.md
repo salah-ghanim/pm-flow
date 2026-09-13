@@ -1,25 +1,25 @@
-# checkpoint-acceleration section handoff
-
 ## Outcome
 
-- Section initialized; no implementation outcome yet.
+- Cut by a portfolio review: Optional A27/A28 caching, suffix-replay optimization and cache diagnostics are removed through a dated scope reduction.
 
 ## Decisions
 
-- None yet.
+- The product officer decided this in a portfolio review, against the
+  mission and the evidence it probed, not against this section reporting.
 
 ## Interfaces
 
-- None identified yet.
+- Nothing new. Any section expecting this capability must be reconciled
+  without it.
 
 ## Risks
 
-- No implementation evidence exists yet.
+- Optional A27/A28 caching, suffix-replay optimization and cache diagnostics are removed through a dated scope reduction.
 
 ## What is unproven
 
-- Everything in the brief; nothing has been attempted yet.
+- Everything this section was to deliver; it was cut before proving any of it.
 
 ## Next action
 
-- Awaiting the first scoped assignment.
+- Reconcile the product plan without this section.

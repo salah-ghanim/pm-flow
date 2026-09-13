@@ -1,4 +1,41 @@
-# Portfolio review 001 — 2026-09-13
+# Portfolio review log
+
+Newest first. Read this before anything else: one review cannot see a
+section that has been nearly done for four of them, or a shortest path that
+has not moved in three. Older entries are compacted to their summary line.
+
+## Review 001 - 2026-09-13T17:55:59Z - $22.4482 spent
+
+- Summary: 0 of 7 criteria met; verdicts CONTINUE 11, CUT 1; shortest path: Complete state-service A15, then timelines-replay A16/A17 to close Replay. Current work is on that path. Preserve dependency gates and settle shared interfac...
+
+### Completion criteria
+
+These probes check required committed acceptance deliverables; missing suites were not treated as failed test runs.
+- Coordination — `git ls-files --error-unmatch tests/knowledge_migration_test.sh`: missing — NOT MET
+- Workflows — `git ls-files --error-unmatch tests/workflow_runtime_test.sh`: missing — NOT MET
+- Provenance and consumers — `git ls-files --error-unmatch tests/knowledge_provenance_test.sh tests/knowledge_api_test.sh tests/knowledge_telemetry_test.sh`: all missing — NOT MET
+- Replay — `git ls-files --error-unmatch tests/timeline_replay_test.sh tests/timeline_fork_test.sh`: both missing — NOT MET
+- Experiments — `git ls-files --error-unmatch tests/experiment_definition_test.sh tests/experiment_report_test.sh`: both missing — NOT MET
+- Real targets — `git ls-files --error-unmatch tests/golden_grid_database_test.sh tests/database_product_test.sh`: both missing — NOT MET
+
+### Verdicts
+
+- checkpoint-acceleration: CUT Optional A27/A28 caching, suffix-replay optimization and cache diagnostics are removed through a dated scope reduction.
+- experiment-evaluation-consumers: CONTINUE API compatibility, metrics, blind evaluation and statistical reporting remain unproven.
+- experiment-execution: CONTINUE Override validation, concurrent isolation, recovery and promotion remain unproven.
+- general-workflows: CONTINUE Delivery graphs, panels, decomposition and restart behavior remain unproven.
+- golden-grid-rollout: CONTINUE Snapshot migration, rollback and real-cycle evidence remain unproven; the old write blocker was not reproduced.
+- legacy-migration: CONTINUE Identity preservation, interrupted import and rollback remain unproven.
+- live-product-validation: CONTINUE The real three-arm, three-replicate experiment and inspected backend traces remain unproven.
+- provenance-acceptance: CONTINUE Exact-output acceptance and dispatch/environment provenance remain unproven.
+- runtime-cutover: CONTINUE Database authority without Git churn, executable graphs and installation compatibility remain unproven.
+- state-service: CONTINUE Passing foundation evidence warrants continuation; complete fencing, integration recovery and replay, and correct the stale handoff.
+- telemetry-continuity: CONTINUE Real provider reconciliation and outage/restart evidence remain unproven.
+- timelines-replay: CONTINUE Production-preserving forks and zero-worker recorded replay remain unproven.
+
+### Shortest path
+
+Complete state-service A15, then timelines-replay A16/A17 to close Replay. Current work is on that path. Preserve dependency gates and settle shared interfaces before consumers start.
 
 ## Position
 

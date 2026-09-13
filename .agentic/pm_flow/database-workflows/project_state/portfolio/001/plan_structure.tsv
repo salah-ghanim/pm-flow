@@ -1,0 +1,4 @@
+UNSTARTED_DEPENDENCY	FOUND	runtime-cutover waits on zero-cycle legacy-migration; downstream telemetry and experiment sections likewise await unstarted prerequisites.
+UNREACHABLE_SECTION	CLEAR	
+MUST_HAVE_INFLATION	CLEAR	
+LINEAR_CHAIN_RISK	FOUND	eight sections connect state-service to live validation; foundation failure stalls downstream delivery.

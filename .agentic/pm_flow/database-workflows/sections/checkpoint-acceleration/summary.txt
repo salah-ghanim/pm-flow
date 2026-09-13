@@ -1,1 +1,1 @@
-Section created; its PM sub-agent has not been launched yet.
+Cut by a portfolio review: Optional A27/A28 caching, suffix-replay optimization and cache diagnostics are removed through a dated scope reduction.

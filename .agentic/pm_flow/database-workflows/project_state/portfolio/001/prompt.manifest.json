@@ -1,0 +1,124 @@
+{
+  "context": [
+    {
+      "bytes": 7224,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/project_state/plan.md",
+      "words": 959
+    },
+    {
+      "bytes": 20852,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/task_contract.md",
+      "words": 3179
+    },
+    {
+      "bytes": 4130,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/project_state/sections.md",
+      "words": 413
+    },
+    {
+      "bytes": 1601,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/project_state/portfolio/001/facts.md",
+      "words": 168
+    },
+    {
+      "bytes": 365,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/checkpoint-acceleration/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 373,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/experiment-evaluation-consumers/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 362,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/experiment-execution/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 359,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/general-workflows/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 361,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/golden-grid-rollout/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 358,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/legacy-migration/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 365,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/live-product-validation/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 363,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/provenance-acceptance/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 357,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/runtime-cutover/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 355,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/state-service/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 362,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/telemetry-continuity/handoff.md",
+      "words": 42
+    },
+    {
+      "bytes": 358,
+      "exists": true,
+      "path": ".agentic/pm_flow/database-workflows/sections/timelines-replay/handoff.md",
+      "words": 42
+    }
+  ],
+  "findings": [
+    {
+      "code": "context-fanout",
+      "message": "prompt asks the role to read 16 context files",
+      "severity": "warning"
+    }
+  ],
+  "metrics": {
+    "bytes": 7582,
+    "context_files": 16,
+    "context_words": 5223,
+    "duplicate_ratio": 0.0,
+    "task_ratio": 0.7024,
+    "task_words": 741,
+    "words": 1055
+  },
+  "path": "/Users/salah/code/personal/pm-flow/.agentic/pm_flow/database-workflows/project_state/portfolio/001/prompt.md",
+  "runtime": {
+    "commit_owner": "product-officer",
+    "phase": "portfolio_review",
+    "role": "cpo",
+    "version": "2"
+  },
+  "schema_version": 1
+}
