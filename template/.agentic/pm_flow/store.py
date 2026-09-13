@@ -28,14 +28,16 @@ dependency the exporter needs is imported only by the exporter.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import importlib.util
 import json
 import os
 import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # A panel seat can be mid-dispatch while another writes, so a busy database is
 # the normal case rather than an error. Wait instead of failing.
@@ -438,6 +440,31 @@ GROUP BY r.id;
 """
 
 
+_schema_steps: dict[int, str] | None = None
+
+
+def schema_steps() -> dict[int, str]:
+    """The numbered schema steps after version 1, from `state_service/schema.py`.
+
+    Loaded from beside this file rather than imported through `sys.path`:
+    callers reach `store` however they put its directory on the path, and the
+    steps must come from the same engine copy as the code applying them.
+
+    Loaded only when a step has to run, not at import. A store already at
+    SCHEMA_VERSION never needs them, and tools that copy `store.py` on its own
+    beside a script keep reading such a store; a lone copy asked to create or
+    migrate one fails on the missing file instead.
+    """
+    global _schema_steps
+    if _schema_steps is None:
+        path = Path(__file__).resolve().parent / "state_service" / "schema.py"
+        spec = importlib.util.spec_from_file_location("pm_flow_state_schema", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _schema_steps = module.STEPS
+    return _schema_steps
+
+
 def default_path(project_dir: str | os.PathLike) -> Path:
     """Where a project's store lives. One file, beside the run artifacts."""
     return Path(project_dir) / "runs" / "pm_flow.db"
@@ -463,21 +490,123 @@ def connect(db_path: str | os.PathLike) -> sqlite3.Connection:
     return connection
 
 
+def backup_path(db_path: str | os.PathLike, version: int) -> Path:
+    """Where the copy of a store taken before it leaves `version` is kept."""
+    return Path(f"{os.fspath(db_path)}.v{version}.bak")
+
+
 def _migrate(connection: sqlite3.Connection) -> None:
+    """Bring the store to SCHEMA_VERSION, one numbered step at a time.
+
+    Version 1 is `IF NOT EXISTS` DDL and runs on every open. A store already at
+    SCHEMA_VERSION then returns without taking a lock or writing. Otherwise each
+    step runs under the write lock: re-read the version, because another process
+    may have migrated meanwhile; copy the store to `<db>.v<current>.bak`; then run
+    the step's DDL and bump the version row in one transaction. A store with no
+    version row is new, has nothing to back up, and records SCHEMA_VERSION once
+    every step has run.
+    """
     with connection:
         connection.executescript(SCHEMA)
-        row = connection.execute("SELECT version FROM schema_version").fetchone()
-        if row is None:
-            connection.execute(
-                "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
+    while _schema_version(connection) != SCHEMA_VERSION:
+        _refuse_newer(_schema_version(connection))
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            current = _schema_version(connection)
+            _refuse_newer(current)
+            if current is None:
+                for version in range(2, SCHEMA_VERSION + 1):
+                    _run_step(connection, version)
+                connection.execute(
+                    "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
+                )
+            elif current < SCHEMA_VERSION:
+                _backup(connection, current)
+                _run_step(connection, current + 1)
+                connection.execute(
+                    "UPDATE schema_version SET version = ?", (current + 1,)
+                )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+
+
+def _schema_version(connection: sqlite3.Connection) -> int | None:
+    row = connection.execute("SELECT version FROM schema_version").fetchone()
+    return None if row is None else row[0]
+
+
+def _refuse_newer(version: int | None) -> None:
+    if version is not None and version > SCHEMA_VERSION:
+        # A newer pm-flow wrote this store. Reading it with older accessors
+        # would quietly ignore columns that matter, so refuse instead.
+        raise SystemExit(
+            f"store schema version {version} is newer than this "
+            f"pm-flow understands ({SCHEMA_VERSION}); upgrade pm-flow"
+        )
+
+
+def _run_step(connection: sqlite3.Connection, version: int) -> None:
+    # executescript would commit the open transaction before its first
+    # statement, so the step runs statement by statement inside it instead.
+    pending = ""
+    for line in schema_steps()[version].splitlines(keepends=True):
+        pending += line
+        if sqlite3.complete_statement(pending):
+            connection.execute(pending)
+            pending = ""
+    if any(line.strip() and not line.strip().startswith("--")
+           for line in pending.splitlines()):
+        raise ValueError(f"schema step {version} ends in an unterminated statement")
+
+
+def _backup(connection: sqlite3.Connection, version: int) -> None:
+    """Copy the store as it stands at `version`, or refuse to migrate it.
+
+    The copy is read through a second connection: a backup read through the
+    connection holding the write lock never completes. That lock is what makes
+    the copy exact, since no other writer can commit between the copy and the
+    step. The copy is written beside the target and renamed into place only
+    once it reads back at `version`, so a `.bak` that exists is a whole one.
+    """
+    database = next(row[2] for row in connection.execute("PRAGMA database_list")
+                    if row[1] == "main")
+    if not database:
+        raise SystemExit(
+            f"store has no file to back up; not migrating from version {version}"
+        )
+    target = backup_path(database, version)
+    partial = target.with_name(target.name + ".partial")
+    try:
+        partial.unlink(missing_ok=True)
+        source = sqlite3.connect(database, timeout=BUSY_TIMEOUT_MS / 1000)
+        try:
+            copy = sqlite3.connect(partial)
+            try:
+                source.backup(copy)
+                # One self-contained file: restoring it is a copy, and reading
+                # it leaves no -wal or -shm beside it.
+                copy.execute("PRAGMA journal_mode = DELETE")
+                copied = copy.execute("SELECT version FROM schema_version").fetchone()
+                check = copy.execute("PRAGMA quick_check").fetchone()
+            finally:
+                copy.close()
+        finally:
+            source.close()
+        if copied is None or copied[0] != version or check[0] != "ok":
+            raise sqlite3.DatabaseError(
+                f"copy did not verify (version {copied[0] if copied else None}, "
+                f"quick_check {check[0]})"
             )
-        elif row["version"] > SCHEMA_VERSION:
-            # A newer pm-flow wrote this store. Reading it with older accessors
-            # would quietly ignore columns that matter, so refuse instead.
-            raise SystemExit(
-                f"store schema version {row['version']} is newer than this "
-                f"pm-flow understands ({SCHEMA_VERSION}); upgrade pm-flow"
-            )
+        os.replace(partial, target)
+    except (OSError, sqlite3.Error) as error:
+        with contextlib.suppress(OSError):
+            partial.unlink(missing_ok=True)
+        raise SystemExit(
+            f"could not back up store to {target} ({error}); "
+            f"not migrating from version {version}"
+        ) from error
 
 
 # ------------------------------------------------------------------ helpers
