@@ -57,3 +57,14 @@
 
 ### Open questions
 - None.
+
+## Reduced scope, authorized 2026-09-13
+
+- CUT this optional section, including the checkpoint cache, suffix-replay
+  diagnostics and cache-failure validation in A27/A28. Those IDs and their
+  original Acceptance bullets remain above as history, but are retired.
+- The product no longer guarantees materialized checkpoint caching, replay of
+  only the suffix after a cached checkpoint, or cache-specific diagnostics and
+  fallback tests. All pinned A1–A26 replay and integrity outcomes remain required.
+- Rejection condition: a reviewer must not reject product or section work for
+  omitting the retired A27/A28 optimization, diagnostics or cache tests.

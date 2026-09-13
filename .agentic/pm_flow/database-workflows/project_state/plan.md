@@ -75,8 +75,10 @@ acceptance ID has exactly one owning section and owned paths stay disjoint.
 3. Runtime cutover follows provenance, timelines and legacy import.
 4. Consumers and telemetry follow cutover; experiments follow consumers and
    timelines. General routing follows cutover and may run beside experiments.
-5. Golden-grid rollout waits for consumers and for golden-grid's package-layout
-   migration (pm-agent `real-install`, currently blocked). The live experiment
+5. Golden-grid rollout waits for telemetry and verified package-layout readiness.
+   The prior target-write denial is not current evidence: a disposable file
+   creation succeeded on 2026-09-13 and the target CLI returned pm-flow 0.2.0.
+   This does not establish completed package migration. The live experiment
    comes last.
 
 ## Project-level decisions
@@ -124,7 +126,37 @@ acceptance ID has exactly one owning section and owned paths stay disjoint.
 
 ## Next coordination actions
 
-- Decompose the project from the graph above. Each brief quotes its acceptance
-  IDs from the spec and names disjoint owned paths.
-- After decomposition, confirm no section claims a path owned by an open
-  pm-agent section.
+- Finish state-service A3/A15 and publish its settled interface in the bounded
+  handoff. Committed schema, transaction and rejection scenarios pass, but the
+  handoff still says no work was attempted. It must distinguish demonstrated
+  foundation behavior from unproven leasing, source recovery and full replay.
+- Start provenance-acceptance and timelines-replay after that gate; then legacy
+  migration and runtime cutover establish the first operational database cycle.
+- Preserve the dependency graph and owned paths. Shared test entry points must
+  discover downstream scenarios before their owning section completes, as
+  `knowledge_state_test.sh` already does. Dependent sections must not need to
+  edit a completed upstream section's files to supply acceptance scenarios.
+- Retain separate experiment-execution and experiment-evaluation-consumers
+  sections; telemetry-continuity supplies current-flow accounting, while the
+  latter owns A10 consumer/API and compare compatibility plus A21–A23.
+- Verify package readiness and rollback on a coherent golden-grid snapshot
+  before any target state migration. Do not propagate the old write-access
+  blocker or reopen another project's section from this review.
+
+## Current portfolio position
+
+- All six completion criteria remain NOT MET: required committed acceptance
+  entry points are absent. The foundation test pass is partial progress, not
+  evidence of an operational database cutover or live-provider validation.
+- The eight-section critical chain is state-service → provenance-acceptance
+  (beside timelines-replay) → legacy-migration → runtime-cutover →
+  telemetry-continuity → experiment-execution →
+  experiment-evaluation-consumers → live-product-validation. Keep the foundation
+  as the next gate; do not launch dependent work on an unsettled interface.
+- 2026-09-13: CUT checkpoint-acceleration, the optional A27/A28 extension.
+  The product no longer guarantees a materialized checkpoint cache, suffix-only
+  reconstruction or cache diagnostics/fallback tests. Authoritative replay,
+  fork correctness and every pinned A1–A26 guarantee remain required.
+- OFF_TRACK: accepted foundation progress exists, but its bounded handoff is
+  stale and no complete product outcome is yet evidenced. Spend on the next
+  foundation gate; optional performance work is removed.
