@@ -2724,7 +2724,7 @@ for section_dir in sections_dir.iterdir():
     if not section_dir.is_dir() or section_dir.name.startswith("."):
         continue
     # A cancelled or finished section is not waiting on anybody, so it must not
-    # lend its dependencies priority. It did: a cut section's dependency file
+    # lend its dependencies priority. It did: the dependency file of a cut section
     # kept giving each of its former dependencies a dependent, which outranks a
     # zero-dependency section for ever. Where those are usually actionable, a
     # must-have section with no dependencies is never dispatched at all.
