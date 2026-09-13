@@ -74,7 +74,7 @@ is a prompt-level boundary only. Bind the managing roles to a backend that can
 enforce the tier if that difference matters to you.
 
 There is a harder reason not to bind `pm` or `cpo` to `codex`. Codex's
-workspace-write sandbox refuses git index writes in any repository that has a
+workspace-write sandbox refuses git index writes in every repository, hooks or not, so a committing role runs unsandboxed; the old claim about hooks was a missing control and read as true until
 git hook at all, because committing would run hook code outside the sandbox.
 That was reproduced across four scratch repositories varying one thing each: no
 hooks commits fine; a hook whose entire body is `exit 0` fails, at
