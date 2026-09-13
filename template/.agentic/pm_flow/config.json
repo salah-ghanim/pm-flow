@@ -4,13 +4,13 @@
   "roles": {
     "cpo": {
       "cli": "claude",
-      "model": "claude-fable-5",
+      "model": "claude-fable-5-1",
       "difficulty": "xhigh"
     },
     "pm": {
       "cli": "claude",
-      "model": "claude-fable-5",
-      "difficulty": "xhigh"
+      "model": "claude-fable-5-1",
+      "difficulty": "medium"
     },
     "developer": {
       "cli": "codex",
@@ -20,7 +20,7 @@
     "consultant": [
       {
         "cli": "claude",
-        "model": "claude-fable-5",
+        "model": "claude-fable-5-1",
         "difficulty": "xhigh"
       },
       {
@@ -31,13 +31,13 @@
     ],
     "10x_developer": {
       "cli": "claude",
-      "model": "claude-fable-5",
+      "model": "claude-fable-5-1",
       "difficulty": "max"
     },
     "maintenance_engineer": {
       "cli": "codex",
       "model": "gpt-5.6-sol",
-      "difficulty": "xhigh"
+      "difficulty": "high"
     }
   },
   "access": {
