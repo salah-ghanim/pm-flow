@@ -1,0 +1,2 @@
+nice-to-have
+Without this section, long-history forks require more reconstruction work, but all A1–A26 product guarantees remain intact.

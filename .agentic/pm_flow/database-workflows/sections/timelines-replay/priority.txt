@@ -1,0 +1,2 @@
+must-have
+Without historical forks and replay, operators cannot repeat or compare work from a fixed checkpoint.

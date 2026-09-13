@@ -1,0 +1,2 @@
+must-have
+Without these graph capabilities, the product cannot execute the required delivery and decomposition scenarios.

@@ -1,0 +1,2 @@
+must-have
+Without transactional authority and fencing, concurrent coordination and replay cannot be trusted.

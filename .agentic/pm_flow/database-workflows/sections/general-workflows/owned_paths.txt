@@ -1,0 +1,4 @@
+template/.agentic/pm_flow/workflow_extensions/**
+template/.agentic/pm_flow/workflow_examples/**
+tests/database_workflow_scenarios/**
+docs/database-workflow-examples.md

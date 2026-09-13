@@ -1,0 +1,2 @@
+must-have
+Without lossless migration and safe rollback, existing projects cannot adopt database authority.

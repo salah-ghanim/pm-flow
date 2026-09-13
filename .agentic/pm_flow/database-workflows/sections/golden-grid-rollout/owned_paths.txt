@@ -1,0 +1,4 @@
+tests/golden_grid_database_test.sh
+tests/database_rollout/**
+validation/database-rollout/**
+docs/golden-grid-database-rollout.md

@@ -1,0 +1,13 @@
+template/.agentic/pm_flow/experiments/analysis/**
+template/.agentic/pm_flow/compare.py
+template/.agentic/pm_flow/watch.py
+src/pm_flow/database_api.py
+src/pm_flow/mcp_server.py
+tests/experiment_metrics_test.sh
+tests/experiment_evaluation_test.sh
+tests/experiment_report_test.sh
+tests/knowledge_api_test.sh
+tests/topology_compare_test.sh
+tests/experiment_analysis_fixtures/**
+examples/database-client/**
+docs/database-experiment-reports.md

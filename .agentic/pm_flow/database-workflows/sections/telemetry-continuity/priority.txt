@@ -1,0 +1,2 @@
+must-have
+Without durable reconciled telemetry, operators cannot trust execution cost or experiment measurements.

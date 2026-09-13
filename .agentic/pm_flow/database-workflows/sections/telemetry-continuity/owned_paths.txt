@@ -1,0 +1,12 @@
+template/.agentic/pm_flow/telemetry.py
+template/.agentic/pm_flow/trace_export.py
+template/.agentic/pm_flow/cost.py
+template/.agentic/pm_flow/requirements-telemetry.txt
+template/.agentic/pm_flow/telemetry_jobs/**
+src/pm_flow/semconv.py
+tests/knowledge_telemetry_test.sh
+tests/database_telemetry/**
+tests/codex_usage_test.sh
+tests/otel_semconv_test.sh
+tests/trace_commands_test.sh
+docs/database-telemetry.md

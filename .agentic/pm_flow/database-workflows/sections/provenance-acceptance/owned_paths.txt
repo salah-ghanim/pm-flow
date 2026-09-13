@@ -1,0 +1,8 @@
+template/.agentic/pm_flow/agent_exec.sh
+template/.agentic/pm_flow/access_hook.sh
+template/.agentic/pm_flow/provenance/**
+template/.agentic/pm_flow/export.py
+tests/knowledge_acceptance_test.sh
+tests/knowledge_provenance_test.sh
+tests/database_provenance/**
+docs/database-provenance.md

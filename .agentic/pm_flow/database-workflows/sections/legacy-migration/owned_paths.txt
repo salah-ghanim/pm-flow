@@ -1,0 +1,4 @@
+template/.agentic/pm_flow/migration/**
+tests/knowledge_migration_test.sh
+tests/database_migration/**
+docs/database-migration.md

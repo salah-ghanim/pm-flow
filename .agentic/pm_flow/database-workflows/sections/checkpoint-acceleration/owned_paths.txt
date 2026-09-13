@@ -1,0 +1,4 @@
+template/.agentic/pm_flow/checkpoint_acceleration/**
+tests/checkpoint_acceleration_test.sh
+tests/checkpoint_acceleration_fixtures/**
+docs/database-checkpoint-acceleration.md
