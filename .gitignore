@@ -26,6 +26,14 @@ __pycache__/
 !.agentic/pm_flow/pm-agent/sections/
 .agentic/pm_flow/pm-agent/sections/*/cycles/
 .agentic/pm_flow/pm-agent/sections/*/runs/
+!.agentic/pm_flow/database-workflows/
+.agentic/pm_flow/database-workflows/*
+!.agentic/pm_flow/database-workflows/project_state/
+!.agentic/pm_flow/database-workflows/sections/
+!.agentic/pm_flow/database-workflows/project.json
+!.agentic/pm_flow/database-workflows/task_contract.md
+.agentic/pm_flow/database-workflows/sections/*/cycles/
+.agentic/pm_flow/database-workflows/sections/*/runs/
 
 # The rendered agent-instructions files are generated from template/AGENTS.md
 # and template/CLAUDE.md at install time. The templates are the source; a
